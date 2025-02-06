@@ -16,6 +16,7 @@ import PayrollPage from './features/payroll/PayrollPage';
 import PerformancePage from './features/hr/PerformancePage';
 import TimeOffPage from './features/hr/TimeOffPage';
 import SettingsPage from './features/settings/SettingsPage';
+import CalendarPage from './features/calendar/CalendarPage';
 import { AuthProvider } from './contexts/AuthContext';
 import { FirestoreProvider } from './contexts/FirestoreContext';
 import { ProjectProvider } from './contexts/ProjectContext';
@@ -56,6 +57,7 @@ function App() {
                             <Route path="departments" element={<DepartmentsPage />} />
                             <Route path="departments/:id" element={<DepartmentDetailsPage />} />
                             <Route path="documents" element={<DocumentsPage />} />
+                            <Route path="calendar" element={<CalendarPage />} />
                             <Route path="hr" element={<Outlet />}>
                               <Route path="time-off" element={<TimeOffPage />} />
                               <Route path="leave-requests" element={<LeaveRequestsPage />} />

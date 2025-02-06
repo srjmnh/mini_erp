@@ -86,7 +86,11 @@ export interface Project {
   endDate?: string;
   budget?: number;
   actualCost?: number;
-  departments: string[];
+  departments: Array<{
+    id: string;
+    name: string;
+    assignedAt: string;
+  }>;
   members: ProjectMember[];
   tasks: ProjectTask[];
   progress: number;

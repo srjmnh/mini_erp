@@ -32,6 +32,8 @@ import {
   Schedule as ScheduleIcon,
   AttachMoney as BudgetIcon,
   Group as TeamIcon,
+  Business as DepartmentIcon,
+  CalendarMonth as CalendarIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useProjects, Project, ProjectPriority, ProjectStatus } from '@/contexts/ProjectContext';
@@ -66,6 +68,7 @@ export const ProjectsPage: React.FC = () => {
     status: 'planning' as ProjectStatus,
     priority: 'medium' as ProjectPriority,
     startDate: format(new Date(), 'yyyy-MM-dd'),
+    endDate: '',
     department: '',
     departments: [] as string[],
     members: [],
@@ -74,20 +77,49 @@ export const ProjectsPage: React.FC = () => {
   });
 
   const handleCreateProject = async () => {
-    await createProject(newProject);
-    setOpenNewProject(false);
-    setNewProject({
-      name: '',
-      description: '',
-      status: 'planning',
-      priority: 'medium',
-      startDate: format(new Date(), 'yyyy-MM-dd'),
-      department: '',
-      departments: [],
-      members: [],
-      tasks: [],
-      progress: 0,
-    });
+    if (!newProject.name) {
+      // showSnackbar('Project name is required', 'error');
+      return;
+    }
+
+    try {
+      await createProject({
+        name: newProject.name,
+        description: newProject.description || '',
+        status: 'planning',
+        priority: newProject.priority || 'medium',
+        startDate: new Date().toISOString(),
+        endDate: newProject.endDate,
+        budget: undefined,
+        actualCost: 0,
+        departments: [],
+        members: [],
+        tasks: [],
+        progress: 0,
+        documents: [],
+        milestones: [],
+        risks: [],
+        meetings: []
+      });
+
+      setNewProject({
+        name: '',
+        description: '',
+        priority: 'medium',
+        endDate: '',
+        department: '',
+        departments: [],
+        members: [],
+        tasks: [],
+        progress: 0,
+      });
+      
+      setOpenNewProject(false);
+      // showSnackbar('Project created successfully', 'success');
+    } catch (error) {
+      console.error('Error creating project:', error);
+      // showSnackbar('Failed to create project', 'error');
+    }
   };
 
   const handleProjectMenu = (event: React.MouseEvent<HTMLElement>, projectId: string) => {
@@ -184,6 +216,108 @@ export const ProjectsPage: React.FC = () => {
                                   color={priorityColors[project.priority] as any}
                                 />
                               </Stack>
+                              
+                              {project.departments?.length > 0 && (
+                                <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', gap: 1 }}>
+                                  {project.departments.map((dept) => (
+                                    <Chip
+                                      key={dept.id}
+                                      size="small"
+                                      icon={<DepartmentIcon />}
+                                      label={dept.name}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigate(`/departments/${dept.id}`);
+                                      }}
+                                      sx={{ cursor: 'pointer' }}
+                                    />
+                                  ))}
+                                </Stack>
+                              )}
+
+                              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                                {project.description || 'No description provided'}
+                              </Typography>
+
+                              <Stack direction="row" spacing={2} alignItems="center">
+                                <Stack direction="row" spacing={1} alignItems="center">
+                                  <TeamIcon fontSize="small" color="action" />
+                                  <Typography variant="body2">
+                                    {project.members?.length || 0} members
+                                  </Typography>
+                                </Stack>
+                                <Stack direction="row" spacing={1} alignItems="center">
+                                  <CalendarIcon fontSize="small" color="action" />
+                                  <Typography variant="body2">
+                                    {project.endDate ? format(new Date(project.endDate), 'PP') : 'No end date'}
+                                  </Typography>
+                                </Stack>
+                                <Box sx={{ flexGrow: 1 }}>
+                                  <Typography variant="body2" align="right">
+                                    Progress: {project.progress || 0}%
+                                  </Typography>
+                                </Box>
+                              </Stack>
+
+                              {/* Progress */}
+                              <Box>
+                                <Stack
+                                  direction="row"
+                                  justifyContent="space-between"
+                                  alignItems="center"
+                                  sx={{ mb: 1 }}
+                                >
+                                  <Typography variant="body2" color="text.secondary">
+                                    Progress
+                                  </Typography>
+                                  <Typography variant="body2" color="text.primary">
+                                    {project.progress}%
+                                  </Typography>
+                                </Stack>
+                                <LinearProgress
+                                  variant="determinate"
+                                  value={project.progress}
+                                  sx={{ height: 6, borderRadius: 1 }}
+                                />
+                              </Box>
+
+                              {/* Stats */}
+                              <Stack direction="row" spacing={2}>
+                                <Stack direction="row" spacing={1} alignItems="center">
+                                  <TeamIcon color="action" sx={{ fontSize: 20 }} />
+                                  <Typography variant="body2">
+                                    {project.members.length} members
+                                  </Typography>
+                                </Stack>
+                                <Stack direction="row" spacing={1} alignItems="center">
+                                  <ScheduleIcon color="action" sx={{ fontSize: 20 }} />
+                                  <Typography variant="body2">
+                                    {format(new Date(project.startDate), 'MMM d, yyyy')}
+                                  </Typography>
+                                </Stack>
+                              </Stack>
+
+                              {/* Team */}
+                              <Box>
+                                <AvatarGroup max={5} sx={{ justifyContent: 'flex-end' }}>
+                                  {project.members.map((member) => {
+                                    const employee = employees.find(
+                                      (e) => e.id === member.employeeId
+                                    );
+                                    return (
+                                      <Avatar
+                                        key={member.employeeId}
+                                        src={employee?.photoUrl}
+                                        alt={employee ? `${employee.firstName} ${employee.lastName}` : ''}
+                                      >
+                                        {employee
+                                          ? `${employee.firstName[0]}${employee.lastName[0]}`
+                                          : ''}
+                                      </Avatar>
+                                    );
+                                  })}
+                                </AvatarGroup>
+                              </Box>
                             </Box>
                             <IconButton
                               size="small"
@@ -192,81 +326,6 @@ export const ProjectsPage: React.FC = () => {
                               <MoreVertIcon />
                             </IconButton>
                           </Stack>
-
-                          {/* Description */}
-                          <Typography
-                            variant="body2"
-                            color="text.secondary"
-                            sx={{
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                            }}
-                          >
-                            {project.description}
-                          </Typography>
-
-                          {/* Progress */}
-                          <Box>
-                            <Stack
-                              direction="row"
-                              justifyContent="space-between"
-                              alignItems="center"
-                              sx={{ mb: 1 }}
-                            >
-                              <Typography variant="body2" color="text.secondary">
-                                Progress
-                              </Typography>
-                              <Typography variant="body2" color="text.primary">
-                                {project.progress}%
-                              </Typography>
-                            </Stack>
-                            <LinearProgress
-                              variant="determinate"
-                              value={project.progress}
-                              sx={{ height: 6, borderRadius: 1 }}
-                            />
-                          </Box>
-
-                          {/* Stats */}
-                          <Stack direction="row" spacing={2}>
-                            <Stack direction="row" spacing={1} alignItems="center">
-                              <TeamIcon color="action" sx={{ fontSize: 20 }} />
-                              <Typography variant="body2">
-                                {project.members.length} members
-                              </Typography>
-                            </Stack>
-                            <Stack direction="row" spacing={1} alignItems="center">
-                              <ScheduleIcon color="action" sx={{ fontSize: 20 }} />
-                              <Typography variant="body2">
-                                {format(new Date(project.startDate), 'MMM d, yyyy')}
-                              </Typography>
-                            </Stack>
-                          </Stack>
-
-                          {/* Team */}
-                          <Box>
-                            <AvatarGroup max={5} sx={{ justifyContent: 'flex-end' }}>
-                              {project.members.map((member) => {
-                                const employee = employees.find(
-                                  (e) => e.id === member.employeeId
-                                );
-                                return (
-                                  <Avatar
-                                    key={member.employeeId}
-                                    src={employee?.photoUrl}
-                                    alt={employee ? `${employee.firstName} ${employee.lastName}` : ''}
-                                  >
-                                    {employee
-                                      ? `${employee.firstName[0]}${employee.lastName[0]}`
-                                      : ''}
-                                  </Avatar>
-                                );
-                              })}
-                            </AvatarGroup>
-                          </Box>
                         </Stack>
                       </CardContent>
                     </Card>
@@ -373,6 +432,17 @@ export const ProjectsPage: React.FC = () => {
               fullWidth
               value={newProject.startDate}
               onChange={(e) => setNewProject({ ...newProject, startDate: e.target.value })}
+              InputLabelProps={{
+                shrink: true,
+              }}
+            />
+
+            <TextField
+              label="End Date"
+              type="date"
+              fullWidth
+              value={newProject.endDate}
+              onChange={(e) => setNewProject({ ...newProject, endDate: e.target.value })}
               InputLabelProps={{
                 shrink: true,
               }}

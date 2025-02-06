@@ -31,7 +31,9 @@ import {
   DialogContentText,
   FormEvent,
   Chip,
-  Container
+  Container,
+  Tabs,
+  Tab
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -48,14 +50,23 @@ import {
   Description as DescriptionIcon,
   CalendarToday as CalendarIcon,
   Person as PersonIcon,
-  PersonOutline as PersonOutlineIcon
+  PersonOutline as PersonOutlineIcon,
+  Computer as ComputerIcon,
+  Print as PrinterIcon,
+  Phone as PhoneIcon,
+  Chair as ChairIcon,
+  Work as WorkIcon,
+  Inventory as InventoryIcon,
+  Assignment as AssignmentIcon,
+  Folder as FolderIcon
 } from '@mui/icons-material';
 import { useFirestore } from '@/contexts/FirestoreContext';
 import type { Department, Employee } from '@/types/models';
-import { getFirestore, collection, query, where, getDocs, doc, getDoc, updateDoc, deleteDoc, onSnapshot, writeBatch } from 'firebase/firestore';
+import { getFirestore, collection, query, where, getDocs, doc, getDoc, updateDoc, deleteDoc, onSnapshot, writeBatch, addDoc } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useSnackbar } from '@/contexts/SnackbarContext';
 import { DepartmentDocuments } from './DepartmentDocuments';
+import { format } from 'date-fns';
 
 interface DepartmentStats {
   totalMembers: number;
@@ -494,6 +505,580 @@ const AddMembersDialog: React.FC<AddMembersDialogProps> = ({ open, onClose, depa
   );
 };
 
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`department-tabpanel-${index}`}
+      aria-labelledby={`department-tab-${index}`}
+      {...other}
+    >
+      {value === index && (
+        <Box sx={{ p: 3 }}>
+          {children}
+        </Box>
+      )}
+    </div>
+  );
+}
+
+interface Asset {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  assignedTo?: string;
+  serialNumber?: string;
+  purchaseDate?: string;
+  warranty?: string;
+}
+
+const assetTypes = [
+  { type: 'computer', label: 'Computer/Laptop', icon: <ComputerIcon /> },
+  { type: 'printer', label: 'Printer/Scanner', icon: <PrinterIcon /> },
+  { type: 'phone', label: 'Phone/Mobile', icon: <PhoneIcon /> },
+  { type: 'furniture', label: 'Furniture', icon: <ChairIcon /> },
+  { type: 'other', label: 'Other', icon: <InventoryIcon /> }
+];
+
+interface AddAssetDialogProps {
+  open: boolean;
+  onClose: () => void;
+  departmentId: string;
+  onAssetAdded: () => void;
+}
+
+const AddAssetDialog: React.FC<AddAssetDialogProps> = ({
+  open,
+  onClose,
+  departmentId,
+  onAssetAdded
+}) => {
+  const [formData, setFormData] = useState({
+    name: '',
+    type: '',
+    serialNumber: '',
+    purchaseDate: '',
+    warrantyEndDate: ''
+  });
+  const { showSnackbar } = useSnackbar();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const assetsRef = collection(db, 'assets');
+      await addDoc(assetsRef, {
+        ...formData,
+        departmentId,
+        status: 'available',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      showSnackbar('Asset added successfully', 'success');
+      onAssetAdded();
+      onClose();
+    } catch (error) {
+      console.error('Error adding asset:', error);
+      showSnackbar('Failed to add asset', 'error');
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <form onSubmit={handleSubmit}>
+        <DialogTitle>Add New Asset</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 2 }}>
+            <TextField
+              label="Asset Name"
+              required
+              fullWidth
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            />
+            <FormControl fullWidth required>
+              <InputLabel>Asset Type</InputLabel>
+              <Select
+                value={formData.type}
+                label="Asset Type"
+                onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+              >
+                {assetTypes.map((type) => (
+                  <MenuItem key={type.type} value={type.type}>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      {type.icon}
+                      <Typography>{type.label}</Typography>
+                    </Stack>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              label="Serial Number"
+              fullWidth
+              value={formData.serialNumber}
+              onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
+            />
+            <TextField
+              label="Purchase Date"
+              type="date"
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              value={formData.purchaseDate}
+              onChange={(e) => setFormData({ ...formData, purchaseDate: e.target.value })}
+            />
+            <TextField
+              label="Warranty End Date"
+              type="date"
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              value={formData.warrantyEndDate}
+              onChange={(e) => setFormData({ ...formData, warrantyEndDate: e.target.value })}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="contained">Add Asset</Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  );
+};
+
+interface AssignProjectDialogProps {
+  open: boolean;
+  onClose: () => void;
+  departmentId: string;
+  onProjectAssigned: () => void;
+}
+
+const AssignProjectDialog: React.FC<AssignProjectDialogProps> = ({
+  open,
+  onClose,
+  departmentId,
+  onProjectAssigned
+}) => {
+  const [availableProjects, setAvailableProjects] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { showSnackbar } = useSnackbar();
+  const { departments } = useFirestore();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchProjects = async () => {
+      try {
+        const projectsRef = collection(db, 'projects');
+        const q = query(projectsRef, where('status', '!=', 'completed'));
+        const querySnapshot = await getDocs(q);
+        const projectsList = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        // Filter out projects that are already assigned to this department
+        const filteredProjects = projectsList.filter(project => 
+          !project.departments?.some(dept => dept.id === departmentId)
+        );
+        
+        setAvailableProjects(filteredProjects);
+      } catch (error) {
+        console.error('Error fetching projects:', error);
+        showSnackbar('Failed to load projects', 'error');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (open) {
+      fetchProjects();
+    }
+  }, [open, departmentId]);
+
+  const handleAssignProject = async (projectId: string) => {
+    try {
+      const projectRef = doc(db, 'projects', projectId);
+      const projectDoc = await getDoc(projectRef);
+      const projectData = projectDoc.data();
+      
+      // Get current departments or initialize empty array
+      const currentDepartments = projectData?.departments || [];
+      
+      // Check if department is already assigned
+      if (currentDepartments.some(dept => dept.id === departmentId)) {
+        showSnackbar('Project is already assigned to this department', 'warning');
+        return;
+      }
+
+      // Add new department to the array
+      const updatedDepartments = [
+        ...currentDepartments,
+        {
+          id: departmentId,
+          name: departments.find(d => d.id === departmentId)?.name || '',
+          assignedAt: new Date().toISOString()
+        }
+      ];
+
+      await updateDoc(projectRef, {
+        departments: updatedDepartments,
+        updatedAt: new Date().toISOString()
+      });
+
+      showSnackbar('Project assigned successfully', 'success');
+      onProjectAssigned();
+      onClose();
+    } catch (error) {
+      console.error('Error assigning project:', error);
+      showSnackbar('Failed to assign project', 'error');
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>Assign Project to Department</DialogTitle>
+      <DialogContent>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+            <CircularProgress />
+          </Box>
+        ) : availableProjects.length === 0 ? (
+          <Alert severity="info" sx={{ mt: 2 }}>No available projects found</Alert>
+        ) : (
+          <Grid container spacing={2}>
+            {availableProjects.map((project) => (
+              <Grid item xs={12} key={project.id}>
+                <Paper 
+                  sx={{ 
+                    p: 2, 
+                    cursor: 'pointer',
+                    '&:hover': {
+                      bgcolor: 'action.hover'
+                    }
+                  }}
+                >
+                  <Stack spacing={2}>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <WorkIcon color="primary" />
+                      <Typography variant="subtitle1">{project.name}</Typography>
+                      <Stack direction="row" spacing={1} ml="auto">
+                        <Chip 
+                          label={project.status} 
+                          size="small"
+                          color={
+                            project.status === 'completed' ? 'success' :
+                            project.status === 'in_progress' ? 'warning' :
+                            project.status === 'review' ? 'info' :
+                            'default'
+                          }
+                        />
+                        <Chip 
+                          label={project.priority} 
+                          size="small"
+                          color={
+                            project.priority === 'high' ? 'error' :
+                            project.priority === 'medium' ? 'warning' :
+                            'default'
+                          }
+                        />
+                        <Button
+                          variant="contained"
+                          size="small"
+                          onClick={() => handleAssignProject(project.id)}
+                        >
+                          Assign
+                        </Button>
+                      </Stack>
+                    </Stack>
+                    <Typography variant="body2" color="text.secondary">
+                      {project.description}
+                    </Typography>
+                    <Stack direction="row" spacing={2}>
+                      <Chip 
+                        icon={<CalendarIcon />}
+                        label={project.endDate ? format(new Date(project.endDate), 'PP') : 'No end date'}
+                        size="small"
+                      />
+                      <Chip 
+                        icon={<GroupIcon />}
+                        label={`${project.members?.length || 0} members`}
+                        size="small"
+                      />
+                      {project.progress !== undefined && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 'auto' }}>
+                          <Typography variant="body2" color="text.secondary">
+                            Progress:
+                          </Typography>
+                          <Typography variant="body2" color="text.primary">
+                            {project.progress}%
+                          </Typography>
+                        </Box>
+                      )}
+                    </Stack>
+                  </Stack>
+                </Paper>
+              </Grid>
+            ))}
+          </Grid>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+const DepartmentAssets = ({ departmentId }: { departmentId: string }) => {
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [addAssetDialogOpen, setAddAssetDialogOpen] = useState(false);
+  const { showSnackbar } = useSnackbar();
+
+  const fetchAssets = async () => {
+    try {
+      const assetsRef = collection(db, 'assets');
+      const q = query(assetsRef, where('departmentId', '==', departmentId));
+      const querySnapshot = await getDocs(q);
+      const assetsList = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Asset));
+      setAssets(assetsList);
+    } catch (error) {
+      console.error('Error fetching assets:', error);
+      showSnackbar('Failed to load assets', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAssets();
+  }, [departmentId]);
+
+  return (
+    <Box>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+        <Typography variant="h6">Department Assets</Typography>
+        <Button
+          startIcon={<AddIcon />}
+          variant="contained"
+          size="small"
+          onClick={() => setAddAssetDialogOpen(true)}
+        >
+          Add Asset
+        </Button>
+      </Stack>
+
+      {loading ? (
+        <CircularProgress />
+      ) : assets.length === 0 ? (
+        <Alert severity="info">No assets found for this department</Alert>
+      ) : (
+        <Grid container spacing={2}>
+          {assetTypes.map((type) => {
+            const typeAssets = assets.filter(asset => asset.type === type.type);
+            if (typeAssets.length === 0) return null;
+
+            return (
+              <Grid item xs={12} key={type.type}>
+                <Paper sx={{ p: 2 }}>
+                  <Stack direction="row" alignItems="center" spacing={1} mb={2}>
+                    {type.icon}
+                    <Typography variant="subtitle1">{type.label}</Typography>
+                    <Chip 
+                      label={`${typeAssets.length} items`} 
+                      size="small" 
+                      color="primary" 
+                      sx={{ ml: 'auto' }} 
+                    />
+                  </Stack>
+                  <List dense>
+                    {typeAssets.map((asset) => (
+                      <ListItem
+                        key={asset.id}
+                        secondaryAction={
+                          <Chip 
+                            label={asset.status} 
+                            size="small"
+                            color={asset.status === 'available' ? 'success' : 'warning'}
+                          />
+                        }
+                      >
+                        <ListItemIcon>
+                          {type.icon}
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={asset.name}
+                          secondary={asset.assignedTo ? `Assigned to: ${asset.assignedTo}` : 'Unassigned'}
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Paper>
+              </Grid>
+            );
+          })}
+        </Grid>
+      )}
+
+      <AddAssetDialog
+        open={addAssetDialogOpen}
+        onClose={() => setAddAssetDialogOpen(false)}
+        departmentId={departmentId}
+        onAssetAdded={fetchAssets}
+      />
+    </Box>
+  );
+};
+
+const DepartmentProjects = ({ departmentId }: { departmentId: string }) => {
+  const [projects, setProjects] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [assignProjectDialogOpen, setAssignProjectDialogOpen] = useState(false);
+  const { showSnackbar } = useSnackbar();
+  const navigate = useNavigate();
+
+  const fetchProjects = async () => {
+    try {
+      const projectsRef = collection(db, 'projects');
+      const querySnapshot = await getDocs(projectsRef);
+      
+      // Filter projects that have this department in their departments array
+      const projectsList = querySnapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }))
+        .filter(project => 
+          project.departments?.some(dept => dept.id === departmentId)
+        );
+        
+      setProjects(projectsList);
+    } catch (error) {
+      console.error('Error fetching projects:', error);
+      showSnackbar('Failed to load projects', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProjects();
+  }, [departmentId]);
+
+  return (
+    <Box>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+        <Typography variant="h6">Department Projects</Typography>
+        <Button
+          startIcon={<AddIcon />}
+          variant="contained"
+          size="small"
+          onClick={() => setAssignProjectDialogOpen(true)}
+        >
+          Assign Project
+        </Button>
+      </Stack>
+
+      {loading ? (
+        <CircularProgress />
+      ) : projects.length === 0 ? (
+        <Alert severity="info">No projects assigned to this department</Alert>
+      ) : (
+        <Grid container spacing={2}>
+          {projects.map((project) => (
+            <Grid item xs={12} md={6} key={project.id}>
+              <Paper 
+                sx={{ 
+                  p: 2,
+                  cursor: 'pointer',
+                  '&:hover': {
+                    bgcolor: 'action.hover'
+                  }
+                }}
+                onClick={() => navigate(`/projects/${project.id}`)}
+              >
+                <Stack spacing={2}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <WorkIcon color="primary" />
+                    <Typography variant="subtitle1">{project.name}</Typography>
+                    <Stack direction="row" spacing={1} ml="auto">
+                      <Chip 
+                        label={project.status} 
+                        size="small"
+                        color={
+                          project.status === 'completed' ? 'success' :
+                          project.status === 'in_progress' ? 'warning' :
+                          project.status === 'review' ? 'info' :
+                          'default'
+                        }
+                      />
+                      <Chip 
+                        label={project.priority} 
+                        size="small"
+                        color={
+                          project.priority === 'high' ? 'error' :
+                          project.priority === 'medium' ? 'warning' :
+                          'default'
+                        }
+                      />
+                    </Stack>
+                  </Stack>
+                  
+                  <Typography variant="body2" color="text.secondary">
+                    {project.description || 'No description provided'}
+                  </Typography>
+
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <Chip 
+                      icon={<CalendarIcon />}
+                      label={project.endDate ? format(new Date(project.endDate), 'PP') : 'No end date'}
+                      size="small"
+                    />
+                    <Chip 
+                      icon={<GroupIcon />}
+                      label={`${project.members?.length || 0} members`}
+                      size="small"
+                    />
+                    {project.progress !== undefined && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 'auto' }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Progress:
+                        </Typography>
+                        <Typography variant="body2" color="text.primary">
+                          {project.progress}%
+                        </Typography>
+                      </Box>
+                    )}
+                  </Stack>
+                </Stack>
+              </Paper>
+            </Grid>
+          ))}
+        </Grid>
+      )}
+
+      <AssignProjectDialog
+        open={assignProjectDialogOpen}
+        onClose={() => setAssignProjectDialogOpen(false)}
+        departmentId={departmentId}
+        onProjectAssigned={fetchProjects}
+      />
+    </Box>
+  );
+};
+
 const DepartmentDetailsPage = () => {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -566,54 +1151,31 @@ const DepartmentDetailsPage = () => {
               position: null,
               updatedAt: new Date().toISOString()
             });
+            // Update employee position
+            batch.update(doc(db, 'employees', employeeId), {
+              position: employee.position === 'Department Head' ? null : employee.position,
+              departmentId,
+              updatedAt: new Date().toISOString()
+            });
           } else if (!isHead && department.deputyId && department.deputyId !== employeeId) {
             const oldDeputyRef = doc(db, 'employees', department.deputyId);
             batch.update(oldDeputyRef, {
               position: null,
               updatedAt: new Date().toISOString()
             });
-          }
-
-          // Check if employee is head/deputy in another department
-          const employeeRef = doc(db, 'employees', employeeId);
-          const employeeSnap = await getDoc(employeeRef);
-          
-          if (employeeSnap.exists()) {
-            const employeeData = employeeSnap.data();
-            if (employeeData.departmentId && employeeData.departmentId !== id) {
-              // Clean up old department references
-              const oldDeptRef = doc(db, 'departments', employeeData.departmentId);
-              const oldDeptSnap = await getDoc(oldDeptRef);
-              
-              if (oldDeptSnap.exists()) {
-                const oldDeptData = oldDeptSnap.data();
-                if (oldDeptData.headId === employeeId) {
-                  batch.update(oldDeptRef, {
-                    headId: null,
-                    head: null,
-                    updatedAt: new Date().toISOString()
-                  });
-                } else if (oldDeptData.deputyId === employeeId) {
-                  batch.update(oldDeptRef, {
-                    deputyId: null,
-                    deputy: null,
-                    updatedAt: new Date().toISOString()
-                  });
-                }
-              }
-            }
-
-            // Update employee
-            batch.update(employeeRef, {
-              position: isHead ? 'Department Head' : 'Deputy Head',
-              departmentId: id,
+            // Update employee position
+            batch.update(doc(db, 'employees', employeeId), {
+              position: employee.position === 'Deputy Head' ? null : employee.position,
+              departmentId,
+              updatedAt: new Date().toISOString()
+            });
+          } else {
+            // Regular member transfer
+            batch.update(doc(db, 'employees', employeeId), {
+              departmentId,
               updatedAt: new Date().toISOString()
             });
           }
-
-          // Update department
-          updateData[`${field}Id`] = employeeId;
-          updateData[field] = value;
         } else {
           // Removing head/deputy
           if (isHead && department.headId) {
@@ -984,6 +1546,12 @@ const DepartmentDetailsPage = () => {
     return 'Unnamed Employee';
   };
 
+  const [selectedTab, setSelectedTab] = useState(0);
+
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setSelectedTab(newValue);
+  };
+
   if (loading) {
     return (
       <Box sx={{ p: 3, display: 'flex', justifyContent: 'center' }}>
@@ -1277,7 +1845,7 @@ const DepartmentDetailsPage = () => {
 
         {/* Leadership Section */}
         <Paper elevation={2} sx={{ p: 3, mb: 4 }}>
-          <Typography variant="h6" color="primary" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h6" color="primary" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
             <GroupIcon sx={{ mr: 1 }} /> Department Leadership
           </Typography>
           <Grid container spacing={3}>
@@ -1395,12 +1963,30 @@ const DepartmentDetailsPage = () => {
 
         {/* Documents Section */}
         <Box sx={{ mt: 4 }}>
-          {department && (
-            <DepartmentDocuments
-              departmentId={department.id}
-              departmentName={department.name}
-            />
-          )}
+          <Paper sx={{ mt: 3 }}>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+              <Tabs value={selectedTab} onChange={handleTabChange}>
+                <Tab icon={<FolderIcon />} iconPosition="start" label="Documents" />
+                <Tab icon={<InventoryIcon />} iconPosition="start" label="Assets" />
+                <Tab icon={<AssignmentIcon />} iconPosition="start" label="Projects" />
+              </Tabs>
+            </Box>
+            
+            <TabPanel value={selectedTab} index={0}>
+              <DepartmentDocuments
+                departmentId={id}
+                departmentName={department?.name || ''}
+              />
+            </TabPanel>
+            
+            <TabPanel value={selectedTab} index={1}>
+              <DepartmentAssets departmentId={id} />
+            </TabPanel>
+            
+            <TabPanel value={selectedTab} index={2}>
+              <DepartmentProjects departmentId={id} />
+            </TabPanel>
+          </Paper>
         </Box>
 
         {/* Edit Dialog */}

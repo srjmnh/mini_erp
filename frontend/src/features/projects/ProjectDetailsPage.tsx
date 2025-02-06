@@ -278,106 +278,224 @@ export const ProjectDetailsPage: React.FC = () => {
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
       {/* Header */}
-      <Box sx={{ mb: 4, borderBottom: '1px solid', borderColor: 'divider', pb: 3 }}>
-        <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2 }}>
-          <IconButton onClick={() => navigate(-1)} size="small">
-            <ArrowBackIcon />
-          </IconButton>
-          <Typography variant="h4" component="h1">
+      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 4 }}>
+        <IconButton onClick={() => navigate('/projects')} sx={{ mr: 1 }}>
+          <ArrowBackIcon />
+        </IconButton>
+        <Box flex={1}>
+          <Typography variant="h4" gutterBottom>
             {project.name}
           </Typography>
-          <Chip 
-            label={project.status} 
-            color={project.status === 'planning' ? 'info' : 'success'}
-            size="small"
-          />
-          <Chip 
-            label={project.priority} 
-            color={
-              project.priority === 'high' ? 'error' : 
-              project.priority === 'medium' ? 'warning' : 
-              'default'
-            }
-            size="small"
-          />
-        </Stack>
-        <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-          {project.description}
-        </Typography>
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2 }}>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <CalendarTodayIcon color="action" fontSize="small" />
-                <Typography variant="body2" color="text.secondary">
-                  Start Date
-                </Typography>
-              </Stack>
-              <Typography variant="body1" sx={{ mt: 1 }}>
-                {new Date(project.startDate).toLocaleDateString()}
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Chip
+              size="small"
+              label={project.status}
+              color={getTaskPriorityColor(project.status)}
+            />
+            <Chip
+              size="small"
+              label={project.priority}
+              color={getTaskPriorityColor(project.priority)}
+            />
+            {project.departmentId && (
+              <Chip
+                size="small"
+                icon={<DepartmentIcon />}
+                label={departments.find(d => d.id === project.departmentId)?.name || 'Unknown Department'}
+                color="default"
+                onClick={() => navigate(`/departments/${project.departmentId}`)}
+                sx={{ cursor: 'pointer' }}
+              />
+            )}
+          </Stack>
+        </Box>
+      </Stack>
+
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={4}>
+          <Paper sx={{ p: 2 }}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <CalendarTodayIcon color="action" fontSize="small" />
+              <Typography variant="body2" color="text.secondary">
+                Start Date
               </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2 }}>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <GroupIcon color="action" fontSize="small" />
-                <Typography variant="body2" color="text.secondary">
-                  Team Size
-                </Typography>
-              </Stack>
-              <Typography variant="body1" sx={{ mt: 1 }}>
-                {project.members.length} Members
+            </Stack>
+            <Typography variant="body1" sx={{ mt: 1 }}>
+              {new Date(project.startDate).toLocaleDateString()}
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <Paper sx={{ p: 2 }}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <GroupIcon color="action" fontSize="small" />
+              <Typography variant="body2" color="text.secondary">
+                Team Size
               </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2 }}>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <AssignmentIcon color="action" fontSize="small" />
-                <Typography variant="body2" color="text.secondary">
-                  Tasks
-                </Typography>
-              </Stack>
-              <Typography variant="body1" sx={{ mt: 1 }}>
-                {project.tasks.length} Total ({project.tasks.filter(t => t.status === 'done').length} Completed)
+            </Stack>
+            <Typography variant="body1" sx={{ mt: 1 }}>
+              {project.members.length} Members
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <Paper sx={{ p: 2 }}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <AssignmentIcon color="action" fontSize="small" />
+              <Typography variant="body2" color="text.secondary">
+                Tasks
               </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2 }}>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <AssignmentIcon color="action" fontSize="small" />
-                <Typography variant="body2" color="text.secondary">
-                  Progress
-                </Typography>
-              </Stack>
-              <Box sx={{ mt: 1 }}>
-                <LinearProgress 
-                  variant="determinate" 
-                  value={project.progress || 0} 
-                  sx={{ 
-                    height: 8,
+            </Stack>
+            <Typography variant="body1" sx={{ mt: 1 }}>
+              {project.tasks.length} Total ({project.tasks.filter(t => t.status === 'done').length} Completed)
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <Paper sx={{ p: 2 }}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <AssignmentIcon color="action" fontSize="small" />
+              <Typography variant="body2" color="text.secondary">
+                Progress
+              </Typography>
+            </Stack>
+            <Box sx={{ mt: 1 }}>
+              <LinearProgress 
+                variant="determinate" 
+                value={project.progress || 0} 
+                sx={{ 
+                  height: 8,
+                  borderRadius: 1,
+                  bgcolor: 'background.default',
+                  '& .MuiLinearProgress-bar': {
                     borderRadius: 1,
-                    bgcolor: 'background.default',
-                    '& .MuiLinearProgress-bar': {
-                      borderRadius: 1,
-                      bgcolor: (project.progress || 0) === 100 ? 'success.main' : 'primary.main'
-                    }
-                  }}
-                />
-                <Typography 
-                  variant="body2" 
-                  color="text.secondary" 
-                  sx={{ mt: 0.5, textAlign: 'right' }}
-                >
-                  {project.progress || 0}%
+                    bgcolor: (project.progress || 0) === 100 ? 'success.main' : 'primary.main'
+                  }
+                }}
+              />
+              <Typography 
+                variant="body2" 
+                color="text.secondary" 
+                sx={{ mt: 0.5, textAlign: 'right' }}
+              >
+                {project.progress || 0}%
+              </Typography>
+            </Box>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      {/* Project Details */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Stack spacing={2}>
+              <Typography variant="h6" gutterBottom>
+                Project Details
+              </Typography>
+              
+              <Box>
+                <Typography variant="subtitle2" color="text.secondary">
+                  Description
+                </Typography>
+                <Typography variant="body1">
+                  {project.description || 'No description provided'}
                 </Typography>
               </Box>
-            </Paper>
+
+              <Box>
+                <Typography variant="subtitle2" color="text.secondary">
+                  Due Date
+                </Typography>
+                <Typography variant="body1">
+                  {project.dueDate ? format(new Date(project.dueDate), 'PPP') : 'No due date set'}
+                </Typography>
+              </Box>
+
+              <Box>
+                <Typography variant="subtitle2" color="text.secondary">
+                  Departments Involved
+                </Typography>
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                  {project.departments && project.departments.length > 0 ? (
+                    project.departments.map(dept => (
+                      <Chip
+                        key={dept.id}
+                        icon={<DepartmentIcon />}
+                        label={dept.name}
+                        onClick={() => navigate(`/departments/${dept.id}`)}
+                        sx={{ cursor: 'pointer' }}
+                      />
+                    ))
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      No departments assigned
+                    </Typography>
+                  )}
+                </Stack>
+              </Box>
+            </Stack>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      {/* Budget & Resources Section */}
+      <Paper sx={{ p: 3, mb: 4 }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <BudgetIcon color="primary" />
+            <Typography variant="h6">Budget & Resources</Typography>
+          </Stack>
+          <IconButton size="small">
+            <EditIcon fontSize="small" />
+          </IconButton>
+        </Stack>
+
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Total Budget
+            </Typography>
+            <Typography variant="h4" color="text.primary" gutterBottom>
+              ${project.budget?.toLocaleString() || '0'}
+            </Typography>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Actual Cost
+            </Typography>
+            <Typography 
+              variant="h4" 
+              color={project.actualCost > project.budget ? 'error.main' : 'success.main'}
+              gutterBottom
+            >
+              ${project.actualCost?.toLocaleString() || '0'}
+            </Typography>
+          </Grid>
+          <Grid item xs={12}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Departments Involved
+            </Typography>
+            {project.departments && project.departments.length > 0 ? (
+              <Stack direction="row" spacing={1} alignItems="center">
+                {project.departments.map(dept => (
+                  <Chip
+                    key={dept.id}
+                    icon={<DepartmentIcon />}
+                    label={dept.name}
+                    onClick={() => navigate(`/departments/${dept.id}`)}
+                    sx={{ cursor: 'pointer' }}
+                  />
+                ))}
+              </Stack>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No departments assigned
+              </Typography>
+            )}
           </Grid>
         </Grid>
-      </Box>
+      </Paper>
 
       {/* Team Members Section */}
       <Paper sx={{ p: 3, mb: 4 }}>

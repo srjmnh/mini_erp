@@ -474,10 +474,10 @@ export function ProjectDashboard() {
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 0.5 }}>
                       {project.departments?.map((dept, index) => (
                         <Chip
-                          key={index}
+                          key={dept.id}
                           size="small"
                           icon={<DepartmentIcon />}
-                          label={dept}
+                          label={dept.name}
                           sx={{ borderRadius: 1 }}
                         />
                       ))}

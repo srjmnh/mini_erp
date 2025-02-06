@@ -120,6 +120,7 @@ export default function DepartmentsPage() {
           await updateEmployee(replacementId, {
             ...newManager,
             isManager: true,
+            position: 'Department Head',
             updatedAt: new Date().toISOString()
           });
         }
@@ -129,7 +130,8 @@ export default function DepartmentsPage() {
       await updateEmployee(employeeId, {
         ...employee,
         departmentId: destId,
-        isManager: false, // Reset manager status when moving
+        isManager: false,
+        position: employee.position === 'Department Head' ? 'Employee' : employee.position,
         updatedAt: new Date().toISOString()
       });
 
@@ -152,22 +154,60 @@ export default function DepartmentsPage() {
 
     try {
       if (editingDepartment) {
-        await updateDepartment(editingDepartment.id, departmentData);
+        // First update the department
+        await updateDepartment(editingDepartment.id, {
+          ...departmentData,
+          updatedAt: new Date().toISOString()
+        });
 
-        // Update department head's manager status
+        // If setting a new department head
         if (departmentData.managerId) {
+          const employee = employees.find(e => e.id === departmentData.managerId);
+          if (employee) {
+            // Update the employee to be in this department and set as manager
+            await updateEmployee(employee.id, {
+              ...employee,
+              departmentId: editingDepartment.id, // Ensure they're in this department
+              isManager: true,
+              position: 'Department Head',
+              updatedAt: new Date().toISOString()
+            });
+
+            // Clear manager status from previous department head if exists
+            const previousManager = employees.find(e => 
+              e.id !== departmentData.managerId && 
+              e.departmentId === editingDepartment.id && 
+              e.isManager
+            );
+            if (previousManager) {
+              await updateEmployee(previousManager.id, {
+                ...previousManager,
+                isManager: false,
+                position: previousManager.position === 'Department Head' ? 'Employee' : previousManager.position,
+                updatedAt: new Date().toISOString()
+              });
+            }
+          }
+        }
+      } else {
+        // Creating new department
+        const newDeptId = await addDepartment(departmentData);
+        
+        // If setting an initial department head
+        if (departmentData.managerId && newDeptId) {
           const employee = employees.find(e => e.id === departmentData.managerId);
           if (employee) {
             await updateEmployee(employee.id, {
               ...employee,
+              departmentId: newDeptId,
               isManager: true,
-              updatedAt: new Date().toISOString().split('T')[0]
+              position: 'Department Head',
+              updatedAt: new Date().toISOString()
             });
           }
         }
-      } else {
-        await addDepartment(departmentData);
       }
+      
       setOpenDialog(false);
       form.reset();
     } catch (error) {
@@ -205,7 +245,8 @@ export default function DepartmentsPage() {
 
   const renderDepartmentCard = (department: Department) => {
     const deptEmployees = departmentEmployees[department.id] || [];
-    const manager = deptEmployees.find(e => e.id === department.managerId);
+    const departmentHead = deptEmployees.find(e => e.position === 'Department Head');
+    const hasDepartmentHead = Boolean(departmentHead);
 
     return (
       <Card
@@ -225,7 +266,7 @@ export default function DepartmentsPage() {
         }}
       >
         <CardContent sx={{ flexGrow: 1 }}>
-          {!department.managerId && (
+          {!hasDepartmentHead && (
             <Alert severity="warning" sx={{ mb: 2 }}>
               No department head assigned
             </Alert>
@@ -254,7 +295,7 @@ export default function DepartmentsPage() {
             <Stack direction="row" spacing={1} alignItems="center">
               <PersonIcon fontSize="small" />
               <Typography variant="body2">
-                Head: {manager ? `${manager.firstName} ${manager.lastName}` : 'Not assigned'}
+                Head: {departmentHead ? `${departmentHead.firstName} ${departmentHead.lastName}` : 'Not assigned'}
               </Typography>
             </Stack>
 
@@ -393,7 +434,8 @@ export default function DepartmentsPage() {
         <Grid container spacing={3}>
           {filteredDepartments.map((department) => {
             const deptEmployees = departmentEmployees[department.id] || [];
-            const manager = deptEmployees.find(e => e.id === department.managerId);
+            const departmentHead = deptEmployees.find(e => e.position === 'Department Head');
+            const hasDepartmentHead = Boolean(departmentHead);
 
             return (
               <Grid item xs={12} sm={6} md={4} key={department.id}>
@@ -420,7 +462,7 @@ export default function DepartmentsPage() {
                     >
                       <CardContent sx={{ flexGrow: 1, pb: 1 }}>
                         <Stack spacing={2}>
-                          {!department.managerId && (
+                          {!hasDepartmentHead && (
                             <Alert 
                               severity="warning" 
                               sx={{ 
@@ -460,7 +502,7 @@ export default function DepartmentsPage() {
                             <Stack direction="row" spacing={1} alignItems="center">
                               <PersonIcon fontSize="small" color="primary" />
                               <Typography variant="body2">
-                                Head: {manager ? `${manager.firstName} ${manager.lastName}` : 'Not assigned'}
+                                Head: {departmentHead ? `${departmentHead.firstName} ${departmentHead.lastName}` : 'Not assigned'}
                               </Typography>
                             </Stack>
 

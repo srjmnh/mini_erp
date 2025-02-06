@@ -24,6 +24,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useSnackbar } from '@/contexts/SnackbarContext';
 import { motion } from 'framer-motion';
+import { MiniCalendar } from '@/components/calendar/MiniCalendar';
 
 interface HeaderProps {
   onDrawerToggle?: () => void;
@@ -173,7 +174,8 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
           </Breadcrumbs>
         </Box>
 
-        <Box sx={{ ml: 2 }}>
+        <Box sx={{ ml: 2, display: 'flex', alignItems: 'center' }}>
+          <MiniCalendar />
           <IconButton
             onClick={handleMenuOpen}
             size="small"

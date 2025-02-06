@@ -73,15 +73,21 @@ export default function OrganizationChart({ department, employees, onEmployeeCli
         borderRadius: 2,
         cursor: 'pointer',
         bgcolor: role === 'manager' 
-          ? alpha(theme.palette.primary.main, 0.1)
+          ? alpha(theme.palette.primary.main, 0.15)
           : role === 'deputy'
-            ? alpha(theme.palette.success.main, 0.1)
-            : alpha(theme.palette.grey[100], 0.5),
+            ? alpha(theme.palette.success.main, 0.15)
+            : 'background.paper',
+        border: '1px solid',
+        borderColor: role === 'manager'
+          ? 'primary.main'
+          : role === 'deputy'
+            ? 'success.main'
+            : 'divider',
         '&:hover': {
           bgcolor: role === 'manager'
-            ? alpha(theme.palette.primary.main, 0.2)
+            ? alpha(theme.palette.primary.main, 0.25)
             : role === 'deputy'
-              ? alpha(theme.palette.success.main, 0.2)
+              ? alpha(theme.palette.success.main, 0.25)
               : alpha(theme.palette.grey[200], 0.5),
           transform: 'translateY(-2px)',
           transition: 'all 0.2s',
@@ -100,12 +106,20 @@ export default function OrganizationChart({ department, employees, onEmployeeCli
             : role === 'deputy'
               ? 'success.main'
               : 'grey.300',
+          bgcolor: role === 'manager'
+            ? 'primary.main'
+            : role === 'deputy'
+              ? 'success.main'
+              : 'grey.100',
         }}
       >
         {employee.firstName[0]}{employee.lastName[0]}
       </Avatar>
       <Box>
-        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+        <Typography variant="subtitle1" sx={{ 
+          fontWeight: role === 'manager' ? 700 : role === 'deputy' ? 600 : 500,
+          color: role === 'manager' ? 'primary.main' : 'text.primary'
+        }}>
           {employee.firstName} {employee.lastName}
         </Typography>
         <Typography variant="body2" color="text.secondary">
@@ -116,31 +130,18 @@ export default function OrganizationChart({ department, employees, onEmployeeCli
             label={role === 'manager' ? 'Department Head' : role === 'deputy' ? 'Deputy Manager' : 'Team Member'}
             size="small"
             color={role === 'manager' ? 'primary' : role === 'deputy' ? 'success' : 'default'}
-            sx={{ mt: 1 }}
+            sx={{ 
+              mt: 1,
+              fontWeight: role === 'manager' ? 600 : 400,
+              '& .MuiChip-label': {
+                px: 1
+              }
+            }}
           />
         )}
       </Box>
     </Paper>
   );
-
-  const renderTeam = (managerId: string = 'root') => {
-    const teamMembers = employeesByManager[managerId] || [];
-    
-    return teamMembers.map((employee) => (
-      <TreeItem
-        key={employee.id}
-        nodeId={employee.id}
-        label={renderEmployee(employee, 'member')}
-        sx={{
-          '& .MuiTreeItem-content': {
-            p: 0.5,
-          },
-        }}
-      >
-        {employeesByManager[employee.id] && renderTeam(employee.id)}
-      </TreeItem>
-    ));
-  };
 
   if (!manager && !deputyManager && departmentEmployees.length === 0) {
     return (
@@ -155,37 +156,20 @@ export default function OrganizationChart({ department, employees, onEmployeeCli
   return (
     <Card sx={{ p: 3, mb: 3 }}>
       <Typography variant="h6" gutterBottom color="primary" sx={{ mb: 3, fontWeight: 600 }}>
-        Organizational Structure
+        Department Members
       </Typography>
-      <TreeView
-        defaultExpanded={['root', 'management', ...(manager ? [manager.id] : []), ...(deputyManager ? [deputyManager.id] : [])]}
-        defaultCollapseIcon={<ExpandMoreIcon />}
-        defaultExpandIcon={<ChevronRightIcon />}
-        sx={{
-          '& .MuiTreeItem-group': {
-            ml: 4,
-            borderLeft: `2px dashed ${theme.palette.divider}`,
-            pt: 2,
-            pb: 2,
-          },
-        }}
-      >
-        <TreeItem
-          nodeId="management"
-          label={
-            <Stack spacing={2}>
-              {manager && renderEmployee(manager, 'manager')}
-              {deputyManager && (
-                <Box sx={{ ml: 4 }}>
-                  {renderEmployee(deputyManager, 'deputy')}
-                </Box>
-              )}
-            </Stack>
-          }
-        >
-          {renderTeam(manager?.id || 'root')}
-        </TreeItem>
-      </TreeView>
+      <Stack spacing={2}>
+        {manager && renderEmployee(manager, 'manager')}
+        {deputyManager && renderEmployee(deputyManager, 'deputy')}
+        {departmentEmployees
+          .filter(emp => emp.id !== manager?.id && emp.id !== deputyManager?.id)
+          .map(employee => (
+            <Box key={employee.id}>
+              {renderEmployee(employee, 'member')}
+            </Box>
+          ))
+        }
+      </Stack>
     </Card>
   );
 }
