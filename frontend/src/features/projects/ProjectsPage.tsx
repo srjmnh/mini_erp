@@ -66,6 +66,7 @@ export const ProjectsPage: React.FC = () => {
     status: 'planning' as ProjectStatus,
     priority: 'medium' as ProjectPriority,
     startDate: format(new Date(), 'yyyy-MM-dd'),
+    department: '',
     departments: [] as string[],
     members: [],
     tasks: [],
@@ -81,6 +82,7 @@ export const ProjectsPage: React.FC = () => {
       status: 'planning',
       priority: 'medium',
       startDate: format(new Date(), 'yyyy-MM-dd'),
+      department: '',
       departments: [],
       members: [],
       tasks: [],
@@ -307,83 +309,102 @@ export const ProjectsPage: React.FC = () => {
           <Stack spacing={3} sx={{ mt: 2 }}>
             <TextField
               label="Project Name"
-              value={newProject.name}
-              onChange={(e) =>
-                setNewProject((prev) => ({ ...prev, name: e.target.value }))
-              }
               fullWidth
-              required
+              value={newProject.name}
+              onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
             />
+            
             <TextField
               label="Description"
-              value={newProject.description}
-              onChange={(e) =>
-                setNewProject((prev) => ({
-                  ...prev,
-                  description: e.target.value,
-                }))
-              }
+              fullWidth
               multiline
               rows={3}
-              fullWidth
+              value={newProject.description}
+              onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
             />
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Priority</InputLabel>
-                  <Select
-                    value={newProject.priority}
-                    label="Priority"
-                    onChange={(e) =>
-                      setNewProject((prev) => ({
-                        ...prev,
-                        priority: e.target.value as ProjectPriority,
-                      }))
-                    }
-                  >
-                    <MenuItem value="low">Low</MenuItem>
-                    <MenuItem value="medium">Medium</MenuItem>
-                    <MenuItem value="high">High</MenuItem>
-                    <MenuItem value="urgent">Urgent</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  label="Start Date"
-                  type="date"
-                  value={newProject.startDate}
-                  onChange={(e) =>
-                    setNewProject((prev) => ({
-                      ...prev,
-                      startDate: e.target.value,
-                    }))
-                  }
-                  fullWidth
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-            </Grid>
+
+            <FormControl fullWidth>
+              <InputLabel>Department</InputLabel>
+              <Select
+                value={newProject.department}
+                label="Department"
+                onChange={(e) => setNewProject({ ...newProject, department: e.target.value })}
+              >
+                {departments.map((dept) => (
+                  <MenuItem key={dept.id} value={dept.name}>
+                    {dept.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={newProject.status}
+                label="Status"
+                onChange={(e) => setNewProject({ ...newProject, status: e.target.value as ProjectStatus })}
+              >
+                <MenuItem value="planning">Planning</MenuItem>
+                <MenuItem value="in_progress">In Progress</MenuItem>
+                <MenuItem value="on_hold">On Hold</MenuItem>
+                <MenuItem value="completed">Completed</MenuItem>
+                <MenuItem value="cancelled">Cancelled</MenuItem>
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth>
+              <InputLabel>Priority</InputLabel>
+              <Select
+                value={newProject.priority}
+                label="Priority"
+                onChange={(e) => setNewProject({ ...newProject, priority: e.target.value as ProjectPriority })}
+              >
+                <MenuItem value="low">Low</MenuItem>
+                <MenuItem value="medium">Medium</MenuItem>
+                <MenuItem value="high">High</MenuItem>
+                <MenuItem value="urgent">Urgent</MenuItem>
+              </Select>
+            </FormControl>
+
+            <TextField
+              label="Start Date"
+              type="date"
+              fullWidth
+              value={newProject.startDate}
+              onChange={(e) => setNewProject({ ...newProject, startDate: e.target.value })}
+              InputLabelProps={{
+                shrink: true,
+              }}
+            />
+
             <Autocomplete
               multiple
-              options={departments}
-              getOptionLabel={(option) => option.name}
-              value={departments.filter((d) =>
-                newProject.departments.includes(d.id)
-              )}
-              onChange={(_, newValue) =>
-                setNewProject((prev) => ({
-                  ...prev,
-                  departments: newValue.map((d) => d.id),
-                }))
-              }
+              options={employees}
+              getOptionLabel={(option) => `${option.firstName} ${option.lastName}`}
+              value={employees.filter(emp => newProject.members.includes(emp.id))}
+              onChange={(_, newValue) => {
+                setNewProject({
+                  ...newProject,
+                  members: newValue.map(emp => emp.id)
+                });
+              }}
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  label="Departments"
-                  placeholder="Select departments"
+                  label="Team Members"
+                  placeholder="Add team members"
                 />
               )}
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => (
+                  <Chip
+                    label={`${option.firstName} ${option.lastName}`}
+                    {...getTagProps({ index })}
+                    avatar={<Avatar src={option.photoUrl}>{option.firstName[0]}</Avatar>}
+                  />
+                ))
+              }
             />
           </Stack>
         </DialogContent>
@@ -392,7 +413,7 @@ export const ProjectsPage: React.FC = () => {
           <Button
             variant="contained"
             onClick={handleCreateProject}
-            disabled={!newProject.name}
+            disabled={!newProject.name || !newProject.department}
           >
             Create Project
           </Button>

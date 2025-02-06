@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -23,6 +23,10 @@ import {
   CardActions,
   CircularProgress,
   Alert,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -58,12 +62,14 @@ interface Employee extends EmployeeFormData {
   name?: string;
   departmentName?: string;
   isDepartmentHead: boolean;
+  reportsTo?: string;
 }
 
 interface Department {
   id: string;
   name: string;
   managerId: string | undefined;
+  deputyManagerId: string | undefined;
 }
 
 interface Project {
@@ -103,6 +109,33 @@ export default function EmployeesPage() {
 
   const handleViewProfile = (employeeId: string) => {
     navigate(`/employees/${employeeId}`);
+  };
+
+  const handleUpdateReportsTo = async () => {
+    if (!selectedEmployee) return;
+
+    try {
+      await updateEmployee(selectedEmployee.id, {
+        ...selectedEmployee,
+        reportsTo: selectedEmployee.reportsTo,
+        updatedAt: new Date().toISOString()
+      });
+
+      showSnackbar('Reporting manager updated successfully', 'success');
+    } catch (error) {
+      console.error('Error updating reporting manager:', error);
+      showSnackbar('Failed to update reporting manager', 'error');
+    }
+  };
+
+  const getAvailableManagers = (employee: Employee) => {
+    if (!employee.departmentId) return [];
+    
+    return employees.filter(e => 
+      e.id !== employee.id && // Can't report to themselves
+      e.departmentId === employee.departmentId && // Same department
+      (e.position === 'Department Head' || e.isManager) // Is a manager or department head
+    );
   };
 
   const handleEdit = (employee: Employee) => {
@@ -251,25 +284,60 @@ export default function EmployeesPage() {
     return department ? department.name : 'Not Assigned';
   };
 
-  const getManagerName = (employeeId: string) => {
-    const employee = employees.find(e => e.id === employeeId);
-    if (!employee?.departmentId) return 'Not Assigned';
-    
-    const department = departments.find(d => d.id === employee.departmentId);
-    if (!department?.managerId) return 'No Department Head';
-    
-    const manager = employees.find(e => e.id === department.managerId);
-    return manager ? `${manager.firstName} ${manager.lastName}` : 'Unknown';
-  };
-
   const isEmployeeDepartmentHead = (employeeId: string) => {
-    return departments.some(d => d.managerId === employeeId);
+    const employee = employees.find(e => e.id === employeeId);
+    return employee?.position === 'Department Head';
   };
 
   const getDepartmentHeadOf = (employeeId: string) => {
-    const department = departments.find(d => d.managerId === employeeId);
-    return department ? department.name : null;
+    const employee = employees.find(e => e.id === employeeId);
+    return employee?.departmentId ? getDepartmentName(employee.departmentId) : null;
   };
+
+  const getManagerName = (employeeId: string) => {
+    const employee = employees.find(e => e.id === employeeId);
+    if (!employee?.departmentId || employee.position === 'Department Head') {
+      return 'No Department Head';
+    }
+    
+    // Find other employees in the same department who are department heads
+    const departmentHead = employees.find(e => 
+      e.departmentId === employee.departmentId && 
+      e.position === 'Department Head'
+    );
+    
+    return departmentHead ? `${departmentHead.firstName} ${departmentHead.lastName}` : 'No Department Head';
+  };
+
+  // Debug log departments and employees on initial load
+  useEffect(() => {
+    if (departments.length > 0 && employees.length > 0) {
+      console.log('Initial Data Load:', {
+        departments: departments.map(d => ({
+          id: d.id,
+          name: d.name,
+          managerId: d.managerId,
+        })),
+        employees: employees.map(e => ({
+          id: e.id,
+          name: `${e.firstName} ${e.lastName}`,
+          departmentId: e.departmentId
+        }))
+      });
+
+      // Check each department's manager ID
+      departments.forEach(d => {
+        console.log(`Department ${d.name}:`, {
+          id: d.id,
+          managerId: d.managerId,
+          manager: employees.find(e => e.id === d.managerId)?.firstName
+        });
+      });
+    }
+  }, [departments, employees]);
+
+  console.log('All Departments:', departments);
+  console.log('All Employees:', employees);
 
   const filteredEmployees = employees.filter(employee => 
     employee.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -372,25 +440,34 @@ export default function EmployeesPage() {
           <Grid item xs={12} sm={6} md={4} lg={3} key={employee.id}>
             <Card
               onClick={() => handleViewProfile(employee.id)}
-              sx={{
+              sx={(theme) => ({
                 height: '100%',
                 display: 'flex',
                 flexDirection: 'column',
                 p: 3,
                 position: 'relative',
                 bgcolor: isEmployeeDepartmentHead(employee.id) 
-                  ? alpha(theme.palette.primary.main, 0.05)
+                  ? alpha(theme.palette.primary.main, 0.08)
                   : 'background.paper',
+                border: '1px solid',
+                borderColor: isEmployeeDepartmentHead(employee.id)
+                  ? theme.palette.primary.main
+                  : theme.palette.divider,
                 borderLeft: isEmployeeDepartmentHead(employee.id)
                   ? `6px solid ${theme.palette.primary.main}`
-                  : 'none',
+                  : `1px solid ${theme.palette.divider}`,
+                boxShadow: isEmployeeDepartmentHead(employee.id)
+                  ? `0 4px 12px ${alpha(theme.palette.primary.main, 0.2)}`
+                  : theme.shadows[1],
                 transition: 'all 0.2s',
                 cursor: 'pointer',
                 '&:hover': {
                   transform: 'translateY(-4px)',
-                  boxShadow: theme.shadows[4],
+                  boxShadow: isEmployeeDepartmentHead(employee.id)
+                    ? `0 8px 24px ${alpha(theme.palette.primary.main, 0.25)}`
+                    : theme.shadows[4],
                 },
-              }}
+              })}
             >
               {/* Employee Header with Photo */}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
@@ -401,17 +478,28 @@ export default function EmployeesPage() {
                     sx={{
                       width: 56,
                       height: 56,
-                      border: `2px solid ${theme.palette.primary.main}`,
+                      border: '2px solid',
+                      borderColor: isEmployeeDepartmentHead(employee.id)
+                        ? theme.palette.primary.main
+                        : theme.palette.grey[300],
+                      bgcolor: isEmployeeDepartmentHead(employee.id)
+                        ? alpha(theme.palette.primary.main, 0.1)
+                        : theme.palette.grey[100],
                     }}
                   >
                     {employee.firstName[0]}{employee.lastName[0]}
                   </Avatar>
                   <Box>
-                    <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                    <Typography variant="h6" sx={{ 
+                      fontWeight: isEmployeeDepartmentHead(employee.id) ? 700 : 500,
+                      color: isEmployeeDepartmentHead(employee.id) ? theme.palette.primary.main : 'text.primary'
+                    }}>
                       {employee.firstName} {employee.lastName}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      {employee.position}
+                      {isEmployeeDepartmentHead(employee.id) 
+                        ? `Head of ${getDepartmentHeadOf(employee.id)}`
+                        : employee.position}
                     </Typography>
                   </Box>
                 </Box>
@@ -433,7 +521,8 @@ export default function EmployeesPage() {
 
               {/* Department & Role Info */}
               <Stack spacing={1} sx={{ mt: 'auto' }}>
-                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  {/* Department */}
                   <Chip
                     label={getDepartmentName(employee.departmentId)}
                     size="small"
@@ -442,19 +531,17 @@ export default function EmployeesPage() {
                       color: employee.departmentId ? 'primary.main' : 'text.secondary',
                     }}
                   />
-                  {isEmployeeDepartmentHead(employee.id) ? (
-                    <Chip
-                      label={`Head of ${getDepartmentHeadOf(employee.id)}`}
-                      size="small"
-                      sx={{
-                        bgcolor: alpha(theme.palette.success.main, 0.1),
-                        color: 'success.main',
-                      }}
-                    />
-                  ) : (
-                    <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
-                      Reports to: {getManagerName(employee.id)}
-                    </Typography>
+                  
+                  {/* Only show Reports To for non-department heads */}
+                  {!isEmployeeDepartmentHead(employee.id) && employee.departmentId && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Reports to:
+                      </Typography>
+                      <Typography variant="body2" color="primary" sx={{ fontWeight: 500 }}>
+                        {getManagerName(employee.id)}
+                      </Typography>
+                    </Box>
                   )}
                 </Box>
               </Stack>

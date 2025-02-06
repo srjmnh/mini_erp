@@ -124,6 +124,57 @@ export default function EmployeeProfile() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const theme = useTheme();
   const [hasChanges, setHasChanges] = useState(false);
+  const [editingReportsTo, setEditingReportsTo] = useState(false);
+  const [selectedManager, setSelectedManager] = useState<string | null>(null);
+
+  const getAvailableManagers = (employee: any) => {
+    // Show all employees except the current one
+    return employees.filter(e => 
+      e.id !== employee.id && // Can't report to themselves
+      e.status === 'active' // Only show active employees
+    ).sort((a, b) => {
+      // Sort by position (Department Heads first, then managers, then others)
+      if (a.position?.includes('Department Head') && !b.position?.includes('Department Head')) return -1;
+      if (!a.position?.includes('Department Head') && b.position?.includes('Department Head')) return 1;
+      if (a.position?.includes('Manager') && !b.position?.includes('Manager')) return -1;
+      if (!a.position?.includes('Manager') && b.position?.includes('Manager')) return 1;
+      // Then sort by name
+      return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
+    });
+  };
+
+  const getManagerName = (employeeId: string) => {
+    const employee = employees.find(e => e.id === employeeId);
+    if (!employee?.departmentId || employee.position === 'Department Head') {
+      return 'No Department Head';
+    }
+    
+    // Find other employees in the same department who are department heads
+    const departmentHead = employees.find(e => 
+      e.departmentId === employee.departmentId && 
+      e.position === 'Department Head'
+    );
+    
+    return departmentHead ? `${departmentHead.firstName} ${departmentHead.lastName}` : 'No Department Head';
+  };
+
+  const handleUpdateReportsTo = async () => {
+    if (!employee || !id) return;
+
+    try {
+      setError(null);
+      await updateEmployee(id, {
+        ...employee,
+        reportsTo: selectedManager,
+        updatedAt: new Date().toISOString()
+      });
+      setEmployee(prev => ({ ...prev, reportsTo: selectedManager }));
+      setEditingReportsTo(false);
+    } catch (error: any) {
+      console.error('Error updating reporting manager:', error);
+      setError('Failed to update reporting manager: ' + error.message);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -223,12 +274,6 @@ export default function EmployeeProfile() {
     if (!departmentId) return 'Not Assigned';
     const department = departments.find(d => d.id === departmentId);
     return department ? department.name : 'Not Assigned';
-  };
-
-  const getManagerName = (managerId: string | undefined) => {
-    if (!managerId) return 'Not Assigned';
-    const manager = employees.find(e => e.id === managerId);
-    return manager ? `${manager.firstName} ${manager.lastName}` : 'Not Assigned';
   };
 
   const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -561,44 +606,30 @@ export default function EmployeeProfile() {
                 </Grid>
               </Grid>
 
-              {/* Employment Details */}
+              {/* Employment Information */}
               <Grid item xs={12}>
-                <Typography variant="h6" sx={{ mb: 3, mt: 3 }}>Employment Details</Typography>
+                <Typography variant="h6" sx={{ mb: 3 }}>Employment Information</Typography>
                 <Grid container spacing={3}>
                   <Grid item xs={12} sm={6}>
                     <TextField
                       fullWidth
                       label="Position"
-                      value={employee.position}
+                      value={employee.position || ''}
                       onChange={(e) => handleFieldChange('position', e.target.value)}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">
-                      Department
-                    </Typography>
-                    <Typography>
-                      {getDepartmentName(employee.departmentId)}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Employee ID"
-                      value={employee.employeeId || ''}
-                      onChange={(e) => handleFieldChange('employeeId', e.target.value)}
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
                     <TextField
                       select
                       fullWidth
-                      label="Employment Type"
-                      value={employee.employmentType || 'Full-time'}
-                      onChange={(e) => handleFieldChange('employmentType', e.target.value)}
+                      label="Department"
+                      value={employee.departmentId || ''}
+                      onChange={(e) => handleFieldChange('departmentId', e.target.value)}
                     >
-                      {['Full-time', 'Part-time', 'Contract', 'Intern'].map((type) => (
-                        <MenuItem key={type} value={type}>{type}</MenuItem>
+                      {departments.map((dept) => (
+                        <MenuItem key={dept.id} value={dept.id}>
+                          {dept.name}
+                        </MenuItem>
                       ))}
                     </TextField>
                   </Grid>
@@ -614,55 +645,25 @@ export default function EmployeeProfile() {
                   </Grid>
                   <Grid item xs={12} sm={6}>
                     <TextField
+                      fullWidth
+                      label="Employee ID"
+                      value={employee.employeeId || ''}
+                      onChange={(e) => handleFieldChange('employeeId', e.target.value)}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
                       select
                       fullWidth
                       label="Status"
-                      value={employee.status}
+                      value={employee.status || 'active'}
                       onChange={(e) => handleFieldChange('status', e.target.value)}
                     >
-                      {['active', 'inactive', 'on_leave'].map((status) => (
-                        <MenuItem key={status} value={status}>
-                          {status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
-                        </MenuItem>
-                      ))}
+                      <MenuItem value="active">Active</MenuItem>
+                      <MenuItem value="inactive">Inactive</MenuItem>
+                      <MenuItem value="on_leave">On Leave</MenuItem>
                     </TextField>
                   </Grid>
-                </Grid>
-              </Grid>
-
-              {/* Department Info */}
-              <Grid item xs={12}>
-                <Card sx={{ mb: 3 }}>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      Department Information
-                    </Typography>
-                    <Stack spacing={2}>
-                      <Box>
-                        <Typography variant="subtitle2" color="text.secondary">
-                          Department
-                        </Typography>
-                        <Typography>
-                          {getDepartmentName(employee.departmentId)}
-                        </Typography>
-                      </Box>
-                      <Box>
-                        <Typography variant="subtitle2" color="text.secondary">
-                          Reports To
-                        </Typography>
-                        <Typography>
-                          {getManagerName(employee.reportsTo)}
-                        </Typography>
-                      </Box>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              </Grid>
-
-              {/* Additional Information */}
-              <Grid item xs={12}>
-                <Typography variant="h6" sx={{ mb: 3, mt: 3 }}>Additional Information</Typography>
-                <Grid container spacing={3}>
                   <Grid item xs={12} sm={6}>
                     <TextField
                       fullWidth
@@ -671,68 +672,56 @@ export default function EmployeeProfile() {
                       onChange={(e) => handleFieldChange('workLocation', e.target.value)}
                     />
                   </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Team"
-                      value={employee.team || ''}
-                      onChange={(e) => handleFieldChange('team', e.target.value)}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Reports To"
-                      value={employee.reportsTo || ''}
-                      onChange={(e) => handleFieldChange('reportsTo', e.target.value)}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Emergency Contact Name"
-                      value={employee.emergencyContact?.name || ''}
-                      onChange={(e) => handleFieldChange('emergencyContact', { 
-                        ...employee.emergencyContact,
-                        name: e.target.value 
-                      })}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Emergency Contact Phone"
-                      value={employee.emergencyContact?.phone || ''}
-                      onChange={(e) => handleFieldChange('emergencyContact', {
-                        ...employee.emergencyContact,
-                        phone: e.target.value
-                      })}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Salary"
-                      type="number"
-                      value={employee.salary || ''}
-                      onChange={(e) => handleFieldChange('salary', parseFloat(e.target.value))}
-                      InputProps={{
-                        startAdornment: <span style={{ marginRight: 8 }}>$</span>,
-                      }}
-                    />
-                  </Grid>
                 </Grid>
               </Grid>
 
-              {/* Save Button */}
-              <Grid item xs={12} sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
-                <Button
-                  variant="contained"
-                  onClick={handleSaveChanges}
-                  disabled={!hasChanges}
-                >
-                  Save Changes
-                </Button>
+              {/* Reporting Structure */}
+              <Grid item xs={12}>
+                <Typography variant="h6" sx={{ mb: 3 }}>Reporting Structure</Typography>
+                <Grid container spacing={3}>
+                  <Grid item xs={12}>
+                    <Stack direction="row" spacing={2} alignItems="center">
+                      <TextField
+                        select
+                        fullWidth
+                        label="Reports To"
+                        value={employee.reportsTo || ''}
+                        onChange={(e) => handleFieldChange('reportsTo', e.target.value)}
+                        disabled={employee.position?.includes('Department Head')}
+                        helperText={
+                          employee.position?.includes('Department Head') 
+                            ? "Department Heads don't have a reporting manager" 
+                            : "Override default reporting structure"
+                        }
+                      >
+                        <MenuItem value="">
+                          <em>None (Default to Department Head)</em>
+                        </MenuItem>
+                        {getAvailableManagers(employee).map((manager) => (
+                          <MenuItem key={manager.id} value={manager.id}>
+                            <Stack>
+                              <Typography>
+                                {manager.firstName} {manager.lastName}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {manager.position} • {departments.find(d => d.id === manager.departmentId)?.name}
+                              </Typography>
+                            </Stack>
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                      {hasChanges && (
+                        <Button
+                          variant="contained"
+                          onClick={handleSaveChanges}
+                          sx={{ minWidth: 100 }}
+                        >
+                          Save
+                        </Button>
+                      )}
+                    </Stack>
+                  </Grid>
+                </Grid>
               </Grid>
             </Grid>
           </Box>
