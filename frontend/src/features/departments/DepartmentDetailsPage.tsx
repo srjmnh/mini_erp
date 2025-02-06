@@ -1,428 +1,1428 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
   Button,
-  Stack,
-  Card,
-  CardContent,
-  IconButton,
   Grid,
-  Avatar,
-  Paper,
-  Divider,
-  Alert,
-  TextField,
-  Tabs,
-  Tab,
-  Autocomplete,
-  Drawer,
+  Stack,
+  IconButton,
   List,
   ListItem,
-  ListItemIcon,
   ListItemText,
-  ListItemButton,
-  Chip,
-  LinearProgress,
-  Menu,
-  MenuItem,
+  ListItemIcon,
+  Avatar,
+  Paper,
+  Alert,
+  TextField,
+  InputAdornment,
+  CircularProgress,
   Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  Checkbox,
+  ListItemButton,
+  DialogContentText,
+  FormEvent,
+  Chip,
+  Container
 } from '@mui/material';
 import {
+  Add as AddIcon,
+  PersonAdd as PersonAddIcon,
+  Search as SearchIcon,
+  Group as GroupIcon,
+  Assessment as AssessmentIcon,
+  Delete as DeleteIcon,
   ArrowBack as ArrowBackIcon,
   Edit as EditIcon,
-  Add as AddIcon,
+  Save as SaveIcon,
+  Cancel as CancelIcon,
+  LocationOn as LocationIcon,
+  Description as DescriptionIcon,
+  CalendarToday as CalendarIcon,
   Person as PersonIcon,
-  Group as GroupIcon,
-  Description as DocumentIcon,
-  Upload as UploadIcon,
-  MoreVert as MoreVertIcon,
-  Delete as DeleteIcon,
-  Download as DownloadIcon,
-  Folder as FolderIcon,
+  PersonOutline as PersonOutlineIcon
 } from '@mui/icons-material';
 import { useFirestore } from '@/contexts/FirestoreContext';
-import { DraggableOrgChart } from './DraggableOrgChart';
-import type { Department, Employee, Document } from '@/types/models';
+import type { Department, Employee } from '@/types/models';
+import { getFirestore, collection, query, where, getDocs, doc, getDoc, updateDoc, deleteDoc, onSnapshot, writeBatch } from 'firebase/firestore';
+import { db } from '@/config/firebase';
+import { useSnackbar } from '@/contexts/SnackbarContext';
+import { DepartmentDocuments } from './DepartmentDocuments';
 
-export default function DepartmentDetailsPage() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const { 
-    departments, 
-    employees, 
-    documents,
-    updateDepartment, 
-    updateEmployee, 
-    addDepartment, 
-    deleteDepartment,
-    addDocument,
-    deleteDocument 
-  } = useFirestore();
-  const [tabValue, setTabValue] = useState('overview');
-  const [openEditDialog, setOpenEditDialog] = useState(false);
-  const [openAddEmployeeDialog, setOpenAddEmployeeDialog] = useState(false);
-  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+interface DepartmentStats {
+  totalMembers: number;
+  performanceScore: number;
+}
 
-  const department = departments.find(d => d.id === id);
-  const departmentEmployees = employees.filter(e => e.departmentId === id);
-  const departmentDocuments = documents.filter(d => d.departmentId === id);
+interface EditDialogProps {
+  open: boolean;
+  onClose: () => void;
+  field: string;
+  value: any;
+  onSave: (value: any) => void;
+  title: string;
+}
 
-  const manager = employees.find(e => e.id === department?.managerId);
-  const deputyManager = employees.find(e => e.id === department?.deputyManagerId);
+const EditDialog: React.FC<EditDialogProps> = ({
+  open,
+  onClose,
+  field,
+  value,
+  onSave,
+  title,
+}) => {
+  const [inputValue, setInputValue] = useState('');
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(false);
+  const { id } = useParams();
 
-  const handleDocumentMenuOpen = (event: React.MouseEvent<HTMLElement>, document: Document) => {
-    setSelectedDocument(document);
-    setAnchorEl(event.currentTarget);
-  };
+  useEffect(() => {
+    if (field === 'head' || field === 'deputy') {
+      setSelectedEmployee(value);
+    } else {
+      setInputValue(value || '');
+    }
+  }, [field, value]);
 
-  const handleDocumentMenuClose = () => {
-    setAnchorEl(null);
-    setSelectedDocument(null);
-  };
-
-  const handleDocumentDelete = async () => {
-    if (selectedDocument) {
+  useEffect(() => {
+    const fetchEmployees = async () => {
+      if (field !== 'head' && field !== 'deputy') return;
+      
+      setLoading(true);
       try {
-        await deleteDocument(selectedDocument.id);
-        handleDocumentMenuClose();
+        const employeesRef = collection(db, 'employees');
+        // Query only employees from current department
+        const q = query(employeesRef, where('departmentId', '==', id));
+        const employeesSnap = await getDocs(q);
+        const employeesList = employeesSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as Employee));
+
+        // Sort employees by name
+        employeesList.sort((a, b) => {
+          const nameA = `${a.firstName} ${a.lastName}`.toLowerCase();
+          const nameB = `${b.firstName} ${b.lastName}`.toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+
+        setEmployees(employeesList);
       } catch (error) {
-        console.error('Error deleting document:', error);
+        console.error('Error fetching employees:', error);
       }
+      setLoading(false);
+    };
+
+    if (open && (field === 'head' || field === 'deputy')) {
+      fetchEmployees();
+    }
+  }, [open, field, id]);
+
+  const handleSave = (e: FormEvent) => {
+    e.preventDefault();
+    if (field === 'head' || field === 'deputy') {
+      onSave(selectedEmployee);
+    } else {
+      onSave(inputValue);
     }
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !department) return;
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <form onSubmit={handleSave}>
+        <DialogTitle>{title}</DialogTitle>
+        <DialogContent>
+          {field === 'head' || field === 'deputy' ? (
+            <>
+              <DialogContentText sx={{ mb: 2 }}>
+                Select a member from the current department to assign as {field === 'head' ? 'Department Head' : 'Deputy Head'}.
+              </DialogContentText>
+              <FormControl fullWidth>
+                <InputLabel id="employee-select-label">Select Employee</InputLabel>
+                <Select
+                  labelId="employee-select-label"
+                  value={selectedEmployee?.id || ''}
+                  onChange={(e) => {
+                    const employee = employees.find(emp => emp.id === e.target.value);
+                    setSelectedEmployee(employee || null);
+                  }}
+                  label="Select Employee"
+                >
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {loading ? (
+                    <MenuItem disabled>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <CircularProgress size={20} />
+                        Loading employees...
+                      </Box>
+                    </MenuItem>
+                  ) : employees.length === 0 ? (
+                    <MenuItem disabled>
+                      <em>No department members available</em>
+                    </MenuItem>
+                  ) : (
+                    employees.map((employee) => (
+                      <MenuItem 
+                        key={employee.id} 
+                        value={employee.id}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1
+                        }}
+                      >
+                        <Avatar 
+                          sx={{ 
+                            width: 24, 
+                            height: 24,
+                            bgcolor: 'primary.main',
+                            fontSize: '0.875rem'
+                          }}
+                        >
+                          {employee.firstName?.[0]}
+                        </Avatar>
+                        <Box>
+                          <Typography>
+                            {employee.firstName} {employee.lastName}
+                          </Typography>
+                          {employee.position && (
+                            <Typography variant="caption" color="text.secondary">
+                              {employee.position}
+                            </Typography>
+                          )}
+                        </Box>
+                      </MenuItem>
+                    ))
+                  )}
+                </Select>
+              </FormControl>
+            </>
+          ) : (
+            <TextField
+              fullWidth
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              margin="dense"
+              variant="outlined"
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button 
+            type="submit" 
+            variant="contained" 
+            color="primary"
+            disabled={field === 'head' || field === 'deputy' ? !selectedEmployee : !inputValue.trim()}
+          >
+            Save
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  );
+};
+
+interface TransferDialogProps {
+  open: boolean;
+  onClose: () => void;
+  employee: Employee;
+  onConfirm: () => void;
+}
+
+const TransferDialog: React.FC<TransferDialogProps> = ({ open, onClose, employee, onConfirm }) => {
+  return (
+    <Dialog open={open} onClose={onClose}>
+      <DialogTitle>Transfer Employee</DialogTitle>
+      <DialogContent>
+        <Box>
+          <Typography>
+            {employee.firstName} {employee.lastName} is currently assigned to another department. 
+            Would you like to transfer them to this department?
+          </Typography>
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onConfirm} variant="contained" color="primary">
+          Transfer
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+interface AddMembersDialogProps {
+  open: boolean;
+  onClose: () => void;
+  departmentId: string;
+  currentMembers: Employee[];
+}
+
+const AddMembersDialog: React.FC<AddMembersDialogProps> = ({ open, onClose, departmentId, currentMembers }) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [showTransferDialog, setShowTransferDialog] = useState(false);
+  const { showSnackbar } = useSnackbar();
+
+  useEffect(() => {
+    const fetchEmployees = async () => {
+      try {
+        const employeesRef = collection(db, 'employees');
+        const employeesSnap = await getDocs(employeesRef);
+        const allEmployees = employeesSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as Employee));
+        
+        // Filter out current members
+        const availableEmployees = allEmployees.filter(
+          emp => !currentMembers.some(member => member.id === emp.id)
+        );
+        
+        setEmployees(availableEmployees);
+        setLoading(false);
+      } catch (error) {
+        console.error('Error fetching employees:', error);
+        showSnackbar('Failed to load employees', 'error');
+        setLoading(false);
+      }
+    };
+
+    if (open) {
+      fetchEmployees();
+    }
+  }, [open, currentMembers]);
+
+  const handleEmployeeSelect = async (employee: Employee) => {
+    setSelectedEmployee(employee);
+    if (employee.departmentId) {
+      setShowTransferDialog(true);
+    } else {
+      await handleAddMember(employee);
+    }
+  };
+
+  const handleAddMember = async (employee: Employee) => {
+    try {
+      const batch = writeBatch(db);
+
+      // If employee is a head of another department, clean up old department
+      if (employee.departmentId) {
+        const oldDeptRef = doc(db, 'departments', employee.departmentId);
+        const oldDeptSnap = await getDoc(oldDeptRef);
+        
+        if (oldDeptSnap.exists()) {
+          const oldDeptData = oldDeptSnap.data();
+          // Clean up department head/deputy references
+          if (oldDeptData.headId === employee.id) {
+            batch.update(oldDeptRef, {
+              headId: null,
+              head: null,
+              updatedAt: new Date().toISOString()
+            });
+            // Update employee position
+            batch.update(doc(db, 'employees', employee.id), {
+              position: employee.position === 'Department Head' ? null : employee.position,
+              departmentId,
+              updatedAt: new Date().toISOString()
+            });
+          } else if (oldDeptData.deputyId === employee.id) {
+            batch.update(oldDeptRef, {
+              deputyId: null,
+              deputy: null,
+              updatedAt: new Date().toISOString()
+            });
+            // Update employee position
+            batch.update(doc(db, 'employees', employee.id), {
+              position: employee.position === 'Deputy Head' ? null : employee.position,
+              departmentId,
+              updatedAt: new Date().toISOString()
+            });
+          } else {
+            // Regular member transfer
+            batch.update(doc(db, 'employees', employee.id), {
+              departmentId,
+              updatedAt: new Date().toISOString()
+            });
+          }
+        }
+      } else {
+        // New member addition
+        batch.update(doc(db, 'employees', employee.id), {
+          departmentId,
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      await batch.commit();
+      showSnackbar('Employee added successfully', 'success');
+      onClose();
+    } catch (error) {
+      console.error('Error adding employee:', error);
+      showSnackbar('Failed to add employee', 'error');
+    }
+  };
+
+  const handleTransferConfirm = async () => {
+    if (selectedEmployee) {
+      await handleAddMember(selectedEmployee);
+      setShowTransferDialog(false);
+    }
+  };
+
+  const filteredEmployees = employees.filter(emp => {
+    const searchTerm = searchQuery.toLowerCase();
+    const fullName = `${emp.firstName} ${emp.lastName}`.toLowerCase();
+    const position = (emp.position || '').toLowerCase();
+    return fullName.includes(searchTerm) || position.includes(searchTerm);
+  });
+
+  return (
+    <>
+      <Dialog 
+        open={open} 
+        onClose={onClose}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Add Department Members</DialogTitle>
+        <DialogContent>
+          <TextField
+            fullWidth
+            variant="outlined"
+            placeholder="Search employees..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            sx={{ mb: 2, mt: 1 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon />
+                </InputAdornment>
+              ),
+            }}
+          />
+          
+          {loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : filteredEmployees.length === 0 ? (
+            <Typography color="text.secondary" align="center" py={3}>
+              No employees available
+            </Typography>
+          ) : (
+            <List sx={{ maxHeight: 400, overflow: 'auto' }}>
+              {filteredEmployees.map((employee) => (
+                <ListItemButton
+                  key={employee.id}
+                  onClick={() => handleEmployeeSelect(employee)}
+                  sx={{
+                    borderRadius: 1,
+                    mb: 1,
+                    '&:hover': {
+                      bgcolor: 'action.hover',
+                    },
+                  }}
+                >
+                  <ListItemIcon>
+                    <Avatar sx={{ bgcolor: employee.departmentId ? 'warning.light' : 'primary.light' }}>
+                      {employee.firstName?.[0] || 'U'}
+                    </Avatar>
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={`${employee.firstName} ${employee.lastName}`}
+                    secondary={
+                      <Box component="span">
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Typography variant="body2" color="text.secondary">
+                            {employee.position || 'No Position'}
+                          </Typography>
+                          {employee.departmentId && (
+                            <Tooltip title="Currently in another department">
+                              <Box
+                                sx={{
+                                  bgcolor: 'warning.light',
+                                  color: 'warning.dark',
+                                  px: 1,
+                                  py: 0.5,
+                                  borderRadius: 1,
+                                  fontSize: '0.75rem',
+                                }}
+                              >
+                                Transfer Required
+                              </Box>
+                            </Tooltip>
+                          )}
+                        </Stack>
+                      </Box>
+                    }
+                  />
+                </ListItemButton>
+              ))}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={onClose}>Cancel</Button>
+        </DialogActions>
+      </Dialog>
+
+      {selectedEmployee && (
+        <TransferDialog
+          open={showTransferDialog}
+          onClose={() => setShowTransferDialog(false)}
+          employee={selectedEmployee}
+          onConfirm={handleTransferConfirm}
+        />
+      )}
+    </>
+  );
+};
+
+const DepartmentDetailsPage = () => {
+  const navigate = useNavigate();
+  const { id } = useParams();
+  const { showSnackbar } = useSnackbar();
+  
+  const [department, setDepartment] = useState<Department | null>(null);
+  const [departmentEmployees, setDepartmentEmployees] = useState<Employee[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredEmployees, setFilteredEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [departmentStats, setDepartmentStats] = useState<DepartmentStats>({
+    totalMembers: 0,
+    performanceScore: 85
+  });
+
+  // Edit dialog state
+  const [editDialog, setEditDialog] = useState({
+    open: false,
+    field: '',
+    value: null,
+    title: ''
+  });
+
+  // Add members dialog state
+  const [addMembersDialogOpen, setAddMembersDialogOpen] = useState(false);
+
+  // Helper function to format date
+  const formatDate = (dateString: string) => {
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch {
+      return 'Invalid Date';
+    }
+  };
+
+  const handleEditClick = (field: string, currentValue: any, title: string) => {
+    setEditDialog({
+      open: true,
+      field,
+      value: currentValue,
+      title
+    });
+  };
+
+  const handleSaveField = async (field: string, value: any) => {
+    if (!id) return;
 
     try {
-      const newDoc = {
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        departmentId: department.id,
-        uploadedBy: 'Current User', // Replace with actual user
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+      const batch = writeBatch(db);
+      const departmentRef = doc(db, 'departments', id);
+      const updateData: any = {
+        updatedAt: new Date().toISOString()
       };
-      await addDocument(newDoc);
+
+      // Handle leadership position assignments
+      if (field === 'head' || field === 'deputy') {
+        const isHead = field === 'head';
+        const employeeId = value?.id;
+        
+        if (employeeId) {
+          // Clean up old position if exists
+          if (isHead && department.headId && department.headId !== employeeId) {
+            const oldHeadRef = doc(db, 'employees', department.headId);
+            batch.update(oldHeadRef, {
+              position: null,
+              updatedAt: new Date().toISOString()
+            });
+          } else if (!isHead && department.deputyId && department.deputyId !== employeeId) {
+            const oldDeputyRef = doc(db, 'employees', department.deputyId);
+            batch.update(oldDeputyRef, {
+              position: null,
+              updatedAt: new Date().toISOString()
+            });
+          }
+
+          // Check if employee is head/deputy in another department
+          const employeeRef = doc(db, 'employees', employeeId);
+          const employeeSnap = await getDoc(employeeRef);
+          
+          if (employeeSnap.exists()) {
+            const employeeData = employeeSnap.data();
+            if (employeeData.departmentId && employeeData.departmentId !== id) {
+              // Clean up old department references
+              const oldDeptRef = doc(db, 'departments', employeeData.departmentId);
+              const oldDeptSnap = await getDoc(oldDeptRef);
+              
+              if (oldDeptSnap.exists()) {
+                const oldDeptData = oldDeptSnap.data();
+                if (oldDeptData.headId === employeeId) {
+                  batch.update(oldDeptRef, {
+                    headId: null,
+                    head: null,
+                    updatedAt: new Date().toISOString()
+                  });
+                } else if (oldDeptData.deputyId === employeeId) {
+                  batch.update(oldDeptRef, {
+                    deputyId: null,
+                    deputy: null,
+                    updatedAt: new Date().toISOString()
+                  });
+                }
+              }
+            }
+
+            // Update employee
+            batch.update(employeeRef, {
+              position: isHead ? 'Department Head' : 'Deputy Head',
+              departmentId: id,
+              updatedAt: new Date().toISOString()
+            });
+          }
+
+          // Update department
+          updateData[`${field}Id`] = employeeId;
+          updateData[field] = value;
+        } else {
+          // Removing head/deputy
+          if (isHead && department.headId) {
+            const oldHeadRef = doc(db, 'employees', department.headId);
+            batch.update(oldHeadRef, {
+              position: null,
+              updatedAt: new Date().toISOString()
+            });
+          } else if (!isHead && department.deputyId) {
+            const oldDeputyRef = doc(db, 'employees', department.deputyId);
+            batch.update(oldDeputyRef, {
+              position: null,
+              updatedAt: new Date().toISOString()
+            });
+          }
+
+          updateData[`${field}Id`] = null;
+          updateData[field] = null;
+        }
+      } else {
+        // Handle other fields
+        updateData[field] = value;
+      }
+
+      batch.update(departmentRef, updateData);
+      await batch.commit();
+      
+      showSnackbar('Department updated successfully', 'success');
+      setEditDialog({ open: false, field: '', value: null, title: '' });
     } catch (error) {
-      console.error('Error uploading document:', error);
+      console.error('Error updating department:', error);
+      showSnackbar('Failed to update department', 'error');
     }
   };
 
-  if (!department) {
+  useEffect(() => {
+    if (!id) return;
+
+    const unsubscribeDepartment = onSnapshot(
+      doc(db, 'departments', id),
+      async (docSnap) => {
+        if (docSnap.exists()) {
+          const departmentData = docSnap.data();
+          
+          // Fetch head details if exists
+          let headData = null;
+          if (departmentData.headId) {
+            const headSnap = await getDoc(doc(db, 'employees', departmentData.headId));
+            if (headSnap.exists()) {
+              headData = { id: headSnap.id, ...headSnap.data() };
+            }
+          }
+
+          // Fetch deputy details if exists
+          let deputyData = null;
+          if (departmentData.deputyId) {
+            const deputySnap = await getDoc(doc(db, 'employees', departmentData.deputyId));
+            if (deputySnap.exists()) {
+              deputyData = { id: deputySnap.id, ...deputySnap.data() };
+            }
+          }
+
+          setDepartment({
+            id: docSnap.id,
+            ...departmentData,
+            head: headData,
+            deputy: deputyData
+          });
+        }
+      }
+    );
+
+    // Fetch department employees
+    const unsubscribeEmployees = onSnapshot(
+      query(collection(db, 'employees'), where('departmentId', '==', id)),
+      (querySnapshot) => {
+        const employees = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Employee[];
+        setDepartmentEmployees(employees);
+      }
+    );
+
+    return () => {
+      unsubscribeDepartment();
+      unsubscribeEmployees();
+    };
+  }, [id]);
+
+  const getReportingManager = (employee: Employee) => {
+    if (!department) return 'No Department Head';
+    
+    if (department.headId === employee.id) {
+      return 'Department Head';
+    }
+    
+    if (department.head) {
+      return `${department.head.firstName} ${department.head.lastName}`;
+    }
+    
+    return 'No Department Head';
+  };
+
+  const renderEmployeeList = () => {
+    return departmentEmployees.map((employee) => (
+      <ListItem
+        key={employee.id}
+        sx={{
+          borderRadius: 1,
+          mb: 1,
+          bgcolor: 'background.paper',
+          '&:hover': { bgcolor: 'action.hover' }
+        }}
+      >
+        <ListItemIcon>
+          <Avatar sx={{ bgcolor: employee.id === department?.headId ? 'primary.main' : 'grey.400' }}>
+            {employee.firstName?.[0] || 'U'}
+          </Avatar>
+        </ListItemIcon>
+        <ListItemText
+          primary={
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography>{employee.firstName} {employee.lastName}</Typography>
+              {employee.id === department?.headId && (
+                <Chip
+                  size="small"
+                  label="Department Head"
+                  color="primary"
+                  sx={{ height: 20 }}
+                />
+              )}
+              {employee.id === department?.deputyId && (
+                <Chip
+                  size="small"
+                  label="Deputy Head"
+                  color="success"
+                  sx={{ height: 20 }}
+                />
+              )}
+            </Box>
+          }
+          secondary={
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography variant="body2" color="text.secondary">
+                {employee.position || 'No Position'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                •
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Reports to: {getReportingManager(employee)}
+              </Typography>
+            </Stack>
+          }
+        />
+        <IconButton
+          size="small"
+          onClick={() => handleRemoveMember(employee.id)}
+          sx={{ color: 'error.main' }}
+        >
+          <DeleteIcon />
+        </IconButton>
+      </ListItem>
+    ));
+  };
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Get department data
+      const departmentRef = doc(db, 'departments', id!);
+      const departmentSnap = await getDoc(departmentRef);
+      
+      if (!departmentSnap.exists()) {
+        throw new Error('Department not found');
+      }
+      
+      const deptData = { id: departmentSnap.id, ...departmentSnap.data() } as Department;
+      setDepartment(deptData);
+      
+      // Get all employees in a single query
+      const employeesRef = collection(db, 'employees');
+      const q = query(employeesRef, where("departmentId", "==", deptData.id));
+      const employeesSnap = await getDocs(q);
+      
+      const deptEmployees = employeesSnap.docs.map(doc => ({
+        id: doc.id,
+        firstName: doc.data().firstName || '',
+        lastName: doc.data().lastName || '',
+        position: doc.data().position || 'No Position',
+        departmentId: doc.data().departmentId || null,
+        ...doc.data()
+      }));
+      
+      setDepartmentEmployees(deptEmployees);
+      setFilteredEmployees(deptEmployees);
+
+      // Update department stats
+      const stats = {
+        totalMembers: deptEmployees.length,
+        performanceScore: deptData.performanceScore || 85
+      };
+      setDepartmentStats(stats);
+
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching department data:', error);
+      setError('Failed to load department data');
+      setLoading(false);
+    }
+  };
+
+  const filterEmployees = (searchTerm: string) => {
+    if (departmentEmployees) {
+      const filtered = departmentEmployees.filter(emp => {
+        const term = searchTerm.toLowerCase();
+        const employeeName = getEmployeeDisplayName(emp).toLowerCase();
+        const position = (emp.position || '').toLowerCase();
+        return employeeName.includes(term) || position.includes(term);
+      });
+      setFilteredEmployees(filtered);
+    }
+  };
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newSearchQuery = e.target.value;
+    setSearchQuery(newSearchQuery);
+    filterEmployees(newSearchQuery);
+  };
+
+  const handleAddMember = async (employeeId: string) => {
+    try {
+      const batch = writeBatch(db);
+      const employeeRef = doc(db, 'employees', employeeId);
+      const employeeSnap = await getDoc(employeeRef);
+      
+      if (!employeeSnap.exists()) {
+        throw new Error('Employee not found');
+      }
+
+      const employeeData = employeeSnap.data();
+      const departmentRef = doc(db, 'departments', id!);
+      const departmentSnap = await getDoc(departmentRef);
+
+      if (departmentSnap.exists()) {
+        const deptData = departmentSnap.data();
+        
+        // If employee is head or deputy, clean up department references
+        if (deptData.headId === employeeId) {
+          batch.update(departmentRef, {
+            headId: null,
+            head: null,
+            updatedAt: new Date().toISOString()
+          });
+          // Update employee position
+          batch.update(employeeRef, {
+            departmentId: null,
+            position: null, // Clear position if they were Department Head
+            updatedAt: new Date().toISOString()
+          });
+        } else if (deptData.deputyId === employeeId) {
+          batch.update(departmentRef, {
+            deputyId: null,
+            deputy: null,
+            updatedAt: new Date().toISOString()
+          });
+          // Update employee position
+          batch.update(employeeRef, {
+            departmentId: null,
+            position: null, // Clear position if they were Deputy Head
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          // Regular member removal
+          batch.update(employeeRef, {
+            departmentId: null,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      }
+
+      await batch.commit();
+      showSnackbar('Employee removed successfully', 'success');
+    } catch (error) {
+      console.error('Error removing employee:', error);
+      showSnackbar('Failed to remove employee', 'error');
+    }
+  };
+
+  const handleRemoveMember = async (employeeId: string) => {
+    try {
+      const batch = writeBatch(db);
+      const employeeRef = doc(db, 'employees', employeeId);
+      const employeeSnap = await getDoc(employeeRef);
+      
+      if (!employeeSnap.exists()) {
+        throw new Error('Employee not found');
+      }
+
+      const employeeData = employeeSnap.data();
+      const departmentRef = doc(db, 'departments', id!);
+      const departmentSnap = await getDoc(departmentRef);
+
+      if (departmentSnap.exists()) {
+        const deptData = departmentSnap.data();
+        
+        // If employee is head or deputy, clean up department references
+        if (deptData.headId === employeeId) {
+          batch.update(departmentRef, {
+            headId: null,
+            head: null,
+            updatedAt: new Date().toISOString()
+          });
+          // Update employee position
+          batch.update(employeeRef, {
+            departmentId: null,
+            position: null, // Clear position if they were Department Head
+            updatedAt: new Date().toISOString()
+          });
+        } else if (deptData.deputyId === employeeId) {
+          batch.update(departmentRef, {
+            deputyId: null,
+            deputy: null,
+            updatedAt: new Date().toISOString()
+          });
+          // Update employee position
+          batch.update(employeeRef, {
+            departmentId: null,
+            position: null, // Clear position if they were Deputy Head
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          // Regular member removal
+          batch.update(employeeRef, {
+            departmentId: null,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      }
+
+      await batch.commit();
+      showSnackbar('Employee removed successfully', 'success');
+    } catch (error) {
+      console.error('Error removing employee:', error);
+      showSnackbar('Failed to remove employee', 'error');
+    }
+  };
+
+  const handleAddMembersClick = () => {
+    setAddMembersDialogOpen(true);
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [id]);
+
+  const getEmployeeDisplayName = (employee: Employee) => {
+    if (employee.firstName && employee.lastName) {
+      return `${employee.firstName} ${employee.lastName}`;
+    } else if (employee.firstName) {
+      return employee.firstName;
+    } else if (employee.lastName) {
+      return employee.lastName;
+    }
+    return 'Unnamed Employee';
+  };
+
+  if (loading) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Stack spacing={2}>
-          <Stack direction="row" spacing={2} alignItems="center">
-            <IconButton onClick={() => navigate('/departments')}>
-              <ArrowBackIcon />
-            </IconButton>
-            <Typography variant="h5">Department not found</Typography>
-          </Stack>
-          <Typography color="text.secondary">
-            The department you're looking for doesn't exist or has been deleted.
-          </Typography>
-          <Button
-            variant="contained"
-            onClick={() => navigate('/departments')}
-            startIcon={<ArrowBackIcon />}
-          >
-            Back to Departments
-          </Button>
-        </Stack>
+      <Box sx={{ p: 3, display: 'flex', justifyContent: 'center' }}>
+        <CircularProgress />
       </Box>
     );
   }
 
+  if (error) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error">{error}</Alert>
+      </Box>
+    );
+  }
+
+  if (!department) {
+    return null;
+  }
+
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
-      <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
-        <Stack direction="row" alignItems="center" spacing={2}>
-          <IconButton onClick={() => navigate('/departments')}>
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Stack spacing={4}>
+        {/* Header Section */}
+        <Stack direction="row" alignItems="center" spacing={2} mb={4}>
+          <IconButton 
+            onClick={() => navigate('/departments')} 
+            size="small"
+            sx={{ 
+              bgcolor: 'white',
+              '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.04)' }
+            }}
+          >
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h5" sx={{ flexGrow: 1 }}>
-            {department.name}
+          <Typography variant="h4" component="h1" fontWeight="500">
+            {department?.name || 'Loading...'}
           </Typography>
-          <Button
-            startIcon={<EditIcon />}
-            onClick={() => setOpenEditDialog(true)}
-            variant="outlined"
-            size="small"
-          >
-            Edit
-          </Button>
         </Stack>
-      </Box>
 
-      {/* Main Content */}
-      <Box sx={{ flexGrow: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {/* Upper Section - Department Info and Documents */}
-        <Box sx={{ display: 'flex', flexGrow: 1, minHeight: 0 }}>
-          {/* Left Panel - Department Info */}
-          <Box sx={{ width: '70%', p: 2, overflow: 'auto' }}>
-            {!manager && (
-              <Alert severity="warning" sx={{ mb: 2 }}>
-                This department has no assigned head. Please assign a department head.
-              </Alert>
-            )}
-
-            <Grid container spacing={3}>
-              {/* Department Overview Card */}
-              <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
+        {/* Department Info Section */}
+        <Paper 
+          elevation={0} 
+          sx={{ 
+            p: 3, 
+            mb: 4, 
+            bgcolor: 'white',
+            borderRadius: 2,
+            border: '1px solid',
+            borderColor: 'divider'
+          }}
+        >
+          <Grid container spacing={4}>
+            <Grid item xs={12} md={6}>
+              <Stack spacing={3}>
+                <Box>
+                  <Stack 
+                    direction="row" 
+                    spacing={2} 
+                    alignItems="center" 
+                    sx={{ 
+                      mb: 3,
+                      pb: 2,
+                      borderBottom: '1px solid',
+                      borderColor: 'divider'
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        bgcolor: '#E3F2FD',
+                        borderRadius: 1,
+                        p: 1,
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <DescriptionIcon sx={{ color: '#1976D2' }} />
+                    </Box>
+                    <Typography variant="h6" color="primary" fontWeight="500">
                       Department Information
                     </Typography>
-                    <Typography color="text.secondary" paragraph>
-                      {department.description || 'No description available'}
-                    </Typography>
-                    <Grid container spacing={3}>
-                      <Grid item xs={12} md={6}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Department Head
-                        </Typography>
-                        <Autocomplete
-                          value={manager || null}
-                          onChange={(_, newValue) => {
-                            if (department) {
-                              updateDepartment(department.id, {
-                                ...department,
-                                managerId: newValue?.id || null,
-                                updatedAt: new Date().toISOString()
-                              });
-                            }
-                          }}
-                          options={departmentEmployees}
-                          getOptionLabel={(option) => option.name}
-                          renderInput={(params) => (
-                            <TextField {...params} placeholder="Select department head" />
-                          )}
-                          renderOption={(props, option) => (
-                            <Box component="li" {...props}>
-                              <Stack direction="row" alignItems="center" spacing={1}>
-                                <Avatar sx={{ width: 24, height: 24 }}>
-                                  <PersonIcon />
-                                </Avatar>
-                                <Typography>{option.name}</Typography>
-                              </Stack>
-                            </Box>
-                          )}
-                        />
-                      </Grid>
-                      <Grid item xs={12} md={6}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          Deputy Manager
-                        </Typography>
-                        <Autocomplete
-                          value={deputyManager || null}
-                          onChange={(_, newValue) => {
-                            if (department) {
-                              updateDepartment(department.id, {
-                                ...department,
-                                deputyManagerId: newValue?.id || null,
-                                updatedAt: new Date().toISOString()
-                              });
-                            }
-                          }}
-                          options={departmentEmployees.filter(e => e.id !== department.managerId)}
-                          getOptionLabel={(option) => option.name}
-                          renderInput={(params) => (
-                            <TextField {...params} placeholder="Select deputy manager" />
-                          )}
-                          renderOption={(props, option) => (
-                            <Box component="li" {...props}>
-                              <Stack direction="row" alignItems="center" spacing={1}>
-                                <Avatar sx={{ width: 24, height: 24 }}>
-                                  <PersonIcon />
-                                </Avatar>
-                                <Typography>{option.name}</Typography>
-                              </Stack>
-                            </Box>
-                          )}
-                        />
-                      </Grid>
-                    </Grid>
-                  </CardContent>
-                </Card>
-              </Grid>
-
-              {/* Team Members Grid */}
-              <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                      <Typography variant="h6">Team Members</Typography>
-                      <Button
-                        startIcon={<AddIcon />}
-                        onClick={() => setOpenAddEmployeeDialog(true)}
-                        variant="outlined"
-                        size="small"
+                  </Stack>
+                </Box>
+                
+                <Box>
+                  <Stack spacing={2}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Typography variant="subtitle2" color="text.secondary">Description</Typography>
+                      <IconButton 
+                        size="small" 
+                        onClick={() => handleEditClick('description', department?.description || '', 'Description')}
+                        sx={{ 
+                          bgcolor: '#F5F5F5',
+                          '&:hover': { bgcolor: '#E0E0E0' }
+                        }}
                       >
-                        Add Member
-                      </Button>
-                    </Stack>
-                    <Grid container spacing={2}>
-                      {departmentEmployees.map((employee) => (
-                        <Grid item xs={12} sm={6} md={4} key={employee.id}>
-                          <Paper sx={{ p: 2 }}>
-                            <Stack direction="row" spacing={2} alignItems="center">
-                              <Avatar>
-                                <PersonIcon />
-                              </Avatar>
-                              <Box sx={{ flexGrow: 1 }}>
-                                <Typography variant="subtitle2">{employee.name}</Typography>
-                                <Typography variant="body2" color="text.secondary">
-                                  {employee.position || 'No position'}
-                                </Typography>
-                              </Box>
-                            </Stack>
-                          </Paper>
-                        </Grid>
-                      ))}
-                    </Grid>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-          </Box>
-
-          {/* Right Panel - Documents */}
-          <Box sx={{ width: '30%', borderLeft: 1, borderColor: 'divider', p: 2, bgcolor: 'grey.50', overflow: 'auto' }}>
-            <Stack spacing={2}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="h6">Department Documents</Typography>
-                <Button
-                  component="label"
-                  startIcon={<UploadIcon />}
-                  size="small"
-                >
-                  Upload
-                  <input
-                    type="file"
-                    hidden
-                    onChange={handleFileUpload}
-                  />
-                </Button>
-              </Stack>
-              <List>
-                {departmentDocuments.map((doc) => (
-                  <ListItem
-                    key={doc.id}
-                    secondaryAction={
-                      <IconButton
-                        edge="end"
-                        onClick={(event) => handleDocumentMenuOpen(event, doc)}
-                      >
-                        <MoreVertIcon />
+                        <EditIcon fontSize="small" />
                       </IconButton>
-                    }
+                    </Stack>
+                    <Typography sx={{ color: '#424242' }}>
+                      {department?.description || 'No description available'}
+                    </Typography>
+                  </Stack>
+                </Box>
+
+                <Box>
+                  <Stack spacing={2}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Typography variant="subtitle2" color="text.secondary">Location</Typography>
+                      <IconButton 
+                        size="small" 
+                        onClick={() => handleEditClick('location', department?.location || '', 'Location')}
+                        sx={{ 
+                          bgcolor: '#F5F5F5',
+                          '&:hover': { bgcolor: '#E0E0E0' }
+                        }}
+                      >
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                    <Typography sx={{ 
+                      display: 'flex', 
+                      alignItems: 'center',
+                      color: '#424242'
+                    }}>
+                      <LocationIcon sx={{ mr: 1, color: '#757575' }} />
+                      {department?.location || 'Not specified'}
+                    </Typography>
+                  </Stack>
+                </Box>
+
+                <Box>
+                  <Stack spacing={2}>
+                    <Typography variant="subtitle2" color="text.secondary">Created</Typography>
+                    <Typography sx={{ 
+                      display: 'flex', 
+                      alignItems: 'center',
+                      color: '#424242'
+                    }}>
+                      <CalendarIcon sx={{ mr: 1, color: '#757575' }} />
+                      {department?.createdAt ? formatDate(department.createdAt) : 'Not available'}
+                    </Typography>
+                  </Stack>
+                </Box>
+              </Stack>
+            </Grid>
+
+            <Grid item xs={12} md={6}>
+              <Stack spacing={3}>
+                <Stack 
+                  direction="row" 
+                  spacing={2} 
+                  alignItems="center" 
+                  sx={{ 
+                    mb: 2,
+                    pb: 2,
+                    borderBottom: '1px solid',
+                    borderColor: 'divider'
+                  }}
+                >
+                  <Box
+                    sx={{
+                      bgcolor: '#E8F5E9',
+                      borderRadius: 1,
+                      p: 1,
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
                   >
-                    <ListItemIcon>
-                      <DocumentIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={doc.name}
-                      secondary={new Date(doc.createdAt).toLocaleDateString()}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </Stack>
-          </Box>
-        </Box>
+                    <AssessmentIcon sx={{ color: '#2E7D32' }} />
+                  </Box>
+                  <Typography variant="h6" color="success.main" fontWeight="500">
+                    Department Statistics
+                  </Typography>
+                </Stack>
 
-        {/* Bottom Panel - Organization Chart */}
-        <Box sx={{ 
-          height: '300px', 
-          borderTop: 1, 
-          borderColor: 'divider',
-          p: 2,
-          bgcolor: 'background.default'
-        }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-            <Typography variant="h6">Organization Chart</Typography>
-            <Button
-              startIcon={<AddIcon />}
-              variant="outlined"
-              size="small"
-              onClick={() => {
-                // Handle adding sub-department
-              }}
-            >
-              Add Sub-department
-            </Button>
-          </Stack>
-          <Box sx={{ height: 'calc(100% - 48px)' }}>
-            <DraggableOrgChart
-              department={department}
-              subDepartments={departments.filter(d => d.parentDepartmentId === department.id)}
-              employees={departmentEmployees}
-              onEmployeeMove={async (employeeId, newDepartmentId) => {
-                try {
-                  const employee = employees.find(e => e.id === employeeId);
-                  if (employee) {
-                    await updateEmployee(employee.id, {
-                      ...employee,
-                      departmentId: newDepartmentId,
-                      updatedAt: new Date().toISOString()
-                    });
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <Paper 
+                      elevation={0}
+                      sx={{ 
+                        p: { xs: 2, sm: 3 }, 
+                        textAlign: 'center', 
+                        bgcolor: '#E3F2FD',
+                        borderRadius: 2,
+                        transition: 'transform 0.2s',
+                        border: '1px solid',
+                        borderColor: 'primary.light',
+                        height: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        '&:hover': {
+                          transform: 'translateY(-4px)',
+                        }
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          width: { xs: 40, sm: 48 },
+                          height: { xs: 40, sm: 48 },
+                          borderRadius: '50%',
+                          bgcolor: '#1976D2',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mb: 2
+                        }}
+                      >
+                        <GroupIcon sx={{ color: 'white', fontSize: { xs: 24, sm: 28 } }} />
+                      </Box>
+                      <Typography 
+                        variant="h4" 
+                        color="primary.main" 
+                        gutterBottom 
+                        fontWeight="500"
+                        sx={{ fontSize: { xs: '1.75rem', sm: '2.125rem' } }}
+                      >
+                        {departmentStats.totalMembers}
+                      </Typography>
+                      <Typography 
+                        variant="body2" 
+                        color="text.secondary" 
+                        fontWeight="500"
+                        sx={{ whiteSpace: 'nowrap' }}
+                      >
+                        Total Members
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Paper 
+                      elevation={0}
+                      sx={{ 
+                        p: { xs: 2, sm: 3 }, 
+                        textAlign: 'center', 
+                        bgcolor: '#E8F5E9',
+                        borderRadius: 2,
+                        transition: 'transform 0.2s',
+                        border: '1px solid',
+                        borderColor: 'success.light',
+                        height: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        '&:hover': {
+                          transform: 'translateY(-4px)',
+                        }
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          width: { xs: 40, sm: 48 },
+                          height: { xs: 40, sm: 48 },
+                          borderRadius: '50%',
+                          bgcolor: '#2E7D32',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mb: 2
+                        }}
+                      >
+                        <AssessmentIcon sx={{ color: 'white', fontSize: { xs: 24, sm: 28 } }} />
+                      </Box>
+                      <Typography 
+                        variant="h4" 
+                        color="success.main" 
+                        gutterBottom 
+                        fontWeight="500"
+                        sx={{ fontSize: { xs: '1.75rem', sm: '2.125rem' } }}
+                      >
+                        {departmentStats.performanceScore}%
+                      </Typography>
+                      <Typography 
+                        variant="body2" 
+                        color="text.secondary" 
+                        fontWeight="500"
+                        sx={{ whiteSpace: 'nowrap' }}
+                      >
+                        Performance Score
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                </Grid>
+              </Stack>
+            </Grid>
+          </Grid>
+        </Paper>
+
+        {/* Leadership Section */}
+        <Paper elevation={2} sx={{ p: 3, mb: 4 }}>
+          <Typography variant="h6" color="primary" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+            <GroupIcon sx={{ mr: 1 }} /> Department Leadership
+          </Typography>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={6}>
+              <Paper 
+                variant="outlined" 
+                sx={{ 
+                  p: 2,
+                  transition: 'transform 0.2s, box-shadow 0.2s',
+                  '&:hover': {
+                    transform: 'translateY(-2px)',
+                    boxShadow: 2
                   }
-                } catch (error) {
-                  console.error('Error moving employee:', error);
-                }
-              }}
-              onCreateSubDepartment={async (name, description) => {
-                try {
-                  await addDepartment({
-                    name,
-                    description,
-                    parentDepartmentId: department.id,
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString()
-                  });
-                } catch (error) {
-                  console.error('Error creating sub-department:', error);
-                }
-              }}
-              onDeleteSubDepartment={async (subDepartmentId) => {
-                try {
-                  await deleteDepartment(subDepartmentId);
-                } catch (error) {
-                  console.error('Error deleting sub-department:', error);
-                }
-              }}
-            />
-          </Box>
-        </Box>
-      </Box>
+                }}
+              >
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Avatar sx={{ bgcolor: 'primary.main', width: 56, height: 56 }}>
+                    {department?.head?.firstName?.[0] || 'H'}
+                  </Avatar>
+                  <Box sx={{ flexGrow: 1 }}>
+                    <Typography variant="subtitle1" color="text.secondary">Department Head</Typography>
+                    <Typography variant="h6">
+                      {department?.head ? getEmployeeDisplayName(department.head) : 'Not Assigned'}
+                    </Typography>
+                  </Box>
+                  <IconButton 
+                    color="primary"
+                    onClick={() => handleEditClick('head', department?.head, 'Assign Department Head')}
+                  >
+                    <EditIcon />
+                  </IconButton>
+                </Stack>
+              </Paper>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Paper 
+                variant="outlined" 
+                sx={{ 
+                  p: 2,
+                  transition: 'transform 0.2s, box-shadow 0.2s',
+                  '&:hover': {
+                    transform: 'translateY(-2px)',
+                    boxShadow: 2
+                  }
+                }}
+              >
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Avatar sx={{ bgcolor: 'secondary.main', width: 56, height: 56 }}>
+                    {department?.deputy?.firstName?.[0] || 'D'}
+                  </Avatar>
+                  <Box sx={{ flexGrow: 1 }}>
+                    <Typography variant="subtitle1" color="text.secondary">Deputy Head</Typography>
+                    <Typography variant="h6">
+                      {department?.deputy ? getEmployeeDisplayName(department.deputy) : 'Not Assigned'}
+                    </Typography>
+                  </Box>
+                  <IconButton 
+                    color="primary"
+                    onClick={() => handleEditClick('deputy', department?.deputy, 'Assign Deputy Head')}
+                  >
+                    <EditIcon />
+                  </IconButton>
+                </Stack>
+              </Paper>
+            </Grid>
+          </Grid>
+        </Paper>
 
-      {/* Document Menu */}
-      <Menu
-        anchorEl={anchorEl}
-        open={Boolean(anchorEl)}
-        onClose={handleDocumentMenuClose}
-      >
-        <MenuItem onClick={handleDocumentMenuClose}>
-          <ListItemIcon>
-            <DownloadIcon fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>Download</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={handleDocumentDelete}>
-          <ListItemIcon>
-            <DeleteIcon fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>Delete</ListItemText>
-        </MenuItem>
-      </Menu>
-    </Box>
+        {/* Member Management Section */}
+        <Paper elevation={2} sx={{ p: 3 }}>
+          <Stack spacing={3}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="h6" color="primary" sx={{ display: 'flex', alignItems: 'center' }}>
+                <GroupIcon sx={{ mr: 1 }} /> Member Management
+              </Typography>
+              <Button
+                variant="contained"
+                startIcon={<PersonAddIcon />}
+                onClick={handleAddMembersClick}
+                size="small"
+              >
+                Add Members
+              </Button>
+            </Box>
+            
+            <TextField
+              fullWidth
+              variant="outlined"
+              placeholder="Search members..."
+              value={searchQuery}
+              onChange={handleSearchChange}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon />
+                  </InputAdornment>
+                ),
+              }}
+              size="small"
+            />
+
+            {filteredEmployees.length === 0 ? (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <Typography color="text.secondary">
+                  {searchQuery ? 'No matching members found' : 'No members in this department'}
+                </Typography>
+              </Box>
+            ) : (
+              <List>
+                {renderEmployeeList()}
+              </List>
+            )}
+          </Stack>
+        </Paper>
+
+        {/* Documents Section */}
+        <Box sx={{ mt: 4 }}>
+          {department && (
+            <DepartmentDocuments
+              departmentId={department.id}
+              departmentName={department.name}
+            />
+          )}
+        </Box>
+
+        {/* Edit Dialog */}
+        <EditDialog
+          open={editDialog.open}
+          onClose={() => setEditDialog({ ...editDialog, open: false })}
+          field={editDialog.field}
+          value={editDialog.value}
+          onSave={(value) => handleSaveField(editDialog.field, value)}
+          title={editDialog.title}
+        />
+
+        {/* Add Members Dialog */}
+        <AddMembersDialog
+          open={addMembersDialogOpen}
+          onClose={() => setAddMembersDialogOpen(false)}
+          departmentId={id!}
+          currentMembers={departmentEmployees}
+        />
+      </Stack>
+    </Container>
   );
-}
+};
+
+export default DepartmentDetailsPage;
