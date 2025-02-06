@@ -1,0 +1,99 @@
+.input {
+  @apply block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center rounded-lg px-5 py-2.5 text-sm font-medium transition-colors;
+}
+
+.btn-primary {
+  @apply bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:opacity-50;
+}
+
+.btn-secondary {
+  @apply bg-gray-100 text-gray-900 hover:bg-gray-200 focus:outline-none focus:ring-4 focus:ring-gray-100 disabled:opacity-50;
+}
+
+.document-type-btn {
+  @apply flex flex-col items-center justify-center gap-2 p-4 rounded-lg border transition-colors;
+}
+
+.document-type-btn.selected {
+  @apply border-blue-500 bg-blue-50;
+}
+
+.document-type-btn:not(.selected) {
+  @apply border-gray-200 hover:border-gray-300;
+}
+
+.file-drop-zone {
+  @apply border-2 border-dashed border-gray-300 rounded-lg p-6 text-center transition-colors hover:border-blue-500;
+}
+
+.file-item {
+  @apply flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200;
+}
+
+.file-item-name {
+  @apply text-sm text-gray-900 truncate;
+}
+
+.file-remove-btn {
+  @apply text-red-500 hover:text-red-700 transition-colors;
+}
+
+.checkbox-label {
+  @apply flex items-center gap-2 text-sm text-gray-700;
+}
+
+.checkbox-input {
+  @apply h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500;
+}
+
+.select-input {
+  @apply block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500;
+}
+
+.select-input[multiple] {
+  @apply h-32;
+}
+
+.modal-overlay {
+  @apply fixed inset-0 z-50 flex items-center justify-center bg-black/50;
+}
+
+.modal-content {
+  @apply w-full max-w-2xl bg-white rounded-lg shadow-xl;
+}
+
+.modal-header {
+  @apply flex items-center justify-between p-6 border-b border-gray-200;
+}
+
+.modal-body {
+  @apply p-6;
+}
+
+.modal-footer {
+  @apply flex justify-end gap-4 p-6 border-t border-gray-200;
+}
+
+.form-grid {
+  @apply grid grid-cols-2 gap-4;
+}
+
+.form-section {
+  @apply space-y-4;
+}
+
+.form-label {
+  @apply block text-sm font-medium text-gray-700;
+}
+
+.form-error {
+  @apply mt-1 text-sm text-red-600;
+}
+
+.loading-spinner {
+  @apply animate-spin h-5 w-5 text-white;
+}
