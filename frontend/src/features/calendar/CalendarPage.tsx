@@ -1,329 +1,839 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
-  Container,
   Paper,
-  Typography,
   Grid,
-  Stack,
-  Chip,
-  IconButton,
-  Button,
+  Typography,
   List,
   ListItem,
   ListItemText,
   ListItemIcon,
   Checkbox,
-  TextField,
+  IconButton,
+  Button,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
+  TextField,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
+  Chip,
+  Tab,
+  Tabs,
+  Divider,
+  Avatar,
+  AvatarGroup,
+  Tooltip,
+  Card,
+  CardContent,
+  Badge,
 } from '@mui/material';
 import {
   Add as AddIcon,
   Delete as DeleteIcon,
+  Edit as EditIcon,
+  Event as EventIcon,
+  VideoCall as VideoCallIcon,
+  Schedule as ScheduleIcon,
+  Today as TodayIcon,
+  CheckCircle as CheckCircleIcon,
+  RadioButtonUnchecked as TodoIcon,
+  Star as StarIcon,
+  StarBorder as StarBorderIcon,
+  Flag as FlagIcon,
+  AccessTime as TimeIcon,
 } from '@mui/icons-material';
-import { useProjects } from '@/contexts/ProjectContext';
-import { useFirestore } from '@/contexts/FirestoreContext';
-import { useSnackbar } from '@/contexts/SnackbarContext';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
-import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
-import listPlugin from '@fullcalendar/list';
 
-interface TodoItem {
+import { DateTimePicker } from '@mui/x-date-pickers';
+import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { db } from '@/config/firebase';
+import { useAuth } from '@/contexts/AuthContext';
+import { useSnackbar } from '@/contexts/SnackbarContext';
+import { useProjects } from '@/contexts/ProjectContext';
+
+interface Task {
   id: string;
   title: string;
+  description?: string;
+  dueDate?: Date;
   completed: boolean;
-  dueDate?: string;
   priority: 'low' | 'medium' | 'high';
+  starred?: boolean;
+  userId: string;
+  assigneeId?: string;
+  assigneeName?: string;
 }
 
-interface CalendarEvent {
+interface Event {
   id: string;
   title: string;
-  start: string;
-  end?: string;
-  allDay?: boolean;
-  backgroundColor?: string;
-  borderColor?: string;
-  url?: string;
-  extendedProps?: {
-    type: 'project' | 'task' | 'todo';
-    priority: string;
-    department?: string;
-  };
+  description?: string;
+  start: Date;
+  end: Date;
+  projectId?: string;
+  type: 'event' | 'project' | 'meeting';
+  attendees?: string[];
+  meetingLink?: string;
+  userId: string;
 }
 
-export default function CalendarPage() {
-  const { projects } = useProjects();
-  const { departments } = useFirestore();
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`task-tabpanel-${index}`}
+      aria-labelledby={`task-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ pt: 2 }}>{children}</Box>}
+    </div>
+  );
+}
+
+const CalendarPage: React.FC = () => {
+  const { user } = useAuth();
   const { showSnackbar } = useSnackbar();
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [todos, setTodos] = useState<TodoItem[]>([]);
-  const [openTodoDialog, setOpenTodoDialog] = useState(false);
-  const [newTodo, setNewTodo] = useState({
-    title: '',
-    dueDate: new Date().toISOString().split('T')[0],
-    priority: 'medium' as const,
-  });
+  const { projects } = useProjects();
+  
+  // Tasks State
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [users, setUsers] = useState<Array<{ id: string; name: string }>>([]);
+  const [assigneeId, setAssigneeId] = useState<string>('');
+  const [selectedTask, setSelectedTask] = useState<Partial<Task> | null>(null);
+  const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
+  const [isNewTask, setIsNewTask] = useState(true);
+  const [taskTabValue, setTaskTabValue] = useState(0);
+  const [taskFilter, setTaskFilter] = useState<'all' | 'today' | 'starred'>('all');
+
+  // Events State
+  const [events, setEvents] = useState<Event[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<Partial<Event> | null>(null);
+  const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
+  const [isNewEvent, setIsNewEvent] = useState(true);
+
+  // Load Tasks
+  const loadTasks = useCallback(async () => {
+    if (!user) return;
+    try {
+      const tasksRef = collection(db, 'tasks');
+      const tasksQuery = query(tasksRef, where('userId', '==', user.uid));
+      const snapshot = await getDocs(tasksQuery);
+      
+      const loadedTasks = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        dueDate: doc.data().dueDate?.toDate()
+      })) as Task[];
+      
+      setTasks(loadedTasks.sort((a, b) => {
+        if (a.completed === b.completed) {
+          return (a.dueDate?.getTime() || 0) - (b.dueDate?.getTime() || 0);
+        }
+        return a.completed ? 1 : -1;
+      }));
+    } catch (error) {
+      console.error('Error loading tasks:', error);
+      showSnackbar('Failed to load tasks', 'error');
+    }
+  }, [user, showSnackbar]);
+
+  // Load Events
+  const loadEvents = useCallback(async () => {
+    if (!user) return;
+    try {
+      const eventsRef = collection(db, 'events');
+      const eventsQuery = query(eventsRef, where('userId', '==', user.uid));
+      const snapshot = await getDocs(eventsQuery);
+      
+      const loadedEvents = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        start: doc.data().start.toDate(),
+        end: doc.data().end.toDate()
+      })) as Event[];
+
+      // Add projects as events
+      const projectEvents = projects.map(project => ({
+        id: project.id,
+        title: project.name,
+        start: new Date(project.startDate),
+        end: new Date(project.endDate),
+        projectId: project.id,
+        type: 'project' as const,
+        userId: user.uid
+      }));
+      
+      setEvents([...loadedEvents, ...projectEvents]);
+    } catch (error) {
+      console.error('Error loading events:', error);
+      showSnackbar('Failed to load events', 'error');
+    }
+  }, [user, projects, showSnackbar]);
+
+  // Load Users
+  const loadUsers = async () => {
+    try {
+      const usersRef = collection(db, 'users');
+      const querySnapshot = await getDocs(usersRef);
+      const usersList = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        name: doc.data().name || doc.data().email
+      }));
+      setUsers(usersList);
+    } catch (error) {
+      console.error('Error loading users:', error);
+    }
+  };
 
   useEffect(() => {
-    // Convert projects and todos to calendar events
-    const projectEvents: CalendarEvent[] = projects.flatMap(project => {
-      const events: CalendarEvent[] = [];
+    loadTasks();
+    loadEvents();
+    loadUsers();
+  }, [loadTasks, loadEvents]);
 
-      if (project.endDate) {
-        const backgroundColor = project.priority === 'high' ? '#f44336' :
-                              project.priority === 'medium' ? '#ff9800' : '#4caf50';
-        
-        events.push({
-          id: `project-${project.id}`,
-          title: `📅 ${project.name}`,
-          start: project.endDate,
-          allDay: true,
-          backgroundColor,
-          borderColor: backgroundColor,
-          url: `/projects/${project.id}`,
-          extendedProps: {
-            type: 'project',
-            priority: project.priority,
-            department: project.departments?.[0]?.name,
-          }
-        });
+  // Task Handlers
+  const handleAddTask = () => {
+    setSelectedTask({
+      completed: false,
+      priority: 'medium'
+    });
+    setAssigneeId('');
+    setIsNewTask(true);
+    setIsTaskDialogOpen(true);
+  };
+
+  const handleSaveTask = async () => {
+    try {
+      if (!selectedTask?.title || !user) return;
+
+      const taskData = {
+        ...selectedTask,
+        userId: user.uid,
+        assigneeId: assigneeId || null,
+        assigneeName: assigneeId ? users.find(u => u.id === assigneeId)?.name : null,
+        updatedAt: new Date()
+      };
+
+      if (isNewTask) {
+        await addDoc(collection(db, 'tasks'), taskData);
+      } else if (selectedTask.id) {
+        await updateDoc(doc(db, 'tasks', selectedTask.id), taskData);
       }
 
-      // Add project tasks
-      project.tasks?.forEach(task => {
-        if (task.dueDate) {
-          const backgroundColor = task.priority === 'high' ? '#d32f2f' :
-                                task.priority === 'medium' ? '#f57c00' : '#388e3c';
-          
-          events.push({
-            id: `task-${task.id}`,
-            title: `📋 ${task.title}`,
-            start: task.dueDate,
-            allDay: true,
-            backgroundColor,
-            borderColor: backgroundColor,
-            url: `/projects/${project.id}`,
-            extendedProps: {
-              type: 'task',
-              priority: task.priority
-            }
-          });
-        }
-      });
-
-      return events;
-    });
-
-    // Convert todos to calendar events
-    const todoEvents: CalendarEvent[] = todos
-      .filter(todo => todo.dueDate)
-      .map(todo => ({
-        id: `todo-${todo.id}`,
-        title: `✓ ${todo.title}`,
-        start: todo.dueDate!,
-        allDay: true,
-        backgroundColor: todo.priority === 'high' ? '#c62828' :
-                        todo.priority === 'medium' ? '#ef6c00' : '#2e7d32',
-        borderColor: todo.priority === 'high' ? '#b71c1c' :
-                    todo.priority === 'medium' ? '#e65100' : '#1b5e20',
-        extendedProps: {
-          type: 'todo',
-          priority: todo.priority
-        }
-      }));
-
-    setEvents([...projectEvents, ...todoEvents]);
-  }, [projects, todos]);
-
-  const handleAddTodo = () => {
-    if (!newTodo.title) {
-      showSnackbar('Please enter a title', 'error');
-      return;
+      await loadTasks();
+      setIsTaskDialogOpen(false);
+      showSnackbar('Task saved successfully', 'success');
+    } catch (error) {
+      console.error('Error saving task:', error);
+      showSnackbar('Failed to save task', 'error');
     }
+  };
 
-    const todo: TodoItem = {
-      id: Math.random().toString(36).substr(2, 9),
-      title: newTodo.title,
-      completed: false,
-      dueDate: newTodo.dueDate,
-      priority: newTodo.priority,
-    };
+  const handleToggleTask = async (task: Task) => {
+    try {
+      await updateDoc(doc(db, 'tasks', task.id), {
+        completed: !task.completed
+      });
+      await loadTasks();
+    } catch (error) {
+      console.error('Error updating task:', error);
+      showSnackbar('Failed to update task', 'error');
+    }
+  };
 
-    setTodos([...todos, todo]);
-    setNewTodo({
-      title: '',
-      dueDate: new Date().toISOString().split('T')[0],
-      priority: 'medium',
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      await deleteDoc(doc(db, 'tasks', taskId));
+      await loadTasks();
+      showSnackbar('Task deleted successfully', 'success');
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      showSnackbar('Failed to delete task', 'error');
+    }
+  };
+
+  // Event Handlers
+  const handleDateClick = (info: any) => {
+    setSelectedEvent({
+      start: info.date,
+      end: new Date(info.date.getTime() + 60 * 60 * 1000), // 1 hour later
+      type: 'event'
     });
-    setOpenTodoDialog(false);
-    showSnackbar('Todo added successfully', 'success');
+    setIsNewEvent(true);
+    setIsEventDialogOpen(true);
   };
 
-  const handleToggleTodo = (id: string) => {
-    setTodos(todos.map(todo =>
-      todo.id === id ? { ...todo, completed: !todo.completed } : todo
-    ));
+  const handleEventClick = (info: any) => {
+    const event = info.event;
+    setSelectedEvent({
+      id: event.id,
+      title: event.title,
+      description: event.extendedProps?.description,
+      start: event.start,
+      end: event.end,
+      projectId: event.extendedProps?.projectId,
+      type: event.extendedProps?.type || 'event'
+    });
+    setIsNewEvent(false);
+    setIsEventDialogOpen(true);
   };
 
-  const handleDeleteTodo = (id: string) => {
-    setTodos(todos.filter(todo => todo.id !== id));
-    showSnackbar('Todo deleted successfully', 'success');
+  const handleSaveEvent = async () => {
+    try {
+      if (!selectedEvent?.title || !selectedEvent.start || !selectedEvent.end || !user) return;
+
+      // Don't allow editing project events
+      if (selectedEvent.type === 'project') {
+        showSnackbar('Cannot edit project events', 'error');
+        return;
+      }
+
+      const eventData = {
+        ...selectedEvent,
+        userId: user.uid,
+        updatedAt: new Date()
+      };
+
+      if (isNewEvent) {
+        await addDoc(collection(db, 'events'), eventData);
+      } else if (selectedEvent.id) {
+        await updateDoc(doc(db, 'events', selectedEvent.id), eventData);
+      }
+
+      await loadEvents();
+      setIsEventDialogOpen(false);
+      showSnackbar('Event saved successfully', 'success');
+    } catch (error) {
+      console.error('Error saving event:', error);
+      showSnackbar('Failed to save event', 'error');
+    }
   };
 
-  const handleDateClick = (arg: any) => {
-    setNewTodo(prev => ({
-      ...prev,
-      dueDate: arg.dateStr
-    }));
-    setOpenTodoDialog(true);
+  const handleDeleteEvent = async () => {
+    try {
+      if (!selectedEvent?.id) return;
+
+      // Don't allow deleting project events
+      if (selectedEvent.type === 'project') {
+        showSnackbar('Cannot delete project events', 'error');
+        return;
+      }
+
+      await deleteDoc(doc(db, 'events', selectedEvent.id));
+      await loadEvents();
+      setIsEventDialogOpen(false);
+      showSnackbar('Event deleted successfully', 'success');
+    } catch (error) {
+      console.error('Error deleting event:', error);
+      showSnackbar('Failed to delete event', 'error');
+    }
   };
+
+  const getEventColor = (event: any) => {
+    if (event.extendedProps?.type === 'project') return '#4caf50';
+    return '#2196f3';
+  };
+
+  if (!user) {
+    return <Box>Please log in to access the calendar.</Box>;
+  }
+
+  const filteredTasks = tasks.filter(task => {
+    if (taskFilter === 'today') {
+      return task.dueDate?.toDateString() === new Date().toDateString();
+    }
+    if (taskFilter === 'starred') {
+      return task.starred;
+    }
+    return true;
+  });
 
   return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      <Grid container spacing={3}>
-        {/* Calendar */}
-        <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 2, height: 'calc(100vh - 200px)' }}>
+    <Box sx={{ height: '100vh', p: 4, bgcolor: 'white' }}>
+      <Grid container spacing={4} sx={{ height: '100%' }}>
+        {/* Left Panel - Tasks */}
+        <Grid item xs={4}>
+          <Paper sx={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', borderRadius: 2, boxShadow: 'none', border: '1px solid #e0e0e0' }}>
+            {/* Task Header */}
+            <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, color: '#1a1a1a' }}>Tasks</Typography>
+                <Button
+                  startIcon={<AddIcon />}
+                  variant="contained"
+                  onClick={handleAddTask}
+                  sx={{
+                    borderRadius: 50,
+                    px: 3,
+                    backgroundColor: '#1976d2',
+                    '&:hover': {
+                      backgroundColor: '#1565c0'
+                    }
+                  }}
+                >
+                  Add Task
+                </Button>
+              </Box>
+              
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Button
+                  variant={taskFilter === 'all' ? 'contained' : 'outlined'}
+                  onClick={() => setTaskFilter('all')}
+                  startIcon={<TodoIcon />}
+                  sx={{
+                    borderRadius: 2,
+                    flex: 1,
+                    backgroundColor: taskFilter === 'all' ? '#1976d2' : 'transparent',
+                    borderColor: taskFilter === 'all' ? 'transparent' : '#e0e0e0',
+                    color: taskFilter === 'all' ? 'white' : '#666',
+                    '&:hover': {
+                      backgroundColor: taskFilter === 'all' ? '#1565c0' : '#f5f5f5'
+                    }
+                  }}
+                >
+                  All
+                </Button>
+                <Button
+                  variant={taskFilter === 'today' ? 'contained' : 'outlined'}
+                  onClick={() => setTaskFilter('today')}
+                  startIcon={<TodayIcon />}
+                  sx={{
+                    borderRadius: 2,
+                    flex: 1,
+                    backgroundColor: taskFilter === 'today' ? '#1976d2' : 'transparent',
+                    borderColor: taskFilter === 'today' ? 'transparent' : '#e0e0e0',
+                    color: taskFilter === 'today' ? 'white' : '#666',
+                    '&:hover': {
+                      backgroundColor: taskFilter === 'today' ? '#1565c0' : '#f5f5f5'
+                    }
+                  }}
+                >
+                  Today
+                </Button>
+                <Button
+                  variant={taskFilter === 'starred' ? 'contained' : 'outlined'}
+                  onClick={() => setTaskFilter('starred')}
+                  startIcon={<StarIcon />}
+                  sx={{
+                    borderRadius: 2,
+                    flex: 1,
+                    backgroundColor: taskFilter === 'starred' ? '#1976d2' : 'transparent',
+                    borderColor: taskFilter === 'starred' ? 'transparent' : '#e0e0e0',
+                    color: taskFilter === 'starred' ? 'white' : '#666',
+                    '&:hover': {
+                      backgroundColor: taskFilter === 'starred' ? '#1565c0' : '#f5f5f5'
+                    }
+                  }}
+                >
+                  Starred
+                </Button>
+              </Box>
+            </Box>
+
+            {/* Task List */}
+            <List sx={{ overflow: 'auto', flexGrow: 1, p: 2 }}>
+              {filteredTasks.map((task) => (
+                <ListItem
+                  key={task.id}
+                  sx={{
+                    mb: 2,
+                    p: 2,
+                    bgcolor: '#f8f9fa',
+                    borderRadius: 2,
+                    '&:hover': {
+                      bgcolor: '#f0f0f0',
+                    },
+                    transition: 'background-color 0.2s',
+                  }}
+                >
+                  <ListItemIcon>
+                    <Checkbox
+                      icon={<TodoIcon />}
+                      checkedIcon={<CheckCircleIcon />}
+                      checked={task.completed}
+                      onChange={() => handleToggleTask(task)}
+                      sx={{
+                        '&.Mui-checked': {
+                          color: 'success.main',
+                        },
+                      }}
+                    />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography
+                          variant="body1"
+                          sx={{
+                            textDecoration: task.completed ? 'line-through' : 'none',
+                            color: task.completed ? 'text.secondary' : 'text.primary',
+                          }}
+                        >
+                          {task.title}
+                        </Typography>
+                        {task.priority === 'high' && (
+                          <FlagIcon color="error" fontSize="small" />
+                        )}
+                      </Box>
+                    }
+                    secondary={
+                      <Box sx={{ mt: 1 }}>
+                        {task.description && (
+                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                            {task.description}
+                          </Typography>
+                        )}
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          {task.assigneeName && (
+                          <Chip
+                            size="small"
+                            icon={<Avatar sx={{ width: 16, height: 16 }}>{task.assigneeName[0]}</Avatar>}
+                            label={task.assigneeName}
+                            sx={{ mr: 1 }}
+                          />
+                        )}
+                        {task.dueDate && (
+                            <Chip
+                              size="small"
+                              icon={<TimeIcon />}
+                              label={task.dueDate.toLocaleDateString()}
+                              color={
+                                new Date() > task.dueDate ? 'error' : 'default'
+                              }
+                            />
+                          )}
+                          <Chip
+                            size="small"
+                            label={task.priority}
+                            color={
+                              task.priority === 'high'
+                                ? 'error'
+                                : task.priority === 'medium'
+                                ? 'warning'
+                                : 'success'
+                            }
+                          />
+                        </Box>
+                      </Box>
+                    }
+                  />
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        setSelectedTask(task);
+                        setIsNewTask(false);
+                        setIsTaskDialogOpen(true);
+                      }}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        const updatedTask = { ...task, starred: !task.starred };
+                        handleUpdateTask(updatedTask);
+                      }}
+                    >
+                      {task.starred ? (
+                        <StarIcon fontSize="small" color="warning" />
+                      ) : (
+                        <StarBorderIcon fontSize="small" />
+                      )}
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      onClick={() => handleDeleteTask(task.id)}
+                      color="error"
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                </ListItem>
+              ))}
+            </List>
+          </Paper>
+        </Grid>
+
+        {/* Main Calendar */}
+        <Grid item xs={8}>
+          <Paper sx={{ p: 3, height: '100%', borderRadius: 2, boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h5" sx={{ fontWeight: 600, color: '#1a1a1a' }}>
+                Calendar
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  sx={{ borderRadius: 2, color: '#666', borderColor: '#e0e0e0' }}
+                >
+                  Month
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  sx={{ borderRadius: 2, color: '#666', borderColor: '#e0e0e0' }}
+                >
+                  Week
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  sx={{ borderRadius: 2, color: '#666', borderColor: '#e0e0e0' }}
+                >
+                  Day
+                </Button>
+              </Box>
+            </Box>
             <FullCalendar
-              plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]}
+              plugins={[dayGridPlugin, interactionPlugin]}
               initialView="dayGridMonth"
               headerToolbar={{
                 left: 'prev,next today',
                 center: 'title',
-                right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
+                right: ''
               }}
+              height="auto"
+              aspectRatio={1.5}
+              stickyHeaderDates={false}
+              dayHeaderFormat={{ weekday: 'short' }}
+              eventTimeFormat={{
+                hour: '2-digit',
+                minute: '2-digit',
+                meridiem: false
+              }}
+              slotLabelFormat={{
+                hour: '2-digit',
+                minute: '2-digit',
+                meridiem: false
+              }}
+              slotMinTime="07:00:00"
+              slotMaxTime="21:00:00"
+              expandRows={true}
+              dayHeaderClassNames="calendar-header"
+              dayCellClassNames="calendar-cell"
               events={events}
               dateClick={handleDateClick}
-              eventClick={(info) => {
-                if (info.event.url) {
-                  window.location.href = info.event.url;
-                }
-              }}
+              eventClick={handleEventClick}
+              eventColor={getEventColor}
               height="100%"
-              eventTimeFormat={{
-                hour: 'numeric',
-                minute: '2-digit',
-                meridiem: 'short'
-              }}
             />
-          </Paper>
-        </Grid>
-
-        {/* Todo List */}
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2, height: 'calc(100vh - 200px)', overflow: 'auto' }}>
-            <Stack spacing={2}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="h6">Todo List</Typography>
-                <Button
-                  startIcon={<AddIcon />}
-                  onClick={() => setOpenTodoDialog(true)}
-                  variant="contained"
-                  size="small"
-                >
-                  Add Todo
-                </Button>
-              </Stack>
-
-              <List>
-                {todos.map((todo) => (
-                  <ListItem
-                    key={todo.id}
-                    secondaryAction={
-                      <IconButton edge="end" onClick={() => handleDeleteTodo(todo.id)}>
-                        <DeleteIcon />
-                      </IconButton>
-                    }
-                    disablePadding
-                  >
-                    <ListItemIcon>
-                      <Checkbox
-                        edge="start"
-                        checked={todo.completed}
-                        onChange={() => handleToggleTodo(todo.id)}
-                      />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={todo.title}
-                      secondary={
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          {todo.dueDate && (
-                            <Typography variant="caption" color="text.secondary">
-                              Due: {new Date(todo.dueDate).toLocaleDateString()}
-                            </Typography>
-                          )}
-                          <Chip
-                            size="small"
-                            label={todo.priority}
-                            color={
-                              todo.priority === 'high' ? 'error' :
-                              todo.priority === 'medium' ? 'warning' :
-                              'success'
-                            }
-                          />
-                        </Stack>
-                      }
-                      sx={{
-                        textDecoration: todo.completed ? 'line-through' : 'none',
-                        color: todo.completed ? 'text.secondary' : 'text.primary',
-                      }}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </Stack>
           </Paper>
         </Grid>
       </Grid>
 
-      {/* Add Todo Dialog */}
-      <Dialog open={openTodoDialog} onClose={() => setOpenTodoDialog(false)}>
-        <DialogTitle>Add New Todo</DialogTitle>
+      {/* Task Dialog */}
+      <Dialog open={isTaskDialogOpen} onClose={() => setIsTaskDialogOpen(false)}>
+        <DialogTitle>{isNewTask ? 'Add Task' : 'Edit Task'}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ mt: 2 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
             <TextField
               label="Title"
+              value={selectedTask?.title || ''}
+              onChange={(e) => setSelectedTask(prev => ({ ...prev, title: e.target.value }))}
               fullWidth
-              value={newTodo.title}
-              onChange={(e) => setNewTodo({ ...newTodo, title: e.target.value })}
+              required
             />
+            
             <TextField
-              label="Due Date"
-              type="date"
+              label="Description"
+              value={selectedTask?.description || ''}
+              onChange={(e) => setSelectedTask(prev => ({ ...prev, description: e.target.value }))}
               fullWidth
-              value={newTodo.dueDate}
-              onChange={(e) => setNewTodo({ ...newTodo, dueDate: e.target.value })}
-              InputLabelProps={{ shrink: true }}
+              multiline
+              rows={3}
             />
+
+            <DateTimePicker
+              label="Due Date"
+              value={selectedTask?.dueDate || null}
+              onChange={(date) => setSelectedTask(prev => ({ ...prev, dueDate: date }))}
+            />
+
             <FormControl fullWidth>
               <InputLabel>Priority</InputLabel>
               <Select
-                value={newTodo.priority}
-                label="Priority"
-                onChange={(e) => setNewTodo({ ...newTodo, priority: e.target.value as 'low' | 'medium' | 'high' })}
+                value={selectedTask?.priority || 'medium'}
+                onChange={(e) => setSelectedTask(prev => ({ ...prev, priority: e.target.value }))}
               >
                 <MenuItem value="low">Low</MenuItem>
                 <MenuItem value="medium">Medium</MenuItem>
                 <MenuItem value="high">High</MenuItem>
               </Select>
             </FormControl>
-          </Stack>
+
+            <FormControl fullWidth>
+              <InputLabel>Assign To (Optional)</InputLabel>
+              <Select
+                value={assigneeId}
+                onChange={(e) => setAssigneeId(e.target.value)}
+                label="Assign To (Optional)"
+              >
+                <MenuItem value=""><em>None</em></MenuItem>
+                {users.map((user) => (
+                  <MenuItem key={user.id} value={user.id}>
+                    {user.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenTodoDialog(false)}>Cancel</Button>
-          <Button onClick={handleAddTodo} variant="contained">Add</Button>
+          <Button onClick={() => setIsTaskDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleSaveTask} variant="contained">
+            Save
+          </Button>
         </DialogActions>
       </Dialog>
-    </Container>
+
+      {/* Event/Meeting Dialog */}
+      <Dialog 
+        open={isEventDialogOpen} 
+        onClose={() => setIsEventDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {selectedEvent?.type === 'meeting' ? <VideoCallIcon color="primary" /> : <EventIcon color="primary" />}
+            {isNewEvent ? 'Schedule ' : 'Edit '}
+            {selectedEvent?.type === 'meeting' ? 'Meeting' : 'Event'}
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+            <TextField
+              label="Title"
+              value={selectedEvent?.title || ''}
+              onChange={(e) => setSelectedEvent(prev => ({ ...prev, title: e.target.value }))}
+              fullWidth
+              required
+              disabled={selectedEvent?.type === 'project'}
+            />
+            
+            <TextField
+              label="Description"
+              value={selectedEvent?.description || ''}
+              onChange={(e) => setSelectedEvent(prev => ({ ...prev, description: e.target.value }))}
+              fullWidth
+              multiline
+              rows={3}
+              disabled={selectedEvent?.type === 'project'}
+            />
+
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <DateTimePicker
+                  label="Start Date & Time"
+                  value={selectedEvent?.start || null}
+                  onChange={(date) => setSelectedEvent(prev => ({ ...prev, start: date }))}
+                  disabled={selectedEvent?.type === 'project'}
+                  sx={{ width: '100%' }}
+                />
+              </Grid>
+              <Grid item xs={6}>
+                <DateTimePicker
+                  label="End Date & Time"
+                  value={selectedEvent?.end || null}
+                  onChange={(date) => setSelectedEvent(prev => ({ ...prev, end: date }))}
+                  disabled={selectedEvent?.type === 'project'}
+                  sx={{ width: '100%' }}
+                />
+              </Grid>
+            </Grid>
+
+            <FormControl fullWidth>
+              <InputLabel>Event Type</InputLabel>
+              <Select
+                value={selectedEvent?.type || 'event'}
+                onChange={(e) => setSelectedEvent(prev => ({ ...prev, type: e.target.value }))}
+                disabled={selectedEvent?.type === 'project'}
+              >
+                <MenuItem value="event">Event</MenuItem>
+                <MenuItem value="meeting">Meeting</MenuItem>
+              </Select>
+            </FormControl>
+
+            {selectedEvent?.type === 'meeting' && (
+              <>
+                <TextField
+                  label="Meeting Link"
+                  value={selectedEvent?.meetingLink || ''}
+                  onChange={(e) => setSelectedEvent(prev => ({ ...prev, meetingLink: e.target.value }))}
+                  fullWidth
+                  placeholder="https://meet.google.com/..."
+                />
+
+                <FormControl fullWidth>
+                  <InputLabel>Attendees</InputLabel>
+                  <Select
+                    multiple
+                    value={selectedEvent?.attendees || []}
+                    onChange={(e) => setSelectedEvent(prev => ({ 
+                      ...prev, 
+                      attendees: typeof e.target.value === 'string' ? 
+                        e.target.value.split(',') : 
+                        e.target.value 
+                    }))}
+                    renderValue={(selected) => (
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                        {selected.map((value) => (
+                          <Chip key={value} label={value} />
+                        ))}
+                      </Box>
+                    )}
+                  >
+                    {['john@example.com', 'jane@example.com', 'bob@example.com'].map((email) => (
+                      <MenuItem key={email} value={email}>
+                        {email}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          {!isNewEvent && selectedEvent?.type !== 'project' && (
+            <Button 
+              onClick={handleDeleteEvent} 
+              color="error"
+              startIcon={<DeleteIcon />}
+            >
+              Delete
+            </Button>
+          )}
+          <Button onClick={() => setIsEventDialogOpen(false)}>Cancel</Button>
+          {selectedEvent?.type !== 'project' && (
+            <Button 
+              onClick={handleSaveEvent} 
+              variant="contained"
+              startIcon={selectedEvent?.type === 'meeting' ? <VideoCallIcon /> : <EventIcon />}
+            >
+              {isNewEvent ? 'Schedule' : 'Update'}
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
-}
+};
+
+export default CalendarPage;
