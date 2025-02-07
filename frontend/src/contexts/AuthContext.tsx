@@ -24,8 +24,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    console.log('Setting up auth state observer...', {
+      currentUser: auth.currentUser?.email,
+      loading,
+      timestamp: new Date().toISOString()
+    });
+
     // Set up auth state observer
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log('Auth state changed:', { 
+        user: user ? { 
+          uid: user.uid, 
+          email: user.email, 
+          emailVerified: user.emailVerified,
+          isAnonymous: user.isAnonymous,
+          metadata: user.metadata,
+          providerId: user.providerId,
+          refreshToken: !!user.refreshToken
+        } : null,
+        currentUser: auth.currentUser?.email,
+        loading,
+        timestamp: new Date().toISOString()
+      });
       setUser(user);
       setLoading(false);
     });

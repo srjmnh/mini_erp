@@ -138,28 +138,53 @@ export const FirestoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   });
 
   useEffect(() => {
-    try {
-      setState(prev => ({ ...prev, loading: false }));
-    } catch (error) {
-      console.error('Error initializing Firestore:', error);
+    console.log('FirestoreContext effect running:', {
+      hasUser: !!user,
+      userId: user?.uid,
+      userEmail: user?.email,
+      timestamp: new Date().toISOString(),
+      state: {
+        departments: state.departments.length,
+        employees: state.employees.length,
+        customers: state.customers.length,
+        documents: state.documents.length,
+        customFolders: state.customFolders.length,
+        loading: state.loading,
+        error: state.error
+      }
+    });
+
+    if (!user) {
+      console.log('No user, clearing state...');
       setState(prev => ({
         ...prev,
-        error: 'Failed to initialize Firestore'
+        departments: [],
+        employees: [],
+        customers: [],
+        documents: [],
+        customFolders: [],
+        loading: false,
+        error: null
       }));
+      return;
     }
-  }, []);
 
-  useEffect(() => {
-    if (!user) return;
+    console.log('User authenticated, setting up listeners...');
+    setState(prev => ({ ...prev, loading: true, error: null }));
 
+    console.log('Setting up Firestore listeners...');
     const departmentsRef = collection(db, 'departments');
+    console.log('Departments ref:', departmentsRef.path);
+    
     const departmentsUnsubscribe = onSnapshot(
       departmentsRef,
       (snapshot: QuerySnapshot<DocumentData>) => {
+        console.log('Departments snapshot received:', { count: snapshot.docs.length });
         const departments = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         })) as Department[];
+        console.log('Processed departments:', { count: departments.length });
         setState(prev => ({ ...prev, departments }));
       },
       (error: any) => {
@@ -197,7 +222,6 @@ export const FirestoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setState(prev => ({ ...prev, error: 'Failed to load employees' }));
       }
     );
-
     const customersRef = collection(db, 'customers');
     const customersUnsubscribe = onSnapshot(
       customersRef,
@@ -246,6 +270,11 @@ export const FirestoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     );
 
+    // Set loading to false after a short delay to ensure data is loaded
+    setTimeout(() => {
+      setState(prev => ({ ...prev, loading: false }));
+    }, 1000);
+
     return () => {
       departmentsUnsubscribe();
       employeesUnsubscribe();
@@ -253,7 +282,9 @@ export const FirestoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       documentsUnsubscribe();
       customFoldersUnsubscribe();
     };
-  }, [state.firestore, user]);
+  }, [user]);
+
+
 
   const getDepartments = async () => {
     try {
