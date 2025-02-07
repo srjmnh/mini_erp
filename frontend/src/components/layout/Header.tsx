@@ -175,7 +175,7 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
         </Box>
 
         <Box sx={{ ml: 2, display: 'flex', alignItems: 'center' }}>
-          <MiniCalendar />
+          <MiniCalendar userId={user.uid} />
           <IconButton
             onClick={handleMenuOpen}
             size="small"

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Link } from 'react-router-dom';
 import {
@@ -24,12 +24,21 @@ import {
 } from '@mui/icons-material';
 import { format, isSameDay } from 'date-fns';
 import { useProjects } from '@/contexts/ProjectContext';
+import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '@/config/firebase';
+import { useSnackbar } from '@/contexts/SnackbarContext';
 
-export const MiniCalendar = () => {
+interface MiniCalendarProps {
+  userId: string;
+}
+
+export const MiniCalendar: React.FC<MiniCalendarProps> = ({ userId }) => {
   const navigate = useNavigate();
   const { projects } = useProjects();
   const [anchorEl, setAnchorEl] = React.useState<HTMLElement | null>(null);
   const [selectedDate] = React.useState(new Date());
+  const [newTask, setNewTask] = useState('');
+  const { showSnackbar } = useSnackbar();
 
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -44,34 +53,68 @@ export const MiniCalendar = () => {
     window.location.href = '/calendar';
   };
 
-  // Get today's events
-  const todaysEvents = React.useMemo(() => {
-    const events = [];
-    
-    // Add project deadlines
-    projects.forEach(project => {
-      if (project.endDate && isSameDay(new Date(project.endDate), selectedDate)) {
-        events.push({
-          type: 'project',
-          title: `${project.name} Due`,
-          priority: project.priority,
+  // Get today's events and tasks
+  const [todaysEvents, setTodaysEvents] = React.useState<Array<{
+    type: 'project' | 'task' | 'event';
+    title: string;
+    priority?: 'low' | 'medium' | 'high';
+  }>>([]);
+
+  React.useEffect(() => {
+    const loadTodaysEvents = async () => {
+      const events = [];
+      
+      try {
+        // Load calendar events
+        const eventsRef = collection(db, 'events');
+        const eventsQuery = query(eventsRef, where('userId', '==', userId));
+        const eventsSnap = await getDocs(eventsQuery);
+        
+        eventsSnap.docs.forEach(doc => {
+          const eventData = doc.data();
+          if (eventData.start && isSameDay(eventData.start.toDate(), selectedDate)) {
+            events.push({
+              type: 'event',
+              title: eventData.title,
+            });
+          }
         });
+
+        // Load tasks
+        const tasksRef = collection(db, 'tasks');
+        const tasksQuery = query(tasksRef, where('userId', '==', userId));
+        const tasksSnap = await getDocs(tasksQuery);
+        
+        tasksSnap.docs.forEach(doc => {
+          const taskData = doc.data();
+          if (taskData.dueDate && isSameDay(taskData.dueDate.toDate(), selectedDate)) {
+            events.push({
+              type: 'task',
+              title: taskData.title,
+              priority: taskData.priority,
+            });
+          }
+        });
+        
+        // Add project deadlines
+        projects.forEach(project => {
+          if (project.endDate && isSameDay(new Date(project.endDate), selectedDate)) {
+            events.push({
+              type: 'project',
+              title: `${project.name} Due`,
+              priority: project.priority,
+            });
+          }
+        });
+
+        setTodaysEvents(events);
+      } catch (error) {
+        console.error('Error loading events:', error);
       }
+    };
 
-      // Add project tasks
-      project.tasks?.forEach(task => {
-        if (task.dueDate && isSameDay(new Date(task.dueDate), selectedDate)) {
-          events.push({
-            type: 'task',
-            title: task.title,
-            priority: task.priority,
-          });
-        }
-      });
-    });
-
-    return events;
-  }, [projects, selectedDate]);
+    loadTodaysEvents();
+  }, [userId, selectedDate, projects]);
 
   const open = Boolean(anchorEl);
 
@@ -121,6 +164,65 @@ export const MiniCalendar = () => {
               Open Calendar
             </Button>
           </Stack>
+
+          <Divider />
+
+          <Box sx={{ p: 2 }}>
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="Add a quick task..."
+              value={newTask}
+              onChange={(e) => setNewTask(e.target.value)}
+              onKeyPress={async (e) => {
+                if (e.key === 'Enter' && newTask.trim()) {
+                  try {
+                    await addDoc(collection(db, 'tasks'), {
+                      title: newTask.trim(),
+                      completed: false,
+                      priority: 'medium',
+                      dueDate: selectedDate,
+                      userId: userId,
+                      createdAt: serverTimestamp(),
+                    });
+                    setNewTask('');
+                    showSnackbar('Task created successfully', 'success');
+                  } catch (error) {
+                    console.error('Error creating task:', error);
+                    showSnackbar('Failed to create task', 'error');
+                  }
+                }
+              }}
+              InputProps={{
+                endAdornment: (
+                  <IconButton
+                    size="small"
+                    onClick={async () => {
+                      if (newTask.trim()) {
+                        try {
+                          await addDoc(collection(db, 'tasks'), {
+                            title: newTask.trim(),
+                            completed: false,
+                            priority: 'medium',
+                            dueDate: selectedDate,
+                            userId: userId,
+                            createdAt: serverTimestamp(),
+                          });
+                          setNewTask('');
+                          showSnackbar('Task created successfully', 'success');
+                        } catch (error) {
+                          console.error('Error creating task:', error);
+                          showSnackbar('Failed to create task', 'error');
+                        }
+                      }
+                    }}
+                  >
+                    <AddIcon />
+                  </IconButton>
+                ),
+              }}
+            />
+          </Box>
 
           <Divider />
 
