@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSnackbar } from '../../contexts/SnackbarContext';
 import { getDepartmentName, isEmployeeDepartmentHead } from './utils';
+import CreateUserAccountDialog from './CreateUserAccountDialog';
+import { UserRole } from '@/types/auth';
 import {
   Box,
   Paper,
@@ -131,6 +133,7 @@ export default function EmployeeProfile() {
   const [hasChanges, setHasChanges] = useState(false);
   const [editingReportsTo, setEditingReportsTo] = useState(false);
   const [selectedManager, setSelectedManager] = useState<string | null>(null);
+  const [createAccountDialogOpen, setCreateAccountDialogOpen] = useState(false);
 
   const getAvailableManagers = (employee: any) => {
     // Show all employees except the current one
@@ -532,7 +535,17 @@ export default function EmployeeProfile() {
                     )}
                   </Box>
                 </Box>
-                <Box>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  {!employee.hasUserAccount && (
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      onClick={() => setCreateAccountDialogOpen(true)}
+                      sx={{ bgcolor: 'rgba(255, 255, 255, 0.2)', '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.3)' } }}
+                    >
+                      Create User Account
+                    </Button>
+                  )}
                   <IconButton
                     onClick={() => setEditDialogOpen(true)}
                     sx={{ color: 'white', bgcolor: 'rgba(255, 255, 255, 0.1)' }}
@@ -926,6 +939,20 @@ export default function EmployeeProfile() {
           />
         </TabPanel>
       </Paper>
+
+      {/* User Account Dialog */}
+      <CreateUserAccountDialog
+        open={createAccountDialogOpen}
+        onClose={() => setCreateAccountDialogOpen(false)}
+        employee={employee}
+        onSuccess={() => {
+          showSnackbar('User account created successfully', 'success');
+          // Refresh employee data
+          const updatedEmployee = { ...employee, hasUserAccount: true };
+          setEmployee(updatedEmployee);
+          updateEmployee(employee.id, { hasUserAccount: true });
+        }}
+      />
     </Box>
   );
 }

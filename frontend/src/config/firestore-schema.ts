@@ -1,5 +1,13 @@
 // This is a reference file for the Firestore schema structure
 
+// Leave Request Types
+export type LeaveType = 'sick' | 'vacation' | 'personal' | 'other';
+export type LeaveStatus = 'pending' | 'approved' | 'rejected';
+
+// Expense Types
+export type ExpenseCategory = 'travel' | 'office' | 'equipment' | 'other';
+export type ExpenseStatus = 'pending' | 'approved' | 'rejected';
+
 /*
 Collection: roles
 Document ID: auto-generated
@@ -32,6 +40,55 @@ Document ID: auto-generated
   photoUrl: string,
   createdAt: timestamp,
   updatedAt: timestamp
+}
+
+Collection: leaveRequests
+Document ID: auto-generated
+{
+  employeeId: string,
+  departmentId: string,
+  type: LeaveType,
+  startDate: timestamp,
+  endDate: timestamp,
+  reason: string,
+  status: LeaveStatus,
+  approverNote?: string,
+  approvedBy?: string,
+  approvedAt?: timestamp,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  notified: boolean
+}
+
+Collection: expenseRequests
+Document ID: auto-generated
+{
+  employeeId: string,
+  departmentId: string,
+  category: ExpenseCategory,
+  amount: number,
+  currency: string,
+  description: string,
+  receiptUrl?: string,
+  status: ExpenseStatus,
+  approverNote?: string,
+  approvedBy?: string,
+  approvedAt?: timestamp,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  notified: boolean
+}
+
+Collection: notifications
+Document ID: auto-generated
+{
+  userId: string,
+  type: 'leave_request' | 'expense_request' | 'leave_approved' | 'leave_rejected' | 'expense_approved' | 'expense_rejected',
+  title: string,
+  message: string,
+  read: boolean,
+  requestId: string,
+  createdAt: timestamp
 }
 
 Collection: employees/{employeeId}/salaryHistory

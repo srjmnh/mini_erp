@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
@@ -12,6 +12,7 @@ import {
   LinearProgress,
   Stack,
   useTheme,
+  CircularProgress,
 } from '@mui/material';
 import {
   People as PeopleIcon,
@@ -27,13 +28,29 @@ import {
 } from '@mui/icons-material';
 import { useFirestore } from '@/contexts/FirestoreContext';
 import { useProjects } from '@/contexts/ProjectContext';
+import { useAuth } from '@/contexts/AuthContext';
+import ManagerDashboard from './ManagerDashboard';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const theme = useTheme();
-  const { employees, departments } = useFirestore();
+  const { employees, departments, loading } = useFirestore();
   const { projects } = useProjects();
+  const { userRole } = useAuth();
+
+  if (loading) {
+    return (
+      <Box sx={{ width: '100%', mt: 2 }}>
+        <LinearProgress />
+      </Box>
+    );
+  }
+
+  // Show manager dashboard for managers
+  if (userRole === 'manager') {
+    return <ManagerDashboard />;
+  }
 
   const menuCards = [
     {
@@ -84,6 +101,14 @@ export default function DashboardPage() {
   ];
 
   const recentProjects = projects.slice(0, 3);
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ pb: 4 }}>

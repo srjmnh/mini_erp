@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
   Container,
@@ -33,9 +33,9 @@ const icons = [BusinessIcon, PeopleIcon, DashboardIcon, AnalyticsIcon, SpeedIcon
 export default function LoginPage() {
   const theme = useTheme();
   const navigate = useNavigate();
-  const { signInWithGoogle, signInWithEmailAndPassword } = useAuth();
+  const { user, loading, signInWithGoogle, signInWithEmailAndPassword } = useAuth();
   const { showSnackbar } = useSnackbar();
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -48,6 +48,17 @@ export default function LoginPage() {
     return () => clearInterval(interval);
   }, []);
 
+  // Redirect if user is already logged in
+  useEffect(() => {
+    if (!loading && user) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [user, loading, navigate]);
+
+  // Redirect to the page they came from, or dashboard if they came directly to login
+  const { state } = useLocation() as { state: { from: { pathname: string } } | null };
+  const from = state?.from?.pathname || '/dashboard';
+
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
@@ -56,10 +67,10 @@ export default function LoginPage() {
     }
     
     try {
-      setLoading(true);
+      setIsLoading(true);
       await signInWithEmailAndPassword(email, password);
       showSnackbar('Successfully signed in!', 'success');
-      navigate('/dashboard');
+      navigate(from, { replace: true });
     } catch (error) {
       if (error instanceof FirebaseError) {
         switch (error.code) {
@@ -82,16 +93,16 @@ export default function LoginPage() {
         showSnackbar('An unexpected error occurred', 'error');
       }
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
   const handleGoogleSignIn = async () => {
     try {
-      setLoading(true);
+      setIsLoading(true);
       await signInWithGoogle();
       showSnackbar('Successfully signed in with Google!', 'success');
-      navigate('/dashboard');
+      navigate(from, { replace: true });
     } catch (error) {
       if (error instanceof FirebaseError) {
         switch (error.code) {
@@ -108,7 +119,7 @@ export default function LoginPage() {
         showSnackbar('An unexpected error occurred', 'error');
       }
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 

@@ -12,6 +12,7 @@ import {
   MenuItem,
   Breadcrumbs,
   useTheme,
+  alpha,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -35,7 +36,7 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
   const theme = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, signOut } = useAuth();
+  const { user, userRole, signOut } = useAuth();
   const { showSnackbar } = useSnackbar();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
 
@@ -180,8 +181,33 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
           </Breadcrumbs>
         </Box>
 
-        <Box sx={{ ml: 2, display: 'flex', alignItems: 'center' }}>
-          <MiniCalendar userId={user.uid} />
+        <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+          {userRole && (
+            <Box
+              sx={{
+                px: 1.5,
+                py: 0.5,
+                borderRadius: '12px',
+                typography: 'caption',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                bgcolor: (theme) => 
+                  userRole === 'HR0' ? alpha(theme.palette.error.main, 0.1) :
+                  userRole === 'manager' ? alpha(theme.palette.warning.main, 0.1) :
+                  alpha(theme.palette.info.main, 0.1),
+                color: (theme) =>
+                  userRole === 'HR0' ? theme.palette.error.main :
+                  userRole === 'manager' ? theme.palette.warning.main :
+                  theme.palette.info.main,
+              }}
+            >
+              {userRole === 'HR0' ? 'HR Admin' : 
+               userRole === 'manager' ? 'Manager' : 
+               'Employee'}
+            </Box>
+          )}
+          <MiniCalendar userId={user?.uid || ''} />
           <IconButton
             onClick={handleMenuOpen}
             size="small"

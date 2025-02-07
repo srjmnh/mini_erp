@@ -1,5 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Box, CssBaseline, ThemeProvider } from '@mui/material';
+import LoginPage from './features/auth/LoginPage';
+import RequireAuth from './components/auth/RequireAuth';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -11,11 +13,12 @@ import EmployeeProfile from './features/employees/EmployeeProfile';
 import DepartmentsPage from './features/departments/DepartmentsPage';
 import DepartmentDetailsPage from './features/departments/DepartmentDetailsPage';
 import DocumentsPage from './features/documents/DocumentsPage';
-import LeaveRequestsPage from './features/leave/LeaveRequestsPage';
+import RequestsPage from './features/requests/RequestsPage';
 import PayrollPage from './features/payroll/PayrollPage';
 import RoleConfigurationPage from './features/roles/RoleConfigurationPage';
 import PerformancePage from './features/hr/PerformancePage';
 import TimeOffPage from './features/hr/TimeOffPage';
+import ExpensePage from './features/hr/ExpensePage';
 import HRDashboard from './features/hr/HRDashboard';
 import SettingsPage from './features/settings/SettingsPage';
 import CalendarPage from './features/calendar/CalendarPage';
@@ -50,8 +53,13 @@ function App() {
                       <CssBaseline />
                       <Router>
                         <Routes>
-                          <Route path="/" element={<DashboardLayout />}>
-                            <Route index element={<DashboardPage />} />
+                          {/* Public Routes */}
+                          <Route path="/login" element={<LoginPage />} />
+                          
+                          {/* Protected Routes */}
+                          <Route path="/" element={<RequireAuth><DashboardLayout /></RequireAuth>}>
+                            <Route index element={<Navigate to="/dashboard" replace />} />
+                            <Route path="dashboard" element={<DashboardPage />} />
                             <Route path="projects" element={<ProjectsPage />} />
                             <Route path="projects/:id" element={<ProjectDashboard />} />
                             <Route path="employees" element={<EmployeesPage />} />
@@ -60,17 +68,20 @@ function App() {
                             <Route path="departments/:id" element={<DepartmentDetailsPage />} />
                             <Route path="documents" element={<DocumentsPage />} />
                             <Route path="calendar" element={<CalendarPage />} />
+                            <Route path="requests" element={<RequestsPage />} />
                             <Route path="hr" element={<Outlet />}>
                               <Route index element={<HRDashboard />} />
                               <Route path="time-off" element={<TimeOffPage />} />
-                              <Route path="leave-requests" element={<LeaveRequestsPage />} />
+                              <Route path="expenses" element={<ExpensePage />} />
                               <Route path="payroll" element={<PayrollPage />} />
                               <Route path="performance" element={<PerformancePage />} />
                               <Route path="roles" element={<RoleConfigurationPage />} />
                             </Route>
                             <Route path="settings" element={<SettingsPage />} />
-                            <Route path="*" element={<Navigate to="/" replace />} />
                           </Route>
+
+                          {/* Redirect all other routes to dashboard */}
+                          <Route path="*" element={<Navigate to="/dashboard" replace />} />
                         </Routes>
                       </Router>
                     </ChatProvider>

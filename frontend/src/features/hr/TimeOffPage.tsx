@@ -13,6 +13,7 @@ import {
   MenuItem,
   useTheme,
   alpha,
+  IconButton,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -24,69 +25,63 @@ import {
   Cancel as RejectedIcon,
   Schedule as PendingIcon,
 } from '@mui/icons-material';
+import { format } from 'date-fns';
+
+import { useRequests } from '@/hooks/useRequests';
+import { LeaveType, LeaveStatus } from '@/config/firestore-schema';
+import { useAuth } from '@/contexts/AuthContext';
+import { useSnackbar } from '@/contexts/SnackbarContext';
 
 const leaveTypes = [
-  { value: 'vacation', label: 'Vacation' },
-  { value: 'sick', label: 'Sick Leave' },
-  { value: 'personal', label: 'Personal Leave' },
-  { value: 'wfh', label: 'Work From Home' },
+  { value: 'vacation' as LeaveType, label: 'Vacation' },
+  { value: 'sick' as LeaveType, label: 'Sick Leave' },
+  { value: 'personal' as LeaveType, label: 'Personal Leave' },
+  { value: 'other' as LeaveType, label: 'Other' },
 ];
-
-interface LeaveRequest {
-  id: string;
-  type: string;
-  startDate: Date;
-  endDate: Date;
-  status: 'pending' | 'approved' | 'rejected';
-  description: string;
-}
 
 export default function TimeOffPage() {
   const theme = useTheme();
+  const { showSnackbar } = useSnackbar();
+  const { userRole } = useAuth();
+  const {
+    leaveRequests,
+    loading,
+    submitLeaveRequest,
+    updateRequestStatus,
+  } = useRequests();
+
   const [openDialog, setOpenDialog] = useState(false);
-  const [selectedDates, setSelectedDates] = useState<{
-    start: Date | null;
-    end: Date | null;
-  }>({
-    start: null,
-    end: null,
+  const [selectedRequest, setSelectedRequest] = useState<any>(null);
+  const [approverNote, setApproverNote] = useState('');
+  
+  const [leaveForm, setLeaveForm] = useState({
+    type: 'vacation' as LeaveType,
+    startDate: new Date(),
+    endDate: new Date(),
+    reason: '',
   });
-  const [leaveType, setLeaveType] = useState('');
-  const [description, setDescription] = useState('');
 
-  const [requests] = useState<LeaveRequest[]>([
-    {
-      id: '1',
-      type: 'vacation',
-      startDate: new Date(2025, 2, 15),
-      endDate: new Date(2025, 2, 20),
-      status: 'approved',
-      description: 'Annual family vacation',
-    },
-    {
-      id: '2',
-      type: 'sick',
-      startDate: new Date(2025, 1, 5),
-      endDate: new Date(2025, 1, 6),
-      status: 'rejected',
-      description: 'Not feeling well',
-    },
-    {
-      id: '3',
-      type: 'wfh',
-      startDate: new Date(2025, 2, 1),
-      endDate: new Date(2025, 2, 1),
-      status: 'pending',
-      description: 'Working from home',
-    },
-  ]);
+  const handleSubmit = async () => {
+    try {
+      await submitLeaveRequest(leaveForm);
+      setOpenDialog(false);
+      showSnackbar('Leave request submitted successfully', 'success');
+    } catch (error) {
+      showSnackbar('Failed to submit leave request', 'error');
+    }
+  };
 
-  const handleSubmit = () => {
-    // Handle submit logic here
-    setOpenDialog(false);
-    setSelectedDates({ start: null, end: null });
-    setLeaveType('');
-    setDescription('');
+  const handleAction = async (status: LeaveStatus) => {
+    if (!selectedRequest) return;
+
+    try {
+      await updateRequestStatus('leave', selectedRequest.id, status, approverNote);
+      setSelectedRequest(null);
+      setApproverNote('');
+      showSnackbar(`Request ${status} successfully`, 'success');
+    } catch (error) {
+      showSnackbar(`Failed to ${status} request`, 'error');
+    }
   };
 
   const getStatusIcon = (status: string) => {
@@ -100,197 +95,107 @@ export default function TimeOffPage() {
     }
   };
 
+  if (loading) {
+    return (
+      <Box sx={{ width: '100%', p: 3 }}>
+        <Typography variant="h4" gutterBottom>Time Off</Typography>
+        <Paper sx={{ p: 2 }}>
+          <Typography>Loading leave requests...</Typography>
+        </Paper>
+      </Box>
+    );
+  }
+
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box sx={{ py: 3 }}>
-        {/* Header */}
-        <Grid container spacing={3} sx={{ mb: 3 }}>
-          <Grid item xs>
-            <Typography variant="h4" gutterBottom>
-              Time Off Management
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              Request and manage your time off
-            </Typography>
-          </Grid>
-          <Grid item>
-            <Button
-              variant="contained"
-              startIcon={<EventIcon />}
-              onClick={() => setOpenDialog(true)}
-            >
-              Request Time Off
-            </Button>
-          </Grid>
-        </Grid>
+      <Box sx={{ p: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h4">Time Off</Typography>
+          <Button
+            variant="contained"
+            startIcon={<EventIcon />}
+            onClick={() => setOpenDialog(true)}
+          >
+            Request Time Off
+          </Button>
+        </Box>
 
-        {/* Stats Cards */}
-        <Grid container spacing={3} sx={{ mb: 3 }}>
-          <Grid item xs={12} sm={6} md={3}>
-            <Paper
-              sx={{
-                p: 3,
-                borderRadius: 2,
-                bgcolor: alpha(theme.palette.primary.main, 0.1),
-              }}
-            >
-              <TimeIcon
-                sx={{ fontSize: 40, color: 'primary.main', mb: 1 }}
-              />
-              <Typography variant="h4" gutterBottom>
-                15
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Days Available
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Paper
-              sx={{
-                p: 3,
-                borderRadius: 2,
-                bgcolor: alpha(theme.palette.success.main, 0.1),
-              }}
-            >
-              <ApprovedIcon
-                sx={{ fontSize: 40, color: 'success.main', mb: 1 }}
-              />
-              <Typography variant="h4" gutterBottom>
-                5
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Days Used
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Paper
-              sx={{
-                p: 3,
-                borderRadius: 2,
-                bgcolor: alpha(theme.palette.warning.main, 0.1),
-              }}
-            >
-              <PendingIcon
-                sx={{ fontSize: 40, color: 'warning.main', mb: 1 }}
-              />
-              <Typography variant="h4" gutterBottom>
-                2
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Pending Requests
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Paper
-              sx={{
-                p: 3,
-                borderRadius: 2,
-                bgcolor: alpha(theme.palette.info.main, 0.1),
-              }}
-            >
-              <EventIcon
-                sx={{ fontSize: 40, color: 'info.main', mb: 1 }}
-              />
-              <Typography variant="h4" gutterBottom>
-                8
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Upcoming Days Off
-              </Typography>
-            </Paper>
-          </Grid>
-        </Grid>
-
-        {/* Requests List */}
-        <Paper sx={{ borderRadius: 2 }}>
-          <Box sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Leave Requests
-            </Typography>
-            <Grid container spacing={2}>
-              {requests.map((request) => (
-                <Grid item xs={12} key={request.id}>
-                  <Paper
-                    sx={{
-                      p: 2,
-                      borderRadius: 2,
-                      bgcolor: 'background.default',
-                    }}
-                  >
-                    <Grid container spacing={2} alignItems="center">
-                      <Grid item>{getStatusIcon(request.status)}</Grid>
-                      <Grid item xs>
-                        <Typography variant="subtitle1">
-                          {request.type.charAt(0).toUpperCase() + request.type.slice(1)}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {request.startDate.toLocaleDateString()} -{' '}
-                          {request.endDate.toLocaleDateString()}
-                        </Typography>
-                      </Grid>
-                      <Grid item>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            px: 2,
-                            py: 0.5,
-                            borderRadius: 1,
-                            bgcolor: alpha(
-                              theme.palette[
-                                request.status === 'approved'
-                                  ? 'success'
-                                  : request.status === 'rejected'
-                                  ? 'error'
-                                  : 'warning'
-                              ].main,
-                              0.1
-                            ),
-                            color:
-                              theme.palette[
-                                request.status === 'approved'
-                                  ? 'success'
-                                  : request.status === 'rejected'
-                                  ? 'error'
-                                  : 'warning'
-                              ].main,
-                          }}
-                        >
-                          {request.status.toUpperCase()}
-                        </Typography>
-                      </Grid>
-                    </Grid>
-                  </Paper>
-                </Grid>
-              ))}
+        <Grid container spacing={3}>
+          {leaveRequests.map((request) => (
+            <Grid item xs={12} md={6} lg={4} key={request.id}>
+              <Paper
+                sx={{
+                  p: 2,
+                  height: '100%',
+                  bgcolor: (theme) =>
+                    request.status === 'approved'
+                      ? alpha(theme.palette.success.main, 0.1)
+                      : request.status === 'rejected'
+                      ? alpha(theme.palette.error.main, 0.1)
+                      : alpha(theme.palette.warning.main, 0.1),
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6" sx={{ flexGrow: 1 }}>
+                    {request.type.charAt(0).toUpperCase() + request.type.slice(1)}
+                  </Typography>
+                  {getStatusIcon(request.status)}
+                  {userRole === 'manager' && request.status === 'pending' && (
+                    <Box sx={{ ml: 1 }}>
+                      <IconButton
+                        size="small"
+                        color="success"
+                        onClick={() => setSelectedRequest(request)}
+                      >
+                        <ApprovedIcon />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={() => setSelectedRequest(request)}
+                      >
+                        <RejectedIcon />
+                      </IconButton>
+                    </Box>
+                  )}
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <TimeIcon sx={{ mr: 1, fontSize: 20 }} />
+                  <Typography variant="body2">
+                    {format(request.startDate, 'MMM dd, yyyy')} -{' '}
+                    {format(request.endDate, 'MMM dd, yyyy')}
+                  </Typography>
+                </Box>
+                <Typography variant="body2" color="text.secondary">
+                  {request.reason}
+                </Typography>
+                {request.approverNote && (
+                  <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
+                    Note: {request.approverNote}
+                  </Typography>
+                )}
+              </Paper>
             </Grid>
-          </Box>
-        </Paper>
+          ))}
+        </Grid>
 
-        {/* Request Dialog */}
-        <Dialog
-          open={openDialog}
-          onClose={() => setOpenDialog(false)}
-          maxWidth="sm"
-          fullWidth
-        >
+        {/* New Leave Request Dialog */}
+        <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
           <DialogTitle>Request Time Off</DialogTitle>
           <DialogContent>
-            <Box sx={{ pt: 2 }}>
-              <Grid container spacing={3}>
+            <Box sx={{ mt: 2 }}>
+              <Grid container spacing={2}>
                 <Grid item xs={12}>
                   <TextField
                     select
                     fullWidth
                     label="Leave Type"
-                    value={leaveType}
-                    onChange={(e) => setLeaveType(e.target.value)}
+                    value={leaveForm.type}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, type: e.target.value as LeaveType })}
                   >
-                    {leaveTypes.map((option) => (
-                      <MenuItem key={option.value} value={option.value}>
-                        {option.label}
+                    {leaveTypes.map((type) => (
+                      <MenuItem key={type.value} value={type.value}>
+                        {type.label}
                       </MenuItem>
                     ))}
                   </TextField>
@@ -298,19 +203,15 @@ export default function TimeOffPage() {
                 <Grid item xs={12} sm={6}>
                   <DatePicker
                     label="Start Date"
-                    value={selectedDates.start}
-                    onChange={(date) =>
-                      setSelectedDates({ ...selectedDates, start: date })
-                    }
+                    value={leaveForm.startDate}
+                    onChange={(date) => date && setLeaveForm({ ...leaveForm, startDate: date })}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
                   <DatePicker
                     label="End Date"
-                    value={selectedDates.end}
-                    onChange={(date) =>
-                      setSelectedDates({ ...selectedDates, end: date })
-                    }
+                    value={leaveForm.endDate}
+                    onChange={(date) => date && setLeaveForm({ ...leaveForm, endDate: date })}
                   />
                 </Grid>
                 <Grid item xs={12}>
@@ -318,9 +219,9 @@ export default function TimeOffPage() {
                     fullWidth
                     multiline
                     rows={4}
-                    label="Description"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
+                    label="Reason"
+                    value={leaveForm.reason}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })}
                   />
                 </Grid>
               </Grid>
@@ -328,12 +229,31 @@ export default function TimeOffPage() {
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
-            <Button
-              variant="contained"
-              onClick={handleSubmit}
-              disabled={!leaveType || !selectedDates.start || !selectedDates.end}
-            >
-              Submit Request
+            <Button onClick={handleSubmit} variant="contained">Submit</Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Review Request Dialog */}
+        <Dialog open={!!selectedRequest} onClose={() => setSelectedRequest(null)} maxWidth="sm" fullWidth>
+          <DialogTitle>Review Leave Request</DialogTitle>
+          <DialogContent>
+            <TextField
+              fullWidth
+              multiline
+              rows={4}
+              label="Note (Optional)"
+              value={approverNote}
+              onChange={(e) => setApproverNote(e.target.value)}
+              sx={{ mt: 2 }}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setSelectedRequest(null)}>Cancel</Button>
+            <Button onClick={() => handleAction('rejected')} color="error">
+              Reject
+            </Button>
+            <Button onClick={() => handleAction('approved')} color="success" variant="contained">
+              Approve
             </Button>
           </DialogActions>
         </Dialog>
