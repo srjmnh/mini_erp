@@ -153,7 +153,7 @@ export default function DepartmentsPage() {
     const departmentData = {
       name: formData.get('name') as string,
       description: formData.get('description') as string,
-      headId: formData.get('managerId') as string || null, // Using headId instead of managerId for consistency
+      headId: formData.get('headId') as string || null, // Using headId for consistency
     };
 
     try {
@@ -551,7 +551,7 @@ export default function DepartmentsPage() {
                             </Typography>
                             <Stack direction="row" spacing={-0.5}>
                               {deptEmployees.slice(0, 5).map((employee) => (
-                                <Tooltip key={employee.id} title={`${employee.firstName} ${employee.lastName}`}>
+                                <Tooltip key={employee.id} title={employee.name || 'Unnamed Employee'}>
                                   <Avatar
                                     src={employee.photoURL}
                                     sx={{
@@ -560,7 +560,7 @@ export default function DepartmentsPage() {
                                       border: '2px solid white'
                                     }}
                                   >
-                                    {employee.firstName.charAt(0)}
+                                    {(employee.name || 'U')[0]}
                                   </Avatar>
                                 </Tooltip>
                               ))}

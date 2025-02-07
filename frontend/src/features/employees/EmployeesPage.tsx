@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getDepartmentName, isEmployeeDepartmentHead, getDepartmentHeadOf, getManagerName } from './utils';
 import {
   Box,
   Typography,
@@ -34,6 +35,8 @@ import {
   Delete as DeleteIcon,
   Search as SearchIcon,
   Visibility as ViewIcon,
+  Email as EmailIcon,
+  Phone as PhoneIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFirestore } from '@/contexts/FirestoreContext';
@@ -315,35 +318,9 @@ export default function EmployeesPage() {
     }
   };
 
-  const getDepartmentName = (departmentId: string | undefined) => {
-    if (!departmentId) return 'Not Assigned';
-    const department = departments.find(d => d.id === departmentId);
-    return department ? department.name : 'Not Assigned';
-  };
-
-  const isEmployeeDepartmentHead = (employeeId: string) => {
-    const employee = employees.find(e => e.id === employeeId);
-    return employee?.position === 'Department Head';
-  };
-
-  const getDepartmentHeadOf = (employeeId: string) => {
-    const employee = employees.find(e => e.id === employeeId);
-    return employee?.departmentId ? getDepartmentName(employee.departmentId) : null;
-  };
-
-  const getManagerName = (employeeId: string) => {
-    const employee = employees.find(e => e.id === employeeId);
-    if (!employee?.departmentId || employee.position === 'Department Head') {
-      return 'No Department Head';
-    }
-    
-    // Find other employees in the same department who are department heads
-    const departmentHead = employees.find(e => 
-      e.departmentId === employee.departmentId && 
-      e.position === 'Department Head'
-    );
-    
-    return departmentHead ? `${departmentHead.firstName} ${departmentHead.lastName}` : 'No Department Head';
+  const getDepartmentHeadName = (departmentId: string) => {
+    const departmentHead = employees.find(emp => emp.id === departments.find(d => d.id === departmentId)?.managerId);
+    return departmentHead ? departmentHead.name : 'No Department Head';
   };
 
   // Debug log departments and employees on initial load
@@ -496,17 +473,17 @@ export default function EmployeesPage() {
                 flexDirection: 'column',
                 p: 3,
                 position: 'relative',
-                bgcolor: isEmployeeDepartmentHead(employee.id) 
+                bgcolor: isEmployeeDepartmentHead(departments, employee.id) 
                   ? alpha(theme.palette.primary.main, 0.08)
                   : 'background.paper',
                 border: '1px solid',
-                borderColor: isEmployeeDepartmentHead(employee.id)
+                borderColor: isEmployeeDepartmentHead(departments, employee.id)
                   ? theme.palette.primary.main
                   : theme.palette.divider,
-                borderLeft: isEmployeeDepartmentHead(employee.id)
+                borderLeft: isEmployeeDepartmentHead(departments, employee.id)
                   ? `6px solid ${theme.palette.primary.main}`
                   : `1px solid ${theme.palette.divider}`,
-                boxShadow: isEmployeeDepartmentHead(employee.id)
+                boxShadow: isEmployeeDepartmentHead(departments, employee.id)
                   ? `0 4px 12px ${alpha(theme.palette.primary.main, 0.2)}`
                   : theme.shadows[1],
                 transition: 'all 0.2s',
@@ -519,153 +496,155 @@ export default function EmployeesPage() {
                 },
               })}
             >
-              {/* Employee Header with Photo */}
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                  <Avatar
-                    sx={{
-                      width: 56,
-                      height: 56,
-                      border: '2px solid',
-                      borderColor: theme.palette.primary.main,
-                      bgcolor: alpha(theme.palette.primary.main, 0.1),
-                    }}
-                  >
-                    {employee.name?.[0]}
-                  </Avatar>
-                  <Box>
-                    <Typography variant="h6" sx={{ fontWeight: 500 }}>
-                      {`${employee.firstName || ''} ${employee.lastName || ''}`}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {employee.position || 'Unassigned'} • Level {employee.currentLevel || 1}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      {getDepartmentName(employee.departmentId)}
-                      {isEmployeeDepartmentHead(employee.id) && (
-                        <Chip size="small" label="Department Head" color="primary" sx={{ height: 20 }} />
-                      )}
-                    </Typography>
-                  </Box>
-                </Box>
-                
-                {/* Status Chip */}
-                <Chip
-                  label={employee.status || 'active'}
-                  size="small"
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                {/* Left section - Avatar */}
+                <Avatar
                   sx={{
-                    bgcolor: (employee.status || 'active') === 'active' 
-                      ? alpha(theme.palette.success.main, 0.1)
-                      : alpha(theme.palette.error.main, 0.1),
-                    color: (employee.status || 'active') === 'active'
-                      ? 'success.main'
-                      : 'error.main',
+                    width: 48,
+                    height: 48,
+                    bgcolor: alpha(theme.palette.primary.main, 0.1),
+                    color: theme.palette.primary.main,
                   }}
-                />
-              </Box>
+                >
+                  {employee.name?.[0]}
+                </Avatar>
 
-              {/* Employee Details */}
-              <Stack spacing={2}>
-                {/* Contact Info */}
-                <Box>
-                  <Stack spacing={1}>
-                    <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <span style={{ color: theme.palette.text.secondary, minWidth: 45 }}>Email:</span>
-                      {employee.email}
-                    </Typography>
-                    <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <span style={{ color: theme.palette.text.secondary, minWidth: 45 }}>Phone:</span>
-                      {employee.phone || 'Not provided'}
-                    </Typography>
-                    <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <span style={{ color: theme.palette.text.secondary, minWidth: 45 }}>Joined:</span>
-                      {employee.joiningDate ? new Date(employee.joiningDate).toLocaleDateString() : 'Not set'}
-                    </Typography>
-                    <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <span style={{ color: theme.palette.text.secondary, minWidth: 45 }}>Salary:</span>
-                      ${employee.salary?.toLocaleString() || '0'}
-                    </Typography>
-                  </Stack>
-                </Box>
+                {/* Right section - Details */}
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  {/* Name and position */}
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 500, mb: 0.5 }}>
+                        {employee.name || 'Unnamed Employee'}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" noWrap>
+                        {employee.position || 'Unassigned'} • Level {employee.currentLevel || 1}
+                      </Typography>
+                    </Box>
+                    <Chip
+                      label={employee.status || 'active'}
+                      size="small"
+                      sx={{
+                        ml: 1,
+                        bgcolor: (employee.status || 'active') === 'active' 
+                          ? alpha(theme.palette.success.main, 0.1)
+                          : alpha(theme.palette.error.main, 0.1),
+                        color: (employee.status || 'active') === 'active'
+                          ? 'success.main'
+                          : 'error.main',
+                        flexShrink: 0,
+                      }}
+                    />
+                  </Box>
 
-                {/* Skills */}
-                <Box>
-                  <Typography variant="caption" color="text.secondary" gutterBottom>
-                    Skills
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                    {employee.skills?.slice(0, 3).map(skill => (
-                      <Chip
-                        key={skill}
-                        size="small"
-                        label={skill}
-                        color="primary"
-                        variant="outlined"
-                      />
-                    ))}
-                    {employee.skills?.length > 3 && (
-                      <Chip
-                        size="small"
-                        label={`+${employee.skills.length - 3} more`}
-                        color="default"
-                        variant="outlined"
+                  {/* Department and role */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                    <Typography variant="body2" color="text.secondary" noWrap>
+                      {getDepartmentName(departments, employee.departmentId)}
+                    </Typography>
+                    {isEmployeeDepartmentHead(departments, employee.id) && (
+                      <Chip 
+                        size="small" 
+                        label="Department Head" 
+                        color="primary" 
+                        sx={{ height: 20, flexShrink: 0 }} 
                       />
                     )}
                   </Box>
-                </Box>
 
-                {/* Location & Details */}
-                <Box>
-                  <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <span style={{ color: theme.palette.text.secondary }}>Location:</span>
-                    {employee.address?.city}, {employee.address?.state}
-                  </Typography>
-                  <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <span style={{ color: theme.palette.text.secondary }}>Joined:</span>
-                    {new Date(employee.joiningDate).toLocaleDateString()}
-                  </Typography>
-                  <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <span style={{ color: theme.palette.text.secondary }}>Salary:</span>
-                    ${employee.salary.toLocaleString()}
-                  </Typography>
+                  {/* Contact info in 2 columns */}
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }} noWrap>
+                        <EmailIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                        {employee.email}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }} noWrap>
+                        <PhoneIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                        {employee.phone || 'Not provided'}
+                      </Typography>
+                    </Grid>
+                  </Grid>
                 </Box>
-              </Stack>
+              </Box>
+
+              {/* Skills */}
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="caption" color="text.secondary" gutterBottom>
+                  Skills
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  {employee.skills?.slice(0, 3).map(skill => (
+                    <Chip
+                      key={skill}
+                      size="small"
+                      label={skill}
+                      color="primary"
+                      variant="outlined"
+                    />
+                  ))}
+                  {employee.skills?.length > 3 && (
+                    <Chip
+                      size="small"
+                      label={`+${employee.skills.length - 3} more`}
+                      color="default"
+                      variant="outlined"
+                    />
+                  )}
+                </Box>
+              </Box>
+
+              {/* Location & Details */}
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                  <span style={{ color: theme.palette.text.secondary }}>Location:</span>
+                  {employee.address?.city}, {employee.address?.state}
+                </Typography>
+                <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                  <span style={{ color: theme.palette.text.secondary }}>Joined:</span>
+                  {new Date(employee.joiningDate).toLocaleDateString()}
+                </Typography>
+                <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <span style={{ color: theme.palette.text.secondary }}>Salary:</span>
+                  ${employee.salary.toLocaleString()}
+                </Typography>
+              </Box>
 
               {/* Active Projects */}
-              <Box sx={{ mb: 2 }}>
+              <Box sx={{ mt: 2 }}>
                 <Typography variant="subtitle2" gutterBottom>Active Projects</Typography>
-                <Stack spacing={1}>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                   {projects
                     .filter(project => 
                       project.status !== 'completed' && 
                       project.members.some(member => member.employeeId === employee.id)
                     )
+                    .slice(0, 3)
                     .map(project => (
-                      <Box
+                      <Chip
                         key={project.id}
-                        sx={{
-                          p: 1,
-                          borderRadius: 1,
-                          bgcolor: 'background.default',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between'
-                        }}
-                      >
-                        <Box>
-                          <Typography variant="body2">{project.name}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {project.members.find(m => m.employeeId === employee.id)?.role || 'Team Member'}
-                          </Typography>
-                        </Box>
-                        <Chip
-                          label={project.status.replace('_', ' ')}
-                          size="small"
-                          color={project.status === 'active' ? 'primary' : 'default'}
-                          sx={{ textTransform: 'capitalize' }}
-                        />
-                      </Box>
+                        label={project.name}
+                        size="small"
+                        color="info"
+                        variant="outlined"
+                      />
                     ))}
+                  {projects.filter(project => 
+                    project.status !== 'completed' && 
+                    project.members.some(member => member.employeeId === employee.id)
+                  ).length > 3 && (
+                    <Chip
+                      size="small"
+                      label={`+${projects.filter(project => 
+                        project.status !== 'completed' && 
+                        project.members.some(member => member.employeeId === employee.id)
+                      ).length - 3} more`}
+                      color="default"
+                      variant="outlined"
+                    />
+                  )}
                   {!projects.some(project => 
                     project.status !== 'completed' && 
                     project.members.some(member => member.employeeId === employee.id)
@@ -674,7 +653,7 @@ export default function EmployeesPage() {
                       No active projects
                     </Typography>
                   )}
-                </Stack>
+                </Box>
               </Box>
             </Card>
           </Grid>

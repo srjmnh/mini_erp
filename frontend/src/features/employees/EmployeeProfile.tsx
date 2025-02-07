@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useSnackbar } from '../../contexts/SnackbarContext';
+import { getDepartmentName, isEmployeeDepartmentHead } from './utils';
 import {
   Box,
   Paper,
+  Button,
   Tab,
   Tabs,
   Typography,
@@ -17,7 +20,6 @@ import {
   alpha,
   TextField,
   MenuItem,
-  Button,
   Card,
   CardContent,
   Stack,
@@ -116,6 +118,7 @@ export default function EmployeeProfile() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { employees, departments, updateEmployee, fetchDepartments } = useFirestore();
+  const { showSnackbar } = useSnackbar();
   const [departmentsLoaded, setDepartmentsLoaded] = useState(false);
   const { supabase } = useSupabase();
   const [openDialog, setOpenDialog] = useState(false);
@@ -151,16 +154,32 @@ export default function EmployeeProfile() {
     const department = departments.find(d => d.id === departmentId);
     if (!department) return null;
 
-    // Try to find department head, manager, or lead
+    // Get department manager from departments collection
+    console.log('Department:', department);
+    console.log('All Employees:', employees.map(e => ({ id: e.id, name: e.name, dept: e.departmentId, pos: e.position })));
+
+    // First try to find by headId
+    if (department.headId) {
+      const deptHead = employees.find(e => e.id === department.headId);
+      if (deptHead) {
+        console.log('Found department head by headId:', { 
+          name: deptHead.name, 
+          position: deptHead.position, 
+          dept: deptHead.departmentId 
+        });
+        return { ...deptHead, department };
+      }
+    }
+    
+    // Then try to find by position
     const deptHead = employees.find(e => 
       e.departmentId === departmentId && 
       (e.position?.toLowerCase().includes('head') || 
-       e.position?.toLowerCase().includes('manager') || 
-       e.position?.toLowerCase().includes('lead'))
+       e.position?.toLowerCase().includes('manager'))
     );
 
     if (deptHead) {
-      console.log('Found department head:', { 
+      console.log('Found department head by position:', { 
         name: deptHead.name, 
         position: deptHead.position, 
         dept: deptHead.departmentId 
@@ -177,10 +196,22 @@ export default function EmployeeProfile() {
       return 'No Department Assigned';
     }
     
-    // If employee has a custom reports-to relationship
-    if (employee.reportsTo) {
-      const manager = employees.find(e => e.id === employee.reportsTo);
-      return manager ? manager.name : 'Unknown Manager';
+    const dept = departments.find(d => d.id === employee.departmentId);
+    if (!dept) return 'No Department Found';
+
+    // First check if there's a department head
+    if (dept.headId) {
+      const deptHead = employees.find(e => e.id === dept.headId);
+      if (deptHead) {
+        // If there's an override, show both
+        if (employee.reportsTo && employee.reportsTo !== dept.headId) {
+          const overrideManager = employees.find(e => e.id === employee.reportsTo);
+          if (overrideManager) {
+            return `${overrideManager.name} (Override from ${deptHead.name})`;
+          }
+        }
+        return deptHead.name;
+      }
     }
     
     // Find department head
@@ -302,6 +333,24 @@ export default function EmployeeProfile() {
     setHasChanges(true);
   };
 
+  const handleSavePersonalInfo = async () => {
+    if (!id) return;
+
+    try {
+      setError(null);
+      await updateEmployee(id, {
+        ...employee,
+        updatedAt: new Date().toISOString()
+      });
+      setHasChanges(false);
+      showSnackbar('Personal information updated successfully', 'success');
+    } catch (error: any) {
+      console.error('Error updating personal information:', error);
+      setError('Failed to update personal information: ' + error.message);
+      showSnackbar('Failed to update personal information', 'error');
+    }
+  };
+
   const handleSaveChanges = async () => {
     try {
       await updateEmployee(id, employee);
@@ -401,8 +450,9 @@ export default function EmployeeProfile() {
           color: 'white',
         }}
       >
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={4} sx={{ display: 'flex', alignItems: 'center' }}>
+        <Grid container spacing={3} alignItems="center">
+          {/* Left section - Photo and basic info */}
+          <Grid item xs={12} md={3}>
             <Box sx={{ position: 'relative', mb: 3, textAlign: 'center' }}>
               <input
                 type="file"
@@ -433,7 +483,7 @@ export default function EmployeeProfile() {
                       boxShadow: theme.shadows[3],
                     }}
                   >
-                    {employee.name ? employee.name.split(' ').map(n => n[0]).join('') : 'E'}
+                    {employee.name ? employee.name.split(' ').map(n => n[0]).join('') : 'UE'}
                   </Avatar>
                   <Box
                     className="upload-overlay"
@@ -458,148 +508,68 @@ export default function EmployeeProfile() {
                 </Box>
               </label>
             </Box>
-            <Box sx={{ ml: 2 }}>
-              <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
-                {employee.name || 'Employee'}
-              </Typography>
-              <Typography variant="h6" sx={{ opacity: 0.9 }}>
-                {employee.position}
-              </Typography>
-              <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-                <TextField
-                  select
-                  size="small"
-                  label="Reports To"
-                  value={employee.reportsTo || ''}
-                  onChange={(e) => handleFieldChange('reportsTo', e.target.value)}
-                  sx={{ minWidth: 250, bgcolor: 'rgba(255,255,255,0.1)', borderRadius: 1 }}
-                  InputProps={{
-                    sx: { color: 'white', '.MuiSelect-icon': { color: 'white' } }
-                  }}
-                  InputLabelProps={{
-                    sx: { color: 'white' }
-                  }}
-                >
-                  <MenuItem value="">
-                    <Stack>
-                      <Typography>
-                        <em>
-                          {(() => {
-                            if (!departmentsLoaded || !employee.departmentId) {
-                              return 'Loading...';
-                            }
-
-                            const head = getDepartmentHead(employee.departmentId);
-                            if (head) {
-                              return `Default (${head.name} - ${head.department.name} ${head.position})`;
-                            }
-
-                            const dept = departments.find(d => d.id === employee.departmentId);
-                            return dept ? 
-                              `Default (No Head for ${dept.name} Department)` : 
-                              'Default (No Department Assigned)';
-                          })()} 
-                        </em>
-                      </Typography>
-                    </Stack>
-                  </MenuItem>
-                  {getAvailableManagers(employee).map((manager) => {
-                    const managerDept = departments.find(d => d.id === manager.departmentId);
-                    return (
-                      <MenuItem key={manager.id} value={manager.id}>
-                        <Stack>
-                          <Typography>{manager.name}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {manager.position} • {managerDept?.name || 'No Department'}
-                          </Typography>
-                        </Stack>
-                      </MenuItem>
-                    );
-                  })}
-                </TextField>
-                {hasChanges && (
-                  <Button 
-                    variant="contained" 
-                    onClick={handleSaveChanges}
-                    sx={{ bgcolor: 'rgba(255,255,255,0.2)', '&:hover': { bgcolor: 'rgba(255,255,255,0.3)' } }}
-                  >
-                    Save Changes
-                  </Button>
-                )}
-              </Box>
-              <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                <Chip 
-                  label={employee.status}
-                  size="small"
-                  sx={{ 
-                    bgcolor: employee.status === 'active' ? alpha('#4caf50', 0.2) : alpha('#9e9e9e', 0.2),
-                    color: 'white',
-                    textTransform: 'capitalize',
-                  }}
-                />
-                <Chip 
-                  label={getDepartmentName(employee.departmentId)}
-                  size="small"
-                  sx={{ 
-                    bgcolor: alpha('#ffffff', 0.2),
-                    color: 'white',
-                  }}
-                />
-              </Box>
-            </Box>
           </Grid>
-          <Grid item xs={12} md={8}>
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6} md={4}>
-                <Box sx={{ color: 'white' }}>
-                  <Typography variant="body2" sx={{ opacity: 0.7 }}>Email</Typography>
-                  <Typography>{employee.email}</Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={4}>
-                <Box sx={{ color: 'white' }}>
-                  <Typography variant="body2" sx={{ opacity: 0.7 }}>Phone</Typography>
-                  <Typography>{employee.phone || 'Not provided'}</Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={4}>
-                <Box sx={{ color: 'white' }}>
-                  <Typography variant="body2" sx={{ opacity: 0.7 }}>Department</Typography>
-                  <Typography>{departments.find(d => d.id === employee.departmentId)?.name || 'Not Assigned'}</Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={4}>
-                <Box sx={{ color: 'white' }}>
-                  <Typography variant="body2" sx={{ opacity: 0.7 }}>Join Date</Typography>
-                  <Typography>{new Date(employee.joinDate).toLocaleDateString()}</Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={4}>
-                <Box sx={{ color: 'white' }}>
-                  <Typography variant="body2" sx={{ opacity: 0.7 }}>Employee ID</Typography>
-                  <Typography>{employee.employeeId || id}</Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={4}>
-                <Box sx={{ color: 'white' }}>
-                  <Typography variant="body2" sx={{ opacity: 0.7 }}>Location</Typography>
-                  <Typography>{employee.workLocation || 'Not specified'}</Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={4}>
-                <Box sx={{ color: 'white' }}>
-                  <Typography variant="body2" sx={{ opacity: 0.7 }}>Reports To</Typography>
-                  <Typography>
-                    {employee.reportsTo ? 
-                      employees.find(e => e.id === employee.reportsTo)?.name : 
-                      employees.find(e => e.departmentId === employee.departmentId && e.position?.toLowerCase().includes('head'))?.name || 'No Manager'}
+          {/* Right section - Employee details */}
+          <Grid item xs={12} md={9}>
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+                <Box>
+                  <Typography variant="h4" sx={{ fontWeight: 500, mb: 1 }}>
+                    {employee.name || 'Unnamed Employee'}
                   </Typography>
+                  <Typography variant="h6" sx={{ color: 'rgba(255, 255, 255, 0.9)', mb: 0.5 }}>
+                    {employee.position || 'No Position'} • Level {employee.currentLevel || 1}
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    <BusinessIcon sx={{ fontSize: 20 }} />
+                    <Typography>{getDepartmentName(departments, employee.departmentId)}</Typography>
+                    {isEmployeeDepartmentHead(departments, employee.id) && (
+                      <Chip
+                        size="small"
+                        label="Department Head"
+                        sx={{ bgcolor: 'rgba(255, 255, 255, 0.2)', color: 'white' }}
+                      />
+                    )}
+                  </Box>
                 </Box>
+                <Box>
+                  <IconButton
+                    onClick={() => setEditDialogOpen(true)}
+                    sx={{ color: 'white', bgcolor: 'rgba(255, 255, 255, 0.1)' }}
+                  >
+                    <EditIcon />
+                  </IconButton>
+                </Box>
+              </Box>
+              
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    <EmailIcon sx={{ fontSize: 20 }} />
+                    <Typography>{employee.email}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <PhoneIcon sx={{ fontSize: 20 }} />
+                    <Typography>{employee.phone || 'No phone number'}</Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    <JoinDateIcon sx={{ fontSize: 20 }} />
+                    <Typography>Joined: {employee.joiningDate ? new Date(employee.joiningDate).toLocaleDateString() : 'Not set'}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <SalaryIcon sx={{ fontSize: 20 }} />
+                    <Typography>Salary: ${employee.salary?.toLocaleString() || '0'}</Typography>
+                  </Box>
+                </Grid>
               </Grid>
-            </Grid>
+            </Box>
           </Grid>
         </Grid>
       </Paper>
+
+
 
       {/* Tabs Section */}
       <Paper 
@@ -716,6 +686,16 @@ export default function EmployeeProfile() {
                       onChange={(e) => handleFieldChange('address', e.target.value)}
                     />
                   </Grid>
+                  <Grid item xs={12} sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={handleSavePersonalInfo}
+                      disabled={!hasChanges}
+                    >
+                      Save Changes
+                    </Button>
+                  </Grid>
                 </Grid>
               </Grid>
 
@@ -793,56 +773,104 @@ export default function EmployeeProfile() {
                 <Typography variant="h6" sx={{ mb: 3 }}>Reporting Structure</Typography>
                 <Grid container spacing={3}>
                   <Grid item xs={12}>
-                    <Stack direction="row" spacing={2} alignItems="center">
+                    <Stack spacing={2}>
+                      <Typography variant="subtitle1" color="text.secondary">
+                        Reports To
+                      </Typography>
+                      {(() => {
+                        const dept = departments.find(d => d.id === employee.departmentId);
+                        if (!dept) return <Typography><em>No Department Assigned</em></Typography>;
+                        
+                        // If there's an override, show that manager
+                        if (employee.reportsTo) {
+                          const overrideManager = employees.find(e => e.id === employee.reportsTo);
+                          if (overrideManager) {
+                            return (
+                              <Box>
+                                <Typography variant="body1">
+                                  {overrideManager.name}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {overrideManager.position} • {departments.find(d => d.id === overrideManager.departmentId)?.name}
+                                </Typography>
+                                <Typography variant="caption" color="info.main" sx={{ display: 'block', mt: 0.5 }}>
+                                  (Custom Override)
+                                </Typography>
+                              </Box>
+                            );
+                          }
+                        }
+                        
+                        // First try to get department head from departments collection
+                        if (dept.headId) {
+                          const deptHead = employees.find(e => e.id === dept.headId);
+                          if (deptHead) {
+                            console.log('Found department head:', deptHead);
+                            return (
+                              <Box>
+                                <Typography variant="body1">
+                                  {deptHead.name}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {deptHead.position} • {dept.name}
+                                </Typography>
+                                <Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>
+                                  (Department Head)
+                                </Typography>
+                              </Box>
+                            );
+                          }
+                        }
+                        
+                        // Try to find by position if no manager is set
+                        const deptHead = employees.find(e => 
+                          e.departmentId === employee.departmentId && 
+                          (e.position?.toLowerCase().includes('head') || 
+                           e.position?.toLowerCase().includes('manager'))
+                        );
+                        
+                        if (deptHead) {
+                          console.log('Found department head by position:', deptHead);
+                          return (
+                            <Box>
+                              <Typography variant="body1">
+                                {deptHead.name}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {deptHead.position} • {dept.name}
+                              </Typography>
+                              <Typography variant="caption" color="success.main" sx={{ display: 'block', mt: 0.5 }}>
+                                (Department Head)
+                              </Typography>
+                            </Box>
+                          );
+                        }
+                        
+                        // No manager or department head found
+                        return (
+                          <Typography color="text.secondary">
+                            <em>No Manager Assigned for {dept.name} Department</em>
+                          </Typography>
+                        );
+                      })()} 
+                      
+                      {/* Override dropdown */}
                       <TextField
                         select
                         fullWidth
-                        label="Reports To"
+                        size="small"
+                        label="Override Default Manager"
                         value={employee.reportsTo || ''}
                         onChange={(e) => handleFieldChange('reportsTo', e.target.value)}
-                        disabled={employee.position?.includes('Department Head')}
+                        disabled={employee.position?.toLowerCase().includes('head')}
                         helperText={
-                          employee.position?.includes('Department Head') 
-                            ? "Department Heads don't have a reporting manager" 
-                            : "Override default reporting structure"
+                          employee.position?.toLowerCase().includes('head')
+                            ? "Department Heads don't have a reporting manager"
+                            : "Select to override the default department head"
                         }
                       >
                         <MenuItem value="">
-                          <Stack>
-                            {(() => {
-                              console.log('Department ID:', employee.departmentId);
-                              console.log('All Employees:', employees.map(e => ({ id: e.id, name: e.name, dept: e.departmentId, pos: e.position })));
-                              
-                              const deptHead = employees.find(e => 
-                                e.departmentId === employee.departmentId && 
-                                (e.position?.toLowerCase().includes('head') || 
-                                 e.position?.toLowerCase().includes('manager') || 
-                                 e.position?.toLowerCase().includes('lead'))
-                              );
-                              
-                              console.log('Found Department Head:', deptHead);
-                              const dept = departments.find(d => d.id === employee.departmentId);
-                              
-                              if (deptHead) {
-                                return (
-                                  <>
-                                    <Typography>
-                                      <em>Default ({deptHead.name})</em>
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                      {deptHead.position} • {dept?.name}
-                                    </Typography>
-                                  </>
-                                );
-                              }
-                              
-                              return (
-                                <Typography>
-                                  <em>No Department Head Assigned for {dept?.name || 'Department'}</em>
-                                </Typography>
-                              );
-                            })()}
-                          </Stack>
+                          <em>Use Department Head (Default)</em>
                         </MenuItem>
                         {getAvailableManagers(employee).map((manager) => (
                           <MenuItem key={manager.id} value={manager.id}>
@@ -857,15 +885,6 @@ export default function EmployeeProfile() {
                           </MenuItem>
                         ))}
                       </TextField>
-                      {hasChanges && (
-                        <Button
-                          variant="contained"
-                          onClick={handleSaveChanges}
-                          sx={{ minWidth: 100 }}
-                        >
-                          Save
-                        </Button>
-                      )}
                     </Stack>
                   </Grid>
                 </Grid>

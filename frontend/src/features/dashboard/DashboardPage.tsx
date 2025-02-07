@@ -235,9 +235,9 @@ export default function DashboardPage() {
                           <Avatar
                             key={member.employeeId}
                             src={employee?.photoUrl}
-                            alt={employee ? `${employee.firstName} ${employee.lastName}` : ''}
+                            alt={employee?.name || ''}
                           >
-                            {employee ? `${employee.firstName[0]}${employee.lastName[0]}` : ''}
+                            {employee?.name ? employee.name[0] : 'U'}
                           </Avatar>
                         );
                       })}

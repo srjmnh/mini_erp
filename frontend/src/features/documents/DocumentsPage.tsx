@@ -91,7 +91,7 @@ export default function DocumentsPage() {
 
       const empItems = await Promise.all(employees.map(async emp => ({
         id: emp.id,
-        name: `${emp.firstName} ${emp.lastName}`,
+        name: emp.name || 'Unnamed Employee',
         documentCount: await getDocumentCount(`employees/${emp.id}`),
         photoUrl: emp.photoUrl,
         type: 'employee'

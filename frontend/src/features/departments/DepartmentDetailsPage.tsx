@@ -119,7 +119,7 @@ const EditDialog: React.FC<EditDialogProps> = ({
           return {
             id: doc.id,
             ...data,
-            name: data.name || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : (data.firstName || data.lastName || 'Unnamed Employee'))
+            name: data.name || 'Unnamed Employee'
           } as Employee;
         });
 
@@ -205,11 +205,11 @@ const EditDialog: React.FC<EditDialogProps> = ({
                             fontSize: '0.875rem'
                           }}
                         >
-                          {employee.firstName?.[0]}
+                          {employee.name?.[0]}
                         </Avatar>
                         <Box>
                           <Typography>
-                            {employee.firstName} {employee.lastName}
+                            {employee.name}
                           </Typography>
                           {employee.position && (
                             <Typography variant="caption" color="text.secondary">
@@ -304,7 +304,7 @@ const AddMembersDialog: React.FC<AddMembersDialogProps> = ({ open, onClose, depa
             id: doc.id,
             ...data,
             // Ensure name is set, fallback to firstName + lastName if name is not present
-            name: data.name || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : (data.firstName || data.lastName || 'Unnamed Employee'))
+            name: data.name || 'Unnamed Employee'
           } as Employee;
         });
         
@@ -1159,12 +1159,14 @@ const DepartmentDetailsPage = () => {
             const oldHeadRef = doc(db, 'employees', department.headId);
             batch.update(oldHeadRef, {
               role: 'Employee',
+              isManager: false,
               updatedAt: new Date().toISOString()
             });
           } else if (!isHead && department.deputyId && department.deputyId !== employeeId) {
             const oldDeputyRef = doc(db, 'employees', department.deputyId);
             batch.update(oldDeputyRef, {
               role: 'Employee',
+              isManager: false,
               updatedAt: new Date().toISOString()
             });
           }
@@ -1172,6 +1174,7 @@ const DepartmentDetailsPage = () => {
           // Update the new employee's role and department
           batch.update(doc(db, 'employees', employeeId), {
             role: isHead ? 'Department Head' : 'Team Lead',
+            isManager: isHead, // Set isManager true for department head
             departmentId: currentDepartmentId,
             department: department.name,
             updatedAt: new Date().toISOString()
@@ -1198,6 +1201,7 @@ const DepartmentDetailsPage = () => {
               const oldHeadRef = doc(db, 'employees', department.headId);
               batch.update(oldHeadRef, {
                 role: 'Employee',
+                isManager: false,
                 updatedAt: new Date().toISOString()
               });
             }
@@ -1210,6 +1214,7 @@ const DepartmentDetailsPage = () => {
               const oldDeputyRef = doc(db, 'employees', department.deputyId);
               batch.update(oldDeputyRef, {
                 role: 'Employee',
+                isManager: false,
                 updatedAt: new Date().toISOString()
               });
             }
@@ -1252,7 +1257,7 @@ const DepartmentDetailsPage = () => {
               headData = {
                 id: headSnap.id,
                 ...data,
-                name: data.name || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : (data.firstName || data.lastName || 'Unnamed Employee'))
+                name: data.name || 'Unnamed Employee'
               };
             }
           }
@@ -1266,7 +1271,7 @@ const DepartmentDetailsPage = () => {
               deputyData = {
                 id: deputySnap.id,
                 ...data,
-                name: data.name || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : (data.firstName || data.lastName || 'Unnamed Employee'))
+                name: data.name || 'Unnamed Employee'
               };
             }
           }
@@ -1307,7 +1312,7 @@ const DepartmentDetailsPage = () => {
     }
     
     if (department.head) {
-      return `${department.head.firstName} ${department.head.lastName}`;
+      return department.head.name || 'Unnamed Employee';
     }
     
     return 'No Department Head';

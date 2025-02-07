@@ -50,8 +50,8 @@ Document ID: auto-generated
 {
   name: string,
   description: string,
-  managerId: string, // reference to employee
-  deputyManagerId: string, // reference to employee
+  headId: string, // reference to employee who is the department head
+  deputyHeadId: string, // reference to employee who is the deputy head
   createdAt: timestamp,
   updatedAt: timestamp
 }
