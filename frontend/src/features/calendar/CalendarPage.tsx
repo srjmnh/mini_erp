@@ -255,6 +255,18 @@ const CalendarPage: React.FC = () => {
     }
   };
 
+  const handleToggleStarred = async (task: Task) => {
+    try {
+      await updateDoc(doc(db, 'tasks', task.id), {
+        starred: !task.starred
+      });
+      await loadTasks();
+    } catch (error) {
+      console.error('Error updating task:', error);
+      showSnackbar('Failed to update task', 'error');
+    }
+  };
+
   const handleDeleteTask = async (taskId: string) => {
     try {
       await deleteDoc(doc(db, 'tasks', taskId));
@@ -460,108 +472,104 @@ const CalendarPage: React.FC = () => {
                     transition: 'background-color 0.2s',
                   }}
                 >
-                  <ListItemIcon>
-                    <Checkbox
-                      icon={<TodoIcon />}
-                      checkedIcon={<CheckCircleIcon />}
-                      checked={task.completed}
-                      onChange={() => handleToggleTask(task)}
-                      sx={{
-                        '&.Mui-checked': {
-                          color: 'success.main',
-                        },
-                      }}
-                    />
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box sx={{ display: 'flex', width: '100%', gap: 2 }}>
+                    <ListItemIcon sx={{ minWidth: 40 }}>
+                      <Checkbox
+                        icon={<TodoIcon />}
+                        checkedIcon={<CheckCircleIcon />}
+                        checked={task.completed}
+                        onChange={() => handleToggleTask(task)}
+                        sx={{
+                          '&.Mui-checked': {
+                            color: 'success.main',
+                          },
+                        }}
+                      />
+                    </ListItemIcon>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                         <Typography
                           variant="body1"
                           sx={{
                             textDecoration: task.completed ? 'line-through' : 'none',
                             color: task.completed ? 'text.secondary' : 'text.primary',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
                           }}
                         >
                           {task.title}
                         </Typography>
                         {task.priority === 'high' && (
-                          <FlagIcon color="error" fontSize="small" />
+                          <FlagIcon color="error" fontSize="small" sx={{ flexShrink: 0 }} />
                         )}
                       </Box>
-                    }
-                    secondary={
-                      <Box sx={{ mt: 1 }}>
-                        {task.description && (
-                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                            {task.description}
-                          </Typography>
-                        )}
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          {task.assigneeName && (
+                      {task.description && (
+                        <Typography 
+                          variant="body2" 
+                          color="text.secondary" 
+                          sx={{ 
+                            mb: 1,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                          }}
+                        >
+                          {task.description}
+                        </Typography>
+                      )}
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        {task.assigneeName && (
                           <Chip
                             size="small"
                             icon={<Avatar sx={{ width: 16, height: 16 }}>{task.assigneeName[0]}</Avatar>}
                             label={task.assigneeName}
-                            sx={{ mr: 1 }}
+                            sx={{ maxWidth: 150 }}
                           />
                         )}
                         {task.dueDate && (
-                            <Chip
-                              size="small"
-                              icon={<TimeIcon />}
-                              label={task.dueDate.toLocaleDateString()}
-                              color={
-                                new Date() > task.dueDate ? 'error' : 'default'
-                              }
-                            />
-                          )}
                           <Chip
                             size="small"
-                            label={task.priority}
-                            color={
-                              task.priority === 'high'
-                                ? 'error'
-                                : task.priority === 'medium'
-                                ? 'warning'
-                                : 'success'
-                            }
+                            icon={<TimeIcon />}
+                            label={task.dueDate.toLocaleDateString()}
+                            color={new Date() > task.dueDate ? 'error' : 'default'}
                           />
-                        </Box>
+                        )}
+                        <Chip
+                          size="small"
+                          label={task.priority}
+                          color={task.priority === 'high' ? 'error' : task.priority === 'medium' ? 'warning' : 'default'}
+                        />
                       </Box>
-                    }
-                  />
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <IconButton
-                      size="small"
-                      onClick={() => {
-                        setSelectedTask(task);
-                        setIsNewTask(false);
-                        setIsTaskDialogOpen(true);
-                      }}
-                    >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => {
-                        const updatedTask = { ...task, starred: !task.starred };
-                        handleUpdateTask(updatedTask);
-                      }}
-                    >
-                      {task.starred ? (
-                        <StarIcon fontSize="small" color="warning" />
-                      ) : (
-                        <StarBorderIcon fontSize="small" />
-                      )}
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleDeleteTask(task.id)}
-                      color="error"
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleToggleStarred(task)}
+                        sx={{ color: task.starred ? 'warning.main' : 'action.disabled' }}
+                      >
+                        {task.starred ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setSelectedTask(task);
+                          setIsNewTask(false);
+                          setIsTaskDialogOpen(true);
+                        }}
+                      >
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteTask(task.id)}
+                        sx={{ color: 'error.main' }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
                   </Box>
                 </ListItem>
               ))}
