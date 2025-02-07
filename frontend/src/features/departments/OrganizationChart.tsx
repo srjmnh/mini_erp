@@ -31,7 +31,7 @@ interface Employee {
 interface Department {
   id: string;
   name: string;
-  managerId?: string;
+  headId?: string;
   deputyManagerId?: string;
   description?: string;
 }
@@ -46,8 +46,7 @@ export default function OrganizationChart({ department, employees, onEmployeeCli
   const theme = useTheme();
 
   const departmentEmployees = employees.filter(e => e.departmentId === department.id);
-  const manager = employees.find(e => e.id === department.managerId);
-  const deputyManager = employees.find(e => e.id === department.deputyManagerId);
+  const head = employees.find(e => e.id === department.headId);
   
   // Group employees by who they report to
   const employeesByManager = departmentEmployees.reduce((acc, emp) => {
@@ -55,7 +54,7 @@ export default function OrganizationChart({ department, employees, onEmployeeCli
     if (!acc[reportsTo]) {
       acc[reportsTo] = [];
     }
-    if (emp.id !== manager?.id && emp.id !== deputyManager?.id) {
+    if (emp.id !== head?.id) {
       acc[reportsTo].push(emp);
     }
     return acc;

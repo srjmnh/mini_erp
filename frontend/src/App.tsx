@@ -13,8 +13,10 @@ import DepartmentDetailsPage from './features/departments/DepartmentDetailsPage'
 import DocumentsPage from './features/documents/DocumentsPage';
 import LeaveRequestsPage from './features/leave/LeaveRequestsPage';
 import PayrollPage from './features/payroll/PayrollPage';
+import RoleConfigurationPage from './features/roles/RoleConfigurationPage';
 import PerformancePage from './features/hr/PerformancePage';
 import TimeOffPage from './features/hr/TimeOffPage';
+import HRDashboard from './features/hr/HRDashboard';
 import SettingsPage from './features/settings/SettingsPage';
 import CalendarPage from './features/calendar/CalendarPage';
 import { AuthProvider } from './contexts/AuthContext';
@@ -59,10 +61,12 @@ function App() {
                             <Route path="documents" element={<DocumentsPage />} />
                             <Route path="calendar" element={<CalendarPage />} />
                             <Route path="hr" element={<Outlet />}>
+                              <Route index element={<HRDashboard />} />
                               <Route path="time-off" element={<TimeOffPage />} />
                               <Route path="leave-requests" element={<LeaveRequestsPage />} />
                               <Route path="payroll" element={<PayrollPage />} />
                               <Route path="performance" element={<PerformancePage />} />
+                              <Route path="roles" element={<RoleConfigurationPage />} />
                             </Route>
                             <Route path="settings" element={<SettingsPage />} />
                             <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
   Grid,
@@ -30,6 +30,7 @@ import { useProjects } from '@/contexts/ProjectContext';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const theme = useTheme();
   const { employees, departments } = useFirestore();
   const { projects } = useProjects();
@@ -85,7 +86,7 @@ export default function DashboardPage() {
   const recentProjects = projects.slice(0, 3);
 
   return (
-    <Box>
+    <Box sx={{ pb: 4 }}>
       <Typography variant="h4" sx={{ mb: 4, fontWeight: 600 }}>
         Welcome back!
       </Typography>
@@ -256,6 +257,7 @@ export default function DashboardPage() {
           </Grid>
         ))}
       </Grid>
+
     </Box>
   );
 }

@@ -46,6 +46,7 @@ import SkillsSection from './SkillsSection';
 import EquipmentSection from './EquipmentSection';
 import OnboardingWizard from './OnboardingWizard';
 import PhotoUpload from './PhotoUpload';
+import RoleManagement from './RoleManagement';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -114,7 +115,8 @@ export default function EmployeeProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { employees, departments, updateEmployee } = useFirestore();
+  const { employees, departments, updateEmployee, fetchDepartments } = useFirestore();
+  const [departmentsLoaded, setDepartmentsLoaded] = useState(false);
   const { supabase } = useSupabase();
   const [openDialog, setOpenDialog] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
@@ -139,23 +141,51 @@ export default function EmployeeProfile() {
       if (a.position?.includes('Manager') && !b.position?.includes('Manager')) return -1;
       if (!a.position?.includes('Manager') && b.position?.includes('Manager')) return 1;
       // Then sort by name
-      return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
+      return (a.name || '').localeCompare(b.name || '');
     });
+  };
+
+  const getDepartmentHead = (departmentId: string) => {
+    if (!departmentId || !departments.length) return null;
+    
+    const department = departments.find(d => d.id === departmentId);
+    if (!department) return null;
+
+    // Try to find department head, manager, or lead
+    const deptHead = employees.find(e => 
+      e.departmentId === departmentId && 
+      (e.position?.toLowerCase().includes('head') || 
+       e.position?.toLowerCase().includes('manager') || 
+       e.position?.toLowerCase().includes('lead'))
+    );
+
+    if (deptHead) {
+      console.log('Found department head:', { 
+        name: deptHead.name, 
+        position: deptHead.position, 
+        dept: deptHead.departmentId 
+      });
+      return { ...deptHead, department };
+    }
+
+    return deptHead ? { ...deptHead, department } : null;
   };
 
   const getManagerName = (employeeId: string) => {
     const employee = employees.find(e => e.id === employeeId);
-    if (!employee?.departmentId || employee.position === 'Department Head') {
-      return 'No Department Head';
+    if (!employee?.departmentId) {
+      return 'No Department Assigned';
     }
     
-    // Find other employees in the same department who are department heads
-    const departmentHead = employees.find(e => 
-      e.departmentId === employee.departmentId && 
-      e.position === 'Department Head'
-    );
+    // If employee has a custom reports-to relationship
+    if (employee.reportsTo) {
+      const manager = employees.find(e => e.id === employee.reportsTo);
+      return manager ? manager.name : 'Unknown Manager';
+    }
     
-    return departmentHead ? `${departmentHead.firstName} ${departmentHead.lastName}` : 'No Department Head';
+    // Find department head
+    const head = getDepartmentHead(employee.departmentId);
+    return head ? `${head.name} (${head.department.name} ${head.position})` : 'No Department Head';
   };
 
   const handleUpdateReportsTo = async () => {
@@ -175,6 +205,18 @@ export default function EmployeeProfile() {
       setError('Failed to update reporting manager: ' + error.message);
     }
   };
+
+  useEffect(() => {
+    const loadDepartments = async () => {
+      try {
+        await fetchDepartments();
+        setDepartmentsLoaded(true);
+      } catch (error) {
+        console.error('Error loading departments:', error);
+      }
+    };
+    loadDepartments();
+  }, [fetchDepartments]);
 
   useEffect(() => {
     let isMounted = true;
@@ -382,7 +424,7 @@ export default function EmployeeProfile() {
                 >
                   <Avatar
                     src={employee.photoUrl}
-                    alt={`${employee.firstName} ${employee.lastName}`}
+                    alt={employee.name || 'Employee'}
                     sx={{
                       width: 120,
                       height: 120,
@@ -391,7 +433,7 @@ export default function EmployeeProfile() {
                       boxShadow: theme.shadows[3],
                     }}
                   >
-                    {employee.firstName[0]}{employee.lastName[0]}
+                    {employee.name ? employee.name.split(' ').map(n => n[0]).join('') : 'E'}
                   </Avatar>
                   <Box
                     className="upload-overlay"
@@ -418,11 +460,73 @@ export default function EmployeeProfile() {
             </Box>
             <Box sx={{ ml: 2 }}>
               <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
-                {employee.firstName} {employee.lastName}
+                {employee.name || 'Employee'}
               </Typography>
               <Typography variant="h6" sx={{ opacity: 0.9 }}>
                 {employee.position}
               </Typography>
+              <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+                <TextField
+                  select
+                  size="small"
+                  label="Reports To"
+                  value={employee.reportsTo || ''}
+                  onChange={(e) => handleFieldChange('reportsTo', e.target.value)}
+                  sx={{ minWidth: 250, bgcolor: 'rgba(255,255,255,0.1)', borderRadius: 1 }}
+                  InputProps={{
+                    sx: { color: 'white', '.MuiSelect-icon': { color: 'white' } }
+                  }}
+                  InputLabelProps={{
+                    sx: { color: 'white' }
+                  }}
+                >
+                  <MenuItem value="">
+                    <Stack>
+                      <Typography>
+                        <em>
+                          {(() => {
+                            if (!departmentsLoaded || !employee.departmentId) {
+                              return 'Loading...';
+                            }
+
+                            const head = getDepartmentHead(employee.departmentId);
+                            if (head) {
+                              return `Default (${head.name} - ${head.department.name} ${head.position})`;
+                            }
+
+                            const dept = departments.find(d => d.id === employee.departmentId);
+                            return dept ? 
+                              `Default (No Head for ${dept.name} Department)` : 
+                              'Default (No Department Assigned)';
+                          })()} 
+                        </em>
+                      </Typography>
+                    </Stack>
+                  </MenuItem>
+                  {getAvailableManagers(employee).map((manager) => {
+                    const managerDept = departments.find(d => d.id === manager.departmentId);
+                    return (
+                      <MenuItem key={manager.id} value={manager.id}>
+                        <Stack>
+                          <Typography>{manager.name}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {manager.position} • {managerDept?.name || 'No Department'}
+                          </Typography>
+                        </Stack>
+                      </MenuItem>
+                    );
+                  })}
+                </TextField>
+                {hasChanges && (
+                  <Button 
+                    variant="contained" 
+                    onClick={handleSaveChanges}
+                    sx={{ bgcolor: 'rgba(255,255,255,0.2)', '&:hover': { bgcolor: 'rgba(255,255,255,0.3)' } }}
+                  >
+                    Save Changes
+                  </Button>
+                )}
+              </Box>
               <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
                 <Chip 
                   label={employee.status}
@@ -461,7 +565,7 @@ export default function EmployeeProfile() {
               <Grid item xs={12} sm={6} md={4}>
                 <Box sx={{ color: 'white' }}>
                   <Typography variant="body2" sx={{ opacity: 0.7 }}>Department</Typography>
-                  <Typography>{getDepartmentName(employee.departmentId)}</Typography>
+                  <Typography>{departments.find(d => d.id === employee.departmentId)?.name || 'Not Assigned'}</Typography>
                 </Box>
               </Grid>
               <Grid item xs={12} sm={6} md={4}>
@@ -480,6 +584,16 @@ export default function EmployeeProfile() {
                 <Box sx={{ color: 'white' }}>
                   <Typography variant="body2" sx={{ opacity: 0.7 }}>Location</Typography>
                   <Typography>{employee.workLocation || 'Not specified'}</Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <Box sx={{ color: 'white' }}>
+                  <Typography variant="body2" sx={{ opacity: 0.7 }}>Reports To</Typography>
+                  <Typography>
+                    {employee.reportsTo ? 
+                      employees.find(e => e.id === employee.reportsTo)?.name : 
+                      employees.find(e => e.departmentId === employee.departmentId && e.position?.toLowerCase().includes('head'))?.name || 'No Manager'}
+                  </Typography>
                 </Box>
               </Grid>
             </Grid>
@@ -540,6 +654,12 @@ export default function EmployeeProfile() {
               iconPosition="start"
               sx={{ gap: 1 }}
             />
+            <Tab 
+              icon={<BusinessIcon />} 
+              label="Role & Promotion" 
+              iconPosition="start"
+              sx={{ gap: 1 }}
+            />
           </Tabs>
         </Box>
 
@@ -550,20 +670,12 @@ export default function EmployeeProfile() {
               <Grid item xs={12}>
                 <Typography variant="h6" sx={{ mb: 3 }}>Personal Information</Typography>
                 <Grid container spacing={3}>
-                  <Grid item xs={12} sm={6}>
+                  <Grid item xs={12}>
                     <TextField
                       fullWidth
-                      label="First Name"
-                      value={employee.firstName}
-                      onChange={(e) => handleFieldChange('firstName', e.target.value)}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Last Name"
-                      value={employee.lastName}
-                      onChange={(e) => handleFieldChange('lastName', e.target.value)}
+                      label="Full Name"
+                      value={employee.name || ''}
+                      onChange={(e) => handleFieldChange('name', e.target.value)}
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
@@ -583,6 +695,7 @@ export default function EmployeeProfile() {
                       onChange={(e) => handleFieldChange('phone', e.target.value)}
                     />
                   </Grid>
+
                   <Grid item xs={12} sm={6}>
                     <TextField
                       fullWidth
@@ -695,13 +808,47 @@ export default function EmployeeProfile() {
                         }
                       >
                         <MenuItem value="">
-                          <em>None (Default to Department Head)</em>
+                          <Stack>
+                            {(() => {
+                              console.log('Department ID:', employee.departmentId);
+                              console.log('All Employees:', employees.map(e => ({ id: e.id, name: e.name, dept: e.departmentId, pos: e.position })));
+                              
+                              const deptHead = employees.find(e => 
+                                e.departmentId === employee.departmentId && 
+                                (e.position?.toLowerCase().includes('head') || 
+                                 e.position?.toLowerCase().includes('manager') || 
+                                 e.position?.toLowerCase().includes('lead'))
+                              );
+                              
+                              console.log('Found Department Head:', deptHead);
+                              const dept = departments.find(d => d.id === employee.departmentId);
+                              
+                              if (deptHead) {
+                                return (
+                                  <>
+                                    <Typography>
+                                      <em>Default ({deptHead.name})</em>
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                      {deptHead.position} • {dept?.name}
+                                    </Typography>
+                                  </>
+                                );
+                              }
+                              
+                              return (
+                                <Typography>
+                                  <em>No Department Head Assigned for {dept?.name || 'Department'}</em>
+                                </Typography>
+                              );
+                            })()}
+                          </Stack>
                         </MenuItem>
                         {getAvailableManagers(employee).map((manager) => (
                           <MenuItem key={manager.id} value={manager.id}>
                             <Stack>
                               <Typography>
-                                {manager.firstName} {manager.lastName}
+                                {manager.name}
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
                                 {manager.position} • {departments.find(d => d.id === manager.departmentId)?.name}
@@ -749,6 +896,14 @@ export default function EmployeeProfile() {
           <OnboardingWizard
             steps={employee.onboardingSteps || []}
             onSave={handleOnboardingSave}
+          />
+        </TabPanel>
+
+        <TabPanel value={activeTab} index={5}>
+          <RoleManagement
+            employeeId={id}
+            currentRole={employee.role}
+            currentSalary={employee.salary || 0}
           />
         </TabPanel>
       </Paper>

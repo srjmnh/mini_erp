@@ -114,15 +114,19 @@ const EditDialog: React.FC<EditDialogProps> = ({
         // Query only employees from current department
         const q = query(employeesRef, where('departmentId', '==', id));
         const employeesSnap = await getDocs(q);
-        const employeesList = employeesSnap.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as Employee));
+        const employeesList = employeesSnap.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            name: data.name || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : (data.firstName || data.lastName || 'Unnamed Employee'))
+          } as Employee;
+        });
 
         // Sort employees by name
         employeesList.sort((a, b) => {
-          const nameA = `${a.firstName} ${a.lastName}`.toLowerCase();
-          const nameB = `${b.firstName} ${b.lastName}`.toLowerCase();
+          const nameA = (a.name || '').toLowerCase();
+          const nameB = (b.name || '').toLowerCase();
           return nameA.localeCompare(nameB);
         });
 
@@ -259,7 +263,7 @@ const TransferDialog: React.FC<TransferDialogProps> = ({ open, onClose, employee
       <DialogContent>
         <Box>
           <Typography>
-            {employee.firstName} {employee.lastName} is currently assigned to another department. 
+            {employee.name} is currently assigned to another department. 
             Would you like to transfer them to this department?
           </Typography>
         </Box>
@@ -294,10 +298,15 @@ const AddMembersDialog: React.FC<AddMembersDialogProps> = ({ open, onClose, depa
       try {
         const employeesRef = collection(db, 'employees');
         const employeesSnap = await getDocs(employeesRef);
-        const allEmployees = employeesSnap.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as Employee));
+        const allEmployees = employeesSnap.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            // Ensure name is set, fallback to firstName + lastName if name is not present
+            name: data.name || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : (data.firstName || data.lastName || 'Unnamed Employee'))
+          } as Employee;
+        });
         
         // Filter out current members
         const availableEmployees = allEmployees.filter(
@@ -397,7 +406,7 @@ const AddMembersDialog: React.FC<AddMembersDialogProps> = ({ open, onClose, depa
 
   const filteredEmployees = employees.filter(emp => {
     const searchTerm = searchQuery.toLowerCase();
-    const fullName = `${emp.firstName} ${emp.lastName}`.toLowerCase();
+    const fullName = (emp.name || '').toLowerCase();
     const position = (emp.position || '').toLowerCase();
     return fullName.includes(searchTerm) || position.includes(searchTerm);
   });
@@ -452,11 +461,11 @@ const AddMembersDialog: React.FC<AddMembersDialogProps> = ({ open, onClose, depa
                 >
                   <ListItemIcon>
                     <Avatar sx={{ bgcolor: employee.departmentId ? 'warning.light' : 'primary.light' }}>
-                      {employee.firstName?.[0] || 'U'}
+                      {employee.name?.[0] || 'U'}
                     </Avatar>
                   </ListItemIcon>
                   <ListItemText
-                    primary={`${employee.firstName} ${employee.lastName}`}
+                    primary={employee.name}
                     secondary={
                       <Box component="span">
                         <Stack direction="row" spacing={1} alignItems="center">
@@ -1142,54 +1151,68 @@ const DepartmentDetailsPage = () => {
       if (field === 'head' || field === 'deputy') {
         const isHead = field === 'head';
         const employeeId = value?.id;
+        const currentDepartmentId = department.id;
         
         if (employeeId) {
-          // Clean up old position if exists
+          // First, clean up old head if exists
           if (isHead && department.headId && department.headId !== employeeId) {
             const oldHeadRef = doc(db, 'employees', department.headId);
             batch.update(oldHeadRef, {
-              position: null,
-              updatedAt: new Date().toISOString()
-            });
-            // Update employee position
-            batch.update(doc(db, 'employees', employeeId), {
-              position: employee.position === 'Department Head' ? null : employee.position,
-              departmentId,
+              role: 'Employee',
               updatedAt: new Date().toISOString()
             });
           } else if (!isHead && department.deputyId && department.deputyId !== employeeId) {
             const oldDeputyRef = doc(db, 'employees', department.deputyId);
             batch.update(oldDeputyRef, {
-              position: null,
-              updatedAt: new Date().toISOString()
-            });
-            // Update employee position
-            batch.update(doc(db, 'employees', employeeId), {
-              position: employee.position === 'Deputy Head' ? null : employee.position,
-              departmentId,
-              updatedAt: new Date().toISOString()
-            });
-          } else {
-            // Regular member transfer
-            batch.update(doc(db, 'employees', employeeId), {
-              departmentId,
+              role: 'Employee',
               updatedAt: new Date().toISOString()
             });
           }
+
+          // Update the new employee's role and department
+          batch.update(doc(db, 'employees', employeeId), {
+            role: isHead ? 'Department Head' : 'Team Lead',
+            departmentId: currentDepartmentId,
+            department: department.name,
+            updatedAt: new Date().toISOString()
+          });
+
+          // Update department's head/deputy references
+          if (isHead) {
+            updateData.headId = employeeId;
+            updateData.head = value;
+            updateData.headId = employeeId;
+          } else {
+            updateData.deputyId = employeeId;
+            updateData.deputy = value;
+            updateData.deputyManagerId = employeeId;
+          }
         } else {
           // Removing head/deputy
-          if (isHead && department.headId) {
-            const oldHeadRef = doc(db, 'employees', department.headId);
-            batch.update(oldHeadRef, {
-              position: null,
-              updatedAt: new Date().toISOString()
-            });
-          } else if (!isHead && department.deputyId) {
-            const oldDeputyRef = doc(db, 'employees', department.deputyId);
-            batch.update(oldDeputyRef, {
-              position: null,
-              updatedAt: new Date().toISOString()
-            });
+          if (isHead) {
+            updateData.headId = null;
+            updateData.head = null;
+            updateData.headId = null;
+            
+            if (department.headId) {
+              const oldHeadRef = doc(db, 'employees', department.headId);
+              batch.update(oldHeadRef, {
+                role: 'Employee',
+                updatedAt: new Date().toISOString()
+              });
+            }
+          } else {
+            updateData.deputyId = null;
+            updateData.deputy = null;
+            updateData.deputyManagerId = null;
+            
+            if (department.deputyId) {
+              const oldDeputyRef = doc(db, 'employees', department.deputyId);
+              batch.update(oldDeputyRef, {
+                role: 'Employee',
+                updatedAt: new Date().toISOString()
+              });
+            }
           }
 
           updateData[`${field}Id`] = null;
@@ -1225,7 +1248,12 @@ const DepartmentDetailsPage = () => {
           if (departmentData.headId) {
             const headSnap = await getDoc(doc(db, 'employees', departmentData.headId));
             if (headSnap.exists()) {
-              headData = { id: headSnap.id, ...headSnap.data() };
+              const data = headSnap.data();
+              headData = {
+                id: headSnap.id,
+                ...data,
+                name: data.name || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : (data.firstName || data.lastName || 'Unnamed Employee'))
+              };
             }
           }
 
@@ -1234,7 +1262,12 @@ const DepartmentDetailsPage = () => {
           if (departmentData.deputyId) {
             const deputySnap = await getDoc(doc(db, 'employees', departmentData.deputyId));
             if (deputySnap.exists()) {
-              deputyData = { id: deputySnap.id, ...deputySnap.data() };
+              const data = deputySnap.data();
+              deputyData = {
+                id: deputySnap.id,
+                ...data,
+                name: data.name || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : (data.firstName || data.lastName || 'Unnamed Employee'))
+              };
             }
           }
 
@@ -1293,13 +1326,13 @@ const DepartmentDetailsPage = () => {
       >
         <ListItemIcon>
           <Avatar sx={{ bgcolor: employee.id === department?.headId ? 'primary.main' : 'grey.400' }}>
-            {employee.firstName?.[0] || 'U'}
+            {employee.name?.[0] || 'U'}
           </Avatar>
         </ListItemIcon>
         <ListItemText
           primary={
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography>{employee.firstName} {employee.lastName}</Typography>
+              <Typography>{employee.name}</Typography>
               {employee.id === department?.headId && (
                 <Chip
                   size="small"
@@ -1364,14 +1397,16 @@ const DepartmentDetailsPage = () => {
       const q = query(employeesRef, where("departmentId", "==", deptData.id));
       const employeesSnap = await getDocs(q);
       
-      const deptEmployees = employeesSnap.docs.map(doc => ({
-        id: doc.id,
-        firstName: doc.data().firstName || '',
-        lastName: doc.data().lastName || '',
-        position: doc.data().position || 'No Position',
-        departmentId: doc.data().departmentId || null,
-        ...doc.data()
-      }));
+      const deptEmployees = employeesSnap.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          name: data.name || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : (data.firstName || data.lastName || 'Unnamed Employee')),
+          position: data.position || 'No Position',
+          departmentId: data.departmentId || null
+        };
+      });
       
       setDepartmentEmployees(deptEmployees);
       setFilteredEmployees(deptEmployees);
@@ -1536,14 +1571,7 @@ const DepartmentDetailsPage = () => {
   }, [id]);
 
   const getEmployeeDisplayName = (employee: Employee) => {
-    if (employee.firstName && employee.lastName) {
-      return `${employee.firstName} ${employee.lastName}`;
-    } else if (employee.firstName) {
-      return employee.firstName;
-    } else if (employee.lastName) {
-      return employee.lastName;
-    }
-    return 'Unnamed Employee';
+    return employee.name || 'Unnamed Employee';
   };
 
   const [selectedTab, setSelectedTab] = useState(0);
@@ -1863,7 +1891,7 @@ const DepartmentDetailsPage = () => {
               >
                 <Stack direction="row" spacing={2} alignItems="center">
                   <Avatar sx={{ bgcolor: 'primary.main', width: 56, height: 56 }}>
-                    {department?.head?.firstName?.[0] || 'H'}
+                    {department?.head?.name?.[0] || 'H'}
                   </Avatar>
                   <Box sx={{ flexGrow: 1 }}>
                     <Typography variant="subtitle1" color="text.secondary">Department Head</Typography>
@@ -1894,7 +1922,7 @@ const DepartmentDetailsPage = () => {
               >
                 <Stack direction="row" spacing={2} alignItems="center">
                   <Avatar sx={{ bgcolor: 'secondary.main', width: 56, height: 56 }}>
-                    {department?.deputy?.firstName?.[0] || 'D'}
+                    {department?.deputy?.name?.[0] || 'D'}
                   </Avatar>
                   <Box sx={{ flexGrow: 1 }}>
                     <Typography variant="subtitle1" color="text.secondary">Deputy Head</Typography>

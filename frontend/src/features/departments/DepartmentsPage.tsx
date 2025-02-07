@@ -51,15 +51,14 @@ export default function DepartmentsPage() {
     return acc;
   }, {});
 
-  // Check and update departments with invalid managers
+  // Check and update departments with invalid heads
   useEffect(() => {
     departments.forEach(dept => {
       const deptEmployees = departmentEmployees[dept.id] || [];
-      if (dept.managerId && !deptEmployees.find(e => e.id === dept.managerId)) {
-        // Clear the manager ID from department if manager is not in the department
+      if (dept.headId && !deptEmployees.find(e => e.id === dept.headId)) {
+        // Clear the head ID from department if head is not in the department
         updateDepartment(dept.id, {
-          managerId: null,
-          deputyManagerId: null,
+          headId: null,
           updatedAt: new Date().toISOString()
         }).catch(error => {
           console.error(`Error updating department ${dept.id}:`, error);
@@ -84,10 +83,10 @@ export default function DepartmentsPage() {
       
       if (!employee || !sourceDept) return;
 
-      // Check if employee is manager of source department
-      const isManager = sourceDept.managerId === employeeId;
+      // Check if employee is head of source department
+      const isHead = sourceDept.headId === employeeId;
       
-      if (isManager) {
+      if (isHead) {
         // Store context for succession dialog
         window.sessionStorage.setItem('succession-callback', JSON.stringify({
           context: {
@@ -107,33 +106,38 @@ export default function DepartmentsPage() {
 
         const { replacementId } = confirmed as { replacementId: string };
         
-        // Update old department with new manager
-        await updateDepartment(sourceId, {
-          ...sourceDept,
-          managerId: replacementId,
+        const batch = writeBatch(db);
+
+        // Update old department with new head
+        const sourceDeptRef = doc(db, 'departments', sourceId);
+        batch.update(sourceDeptRef, {
+          headId: replacementId,
           updatedAt: new Date().toISOString()
         });
 
-        // Update new manager's status
-        const newManager = employees.find(e => e.id === replacementId);
-        if (newManager) {
-          await updateEmployee(replacementId, {
-            ...newManager,
+        // Update new head's status
+        const newHeadRef = doc(db, 'employees', replacementId);
+        const newHeadSnap = await getDoc(newHeadRef);
+        if (newHeadSnap.exists()) {
+          batch.update(newHeadRef, {
             isManager: true,
             position: 'Department Head',
             updatedAt: new Date().toISOString()
           });
         }
-      }
 
-      // Move employee to new department
-      await updateEmployee(employeeId, {
-        ...employee,
-        departmentId: destId,
-        isManager: false,
-        position: employee.position === 'Department Head' ? 'Employee' : employee.position,
-        updatedAt: new Date().toISOString()
-      });
+        // Update the moving employee
+        const employeeRef = doc(db, 'employees', employeeId);
+        batch.update(employeeRef, {
+          departmentId: destId,
+          isManager: false,
+          position: 'Employee', // Always reset to Employee when moving
+          updatedAt: new Date().toISOString()
+        });
+
+        // Commit all changes atomically
+        await batch.commit();
+      }
 
     } catch (error) {
       console.error('Error moving employee:', error);
@@ -149,63 +153,90 @@ export default function DepartmentsPage() {
     const departmentData = {
       name: formData.get('name') as string,
       description: formData.get('description') as string,
-      managerId: formData.get('managerId') as string || undefined,
+      headId: formData.get('managerId') as string || null, // Using headId instead of managerId for consistency
     };
 
     try {
       if (editingDepartment) {
-        // First update the department
-        await updateDepartment(editingDepartment.id, {
+        const batch = writeBatch(db);
+        const deptRef = doc(db, 'departments', editingDepartment.id);
+        
+        // Update department
+        batch.update(deptRef, {
           ...departmentData,
           updatedAt: new Date().toISOString()
         });
 
-        // If setting a new department head
-        if (departmentData.managerId) {
-          const employee = employees.find(e => e.id === departmentData.managerId);
-          if (employee) {
-            // Update the employee to be in this department and set as manager
-            await updateEmployee(employee.id, {
-              ...employee,
-              departmentId: editingDepartment.id, // Ensure they're in this department
-              isManager: true,
-              position: 'Department Head',
-              updatedAt: new Date().toISOString()
-            });
-
-            // Clear manager status from previous department head if exists
-            const previousManager = employees.find(e => 
-              e.id !== departmentData.managerId && 
-              e.departmentId === editingDepartment.id && 
-              e.isManager
-            );
-            if (previousManager) {
-              await updateEmployee(previousManager.id, {
-                ...previousManager,
+        // Handle department head changes
+        if (departmentData.headId !== editingDepartment.headId) {
+          // If there was a previous head, update their status
+          if (editingDepartment.headId) {
+            const prevHeadRef = doc(db, 'employees', editingDepartment.headId);
+            const prevHeadSnap = await getDoc(prevHeadRef);
+            if (prevHeadSnap.exists()) {
+              batch.update(prevHeadRef, {
                 isManager: false,
-                position: previousManager.position === 'Department Head' ? 'Employee' : previousManager.position,
+                position: 'Employee',
+                updatedAt: new Date().toISOString()
+              });
+            }
+          }
+
+          // If setting a new head
+          if (departmentData.headId) {
+            const newHeadRef = doc(db, 'employees', departmentData.headId);
+            const newHeadSnap = await getDoc(newHeadRef);
+            if (newHeadSnap.exists()) {
+              batch.update(newHeadRef, {
+                departmentId: editingDepartment.id,
+                isManager: true,
+                position: 'Department Head',
                 updatedAt: new Date().toISOString()
               });
             }
           }
         }
+
+        // Commit all changes atomically
+        await batch.commit();
       } else {
-        // Creating new department
-        const newDeptId = await addDepartment(departmentData);
+        // Create new department and handle head assignment in a batch
+        const batch = writeBatch(db);
+        const newDeptRef = doc(collection(db, 'departments'));
         
+        batch.set(newDeptRef, {
+          ...departmentData,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+
         // If setting an initial department head
-        if (departmentData.managerId && newDeptId) {
-          const employee = employees.find(e => e.id === departmentData.managerId);
-          if (employee) {
-            await updateEmployee(employee.id, {
-              ...employee,
-              departmentId: newDeptId,
+        if (departmentData.headId) {
+          const headRef = doc(db, 'employees', departmentData.headId);
+          const headSnap = await getDoc(headRef);
+          if (headSnap.exists()) {
+            // Update the new head's status
+            batch.update(headRef, {
+              departmentId: newDeptRef.id,
               isManager: true,
               position: 'Department Head',
               updatedAt: new Date().toISOString()
             });
+
+            // If they were head of another department, update that department
+            const oldDeptRef = doc(db, 'departments', headSnap.data().departmentId);
+            const oldDeptSnap = await getDoc(oldDeptRef);
+            if (oldDeptSnap.exists() && oldDeptSnap.data().headId === departmentData.headId) {
+              batch.update(oldDeptRef, {
+                headId: null,
+                updatedAt: new Date().toISOString()
+              });
+            }
           }
         }
+
+        // Commit all changes atomically
+        await batch.commit();
       }
       
       setOpenDialog(false);
@@ -219,7 +250,7 @@ export default function DepartmentsPage() {
   const getManagerName = (managerId?: string) => {
     if (!managerId) return 'No Manager';
     const manager = employees.find(e => e.id === managerId);
-    return manager ? `${manager.firstName} ${manager.lastName}` : 'Unknown Manager';
+    return manager ? manager.name : 'Unknown Manager';
   };
 
   const filteredDepartments = departments.filter(dept =>
@@ -245,7 +276,7 @@ export default function DepartmentsPage() {
 
   const renderDepartmentCard = (department: Department) => {
     const deptEmployees = departmentEmployees[department.id] || [];
-    const departmentHead = deptEmployees.find(e => e.position === 'Department Head');
+    const departmentHead = employees.find(e => e.id === department.managerId);
     const hasDepartmentHead = Boolean(departmentHead);
 
     return (
@@ -295,7 +326,7 @@ export default function DepartmentsPage() {
             <Stack direction="row" spacing={1} alignItems="center">
               <PersonIcon fontSize="small" />
               <Typography variant="body2">
-                Head: {departmentHead ? `${departmentHead.firstName} ${departmentHead.lastName}` : 'Not assigned'}
+                Head: {departmentHead ? departmentHead.name : 'Not assigned'}
               </Typography>
             </Stack>
 
@@ -434,7 +465,7 @@ export default function DepartmentsPage() {
         <Grid container spacing={3}>
           {filteredDepartments.map((department) => {
             const deptEmployees = departmentEmployees[department.id] || [];
-            const departmentHead = deptEmployees.find(e => e.position === 'Department Head');
+            const departmentHead = employees.find(e => e.id === department.headId);
             const hasDepartmentHead = Boolean(departmentHead);
 
             return (
@@ -502,7 +533,7 @@ export default function DepartmentsPage() {
                             <Stack direction="row" spacing={1} alignItems="center">
                               <PersonIcon fontSize="small" color="primary" />
                               <Typography variant="body2">
-                                Head: {departmentHead ? `${departmentHead.firstName} ${departmentHead.lastName}` : 'Not assigned'}
+                                Head: {departmentHead ? departmentHead.name : 'Not assigned'}
                               </Typography>
                             </Stack>
 
@@ -585,19 +616,19 @@ export default function DepartmentsPage() {
               />
               <Autocomplete
                 options={employees.filter(e => e.status === 'active')}
-                getOptionLabel={(option) => `${option.firstName} ${option.lastName}`}
-                defaultValue={employees.find(e => e.id === editingDepartment?.managerId)}
+                getOptionLabel={(option) => option.name}
+                defaultValue={employees.find(e => e.id === editingDepartment?.headId)}
                 renderInput={(params) => (
                   <TextField
                     {...params}
-                    name="managerId"
+                    name="headId"
                     label="Department Head"
                   />
                 )}
                 onChange={(_, value) => {
                   const form = document.querySelector('form');
                   if (form) {
-                    const input = form.querySelector('input[name="managerId"]');
+                    const input = form.querySelector('input[name="headId"]');
                     if (input) {
                       (input as HTMLInputElement).value = value?.id || '';
                     }

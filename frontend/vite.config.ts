@@ -18,7 +18,8 @@ export default defineConfig({
       'react-dropzone',
       'pretty-bytes',
       'recharts/lib',
-      '@supabase/supabase-js'
+      '@supabase/supabase-js',
+      '@mui/x-data-grid'
     ],
     exclude: []
   },

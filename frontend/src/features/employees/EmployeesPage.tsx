@@ -47,22 +47,52 @@ import { app } from '@/config/firebase';
 const db = getFirestore(app);
 
 interface EmployeeFormData {
-  firstName: string;
-  lastName: string;
+  name: string;
   email: string;
-  position: string;
-  salary: number | string;
+  phone: string;
+  role: string;
+  department: string;
+  currentLevel: number;
+  salary: number;
   status: 'active' | 'inactive';
   photoUrl: string;
-  departmentId: string | undefined;
+  skills: string[];
+  joiningDate: string;
+  address: {
+    street: string;
+    city: string;
+    state: string;
+    pincode: string;
+  };
 }
 
-interface Employee extends EmployeeFormData {
+interface Employee {
   id: string;
-  name?: string;
-  departmentName?: string;
-  isDepartmentHead: boolean;
-  reportsTo?: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: string;
+  position: string;
+  department: string;
+  currentLevel: number;
+  salary: number;
+  address?: {
+    street: string;
+    city: string;
+    state: string;
+    pincode: string;
+  };
+  joiningDate: any;
+  skills: string[];
+  education?: {
+    degree: string;
+    field: string;
+    university: string;
+    graduationYear: number;
+  };
+  status?: 'active' | 'inactive';
+  createdAt?: any;
+  updatedAt?: any;
 }
 
 interface Department {
@@ -83,14 +113,23 @@ interface Project {
 }
 
 const initialFormData: EmployeeFormData = {
-  firstName: '',
-  lastName: '',
+  name: '',
   email: '',
-  position: '',
-  salary: '',
+  phone: '',
+  role: '',
+  department: '',
+  currentLevel: 1,
+  salary: 0,
   status: 'active',
   photoUrl: '',
-  departmentId: undefined,
+  skills: [],
+  joiningDate: new Date().toISOString().split('T')[0],
+  address: {
+    street: '',
+    city: '',
+    state: '',
+    pincode: ''
+  }
 };
 
 export default function EmployeesPage() {
@@ -184,14 +223,12 @@ export default function EmployeesPage() {
         await updateEmployee({
           ...selectedEmployee,
           ...formData,
-          name: `${formData.firstName} ${formData.lastName}`,
           updatedAt: new Date().toISOString(),
         });
         showSnackbar('Employee updated successfully', 'success');
       } else {
         await addEmployee({
           ...formData,
-          name: `${formData.firstName} ${formData.lastName}`,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
@@ -339,11 +376,24 @@ export default function EmployeesPage() {
   console.log('All Departments:', departments);
   console.log('All Employees:', employees);
 
-  const filteredEmployees = employees.filter(employee => 
-    employee.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    employee.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    employee.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredEmployees = employees.filter(employee => {
+    if (!employee) return false;
+    
+    const searchLower = searchQuery.toLowerCase();
+    const searchableFields = [
+      employee.name,
+      employee.email,
+      employee.role,
+      employee.department,
+      employee.position,
+      employee.address?.city,
+      employee.address?.state
+    ];
+    
+    return searchableFields.some(field => 
+      field?.toLowerCase().includes(searchLower)
+    );
+  });
 
   if (loading) {
     return (
@@ -473,76 +523,111 @@ export default function EmployeesPage() {
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
                 <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                   <Avatar
-                    src={employee.photoUrl}
-                    alt={`${employee.firstName} ${employee.lastName}`}
                     sx={{
                       width: 56,
                       height: 56,
                       border: '2px solid',
-                      borderColor: isEmployeeDepartmentHead(employee.id)
-                        ? theme.palette.primary.main
-                        : theme.palette.grey[300],
-                      bgcolor: isEmployeeDepartmentHead(employee.id)
-                        ? alpha(theme.palette.primary.main, 0.1)
-                        : theme.palette.grey[100],
+                      borderColor: theme.palette.primary.main,
+                      bgcolor: alpha(theme.palette.primary.main, 0.1),
                     }}
                   >
-                    {employee.firstName[0]}{employee.lastName[0]}
+                    {employee.name?.[0]}
                   </Avatar>
                   <Box>
-                    <Typography variant="h6" sx={{ 
-                      fontWeight: isEmployeeDepartmentHead(employee.id) ? 700 : 500,
-                      color: isEmployeeDepartmentHead(employee.id) ? theme.palette.primary.main : 'text.primary'
-                    }}>
-                      {employee.firstName} {employee.lastName}
+                    <Typography variant="h6" sx={{ fontWeight: 500 }}>
+                      {`${employee.firstName || ''} ${employee.lastName || ''}`}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      {isEmployeeDepartmentHead(employee.id) 
-                        ? `Head of ${getDepartmentHeadOf(employee.id)}`
-                        : employee.position}
+                      {employee.position || 'Unassigned'} • Level {employee.currentLevel || 1}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      {getDepartmentName(employee.departmentId)}
+                      {isEmployeeDepartmentHead(employee.id) && (
+                        <Chip size="small" label="Department Head" color="primary" sx={{ height: 20 }} />
+                      )}
                     </Typography>
                   </Box>
                 </Box>
                 
                 {/* Status Chip */}
                 <Chip
-                  label={employee.status}
+                  label={employee.status || 'active'}
                   size="small"
                   sx={{
-                    bgcolor: employee.status === 'active' 
+                    bgcolor: (employee.status || 'active') === 'active' 
                       ? alpha(theme.palette.success.main, 0.1)
                       : alpha(theme.palette.error.main, 0.1),
-                    color: employee.status === 'active'
+                    color: (employee.status || 'active') === 'active'
                       ? 'success.main'
                       : 'error.main',
                   }}
                 />
               </Box>
 
-              {/* Department & Role Info */}
-              <Stack spacing={1} sx={{ mt: 'auto' }}>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  {/* Department */}
-                  <Chip
-                    label={getDepartmentName(employee.departmentId)}
-                    size="small"
-                    sx={{
-                      bgcolor: employee.departmentId ? alpha(theme.palette.primary.main, 0.1) : alpha(theme.palette.grey[500], 0.1),
-                      color: employee.departmentId ? 'primary.main' : 'text.secondary',
-                    }}
-                  />
-                  
-                  {/* Only show Reports To for non-department heads */}
-                  {!isEmployeeDepartmentHead(employee.id) && employee.departmentId && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <Typography variant="body2" color="text.secondary">
-                        Reports to:
-                      </Typography>
-                      <Typography variant="body2" color="primary" sx={{ fontWeight: 500 }}>
-                        {getManagerName(employee.id)}
-                      </Typography>
-                    </Box>
-                  )}
+              {/* Employee Details */}
+              <Stack spacing={2}>
+                {/* Contact Info */}
+                <Box>
+                  <Stack spacing={1}>
+                    <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span style={{ color: theme.palette.text.secondary, minWidth: 45 }}>Email:</span>
+                      {employee.email}
+                    </Typography>
+                    <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span style={{ color: theme.palette.text.secondary, minWidth: 45 }}>Phone:</span>
+                      {employee.phone || 'Not provided'}
+                    </Typography>
+                    <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span style={{ color: theme.palette.text.secondary, minWidth: 45 }}>Joined:</span>
+                      {employee.joiningDate ? new Date(employee.joiningDate).toLocaleDateString() : 'Not set'}
+                    </Typography>
+                    <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span style={{ color: theme.palette.text.secondary, minWidth: 45 }}>Salary:</span>
+                      ${employee.salary?.toLocaleString() || '0'}
+                    </Typography>
+                  </Stack>
+                </Box>
+
+                {/* Skills */}
+                <Box>
+                  <Typography variant="caption" color="text.secondary" gutterBottom>
+                    Skills
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    {employee.skills?.slice(0, 3).map(skill => (
+                      <Chip
+                        key={skill}
+                        size="small"
+                        label={skill}
+                        color="primary"
+                        variant="outlined"
+                      />
+                    ))}
+                    {employee.skills?.length > 3 && (
+                      <Chip
+                        size="small"
+                        label={`+${employee.skills.length - 3} more`}
+                        color="default"
+                        variant="outlined"
+                      />
+                    )}
+                  </Box>
+                </Box>
+
+                {/* Location & Details */}
+                <Box>
+                  <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <span style={{ color: theme.palette.text.secondary }}>Location:</span>
+                    {employee.address?.city}, {employee.address?.state}
+                  </Typography>
+                  <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <span style={{ color: theme.palette.text.secondary }}>Joined:</span>
+                    {new Date(employee.joiningDate).toLocaleDateString()}
+                  </Typography>
+                  <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <span style={{ color: theme.palette.text.secondary }}>Salary:</span>
+                    ${employee.salary.toLocaleString()}
+                  </Typography>
                 </Box>
               </Stack>
 
@@ -631,8 +716,7 @@ export default function EmployeesPage() {
                 }}
                 onClick={() => !uploadingPhoto && document.getElementById('photo-upload')?.click()}
               >
-                {formData.firstName?.[0]}
-                {formData.lastName?.[0]}
+                {formData.name?.[0]}
               </Avatar>
               <Button
                 variant="outlined"
@@ -646,48 +730,58 @@ export default function EmployeesPage() {
             </Box>
 
             <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="First Name"
-                  value={formData.firstName}
-                  onChange={(e) =>
-                    setFormData({ ...formData, firstName: e.target.value })
-                  }
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Last Name"
-                  value={formData.lastName}
-                  onChange={(e) =>
-                    setFormData({ ...formData, lastName: e.target.value })
-                  }
-                  required
-                />
-              </Grid>
               <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Full Name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
                   label="Email"
                   type="email"
                   value={formData.email}
-                  onChange={(e) =>
-                    setFormData({ ...formData, email: e.target.value })
-                  }
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   required
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  label="Position"
-                  value={formData.position}
-                  onChange={(e) =>
-                    setFormData({ ...formData, position: e.target.value })
-                  }
+                  label="Phone"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Role"
+                  value={formData.role}
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Department"
+                  value={formData.department}
+                  onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Level"
+                  type="number"
+                  value={formData.currentLevel}
+                  onChange={(e) => setFormData({ ...formData, currentLevel: parseInt(e.target.value) || 1 })}
                   required
                 />
               </Grid>
@@ -697,9 +791,18 @@ export default function EmployeesPage() {
                   label="Salary"
                   type="number"
                   value={formData.salary}
-                  onChange={(e) =>
-                    setFormData({ ...formData, salary: e.target.value })
-                  }
+                  onChange={(e) => setFormData({ ...formData, salary: parseFloat(e.target.value) || 0 })}
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Join Date"
+                  type="date"
+                  value={formData.joiningDate}
+                  onChange={(e) => setFormData({ ...formData, joiningDate: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
                   required
                 />
               </Grid>
@@ -709,42 +812,71 @@ export default function EmployeesPage() {
                   select
                   label="Status"
                   value={formData.status}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      status: e.target.value as 'active' | 'inactive',
-                    })
-                  }
+                  onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
                   required
-                  SelectProps={{
-                    native: true,
-                  }}
+                  SelectProps={{ native: true }}
                 >
                   <option value="active">Active</option>
                   <option value="inactive">Inactive</option>
                 </TextField>
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12}>
                 <TextField
                   fullWidth
-                  select
-                  label="Department"
-                  value={formData.departmentId}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      departmentId: e.target.value as string | undefined,
-                    })
-                  }
-                  SelectProps={{
-                    native: true,
-                  }}
-                >
-                  <option value="">Not Assigned</option>
-                  {departments.map(department => (
-                    <option key={department.id} value={department.id}>{department.name}</option>
-                  ))}
-                </TextField>
+                  label="Skills"
+                  value={formData.skills.join(', ')}
+                  onChange={(e) => setFormData({ ...formData, skills: e.target.value.split(',').map(s => s.trim()) })}
+                  helperText="Enter skills separated by commas"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Typography variant="subtitle1" gutterBottom>Address</Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      label="Street Address"
+                      value={formData.address.street}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        address: { ...formData.address, street: e.target.value } 
+                      })}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="City"
+                      value={formData.address.city}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        address: { ...formData.address, city: e.target.value } 
+                      })}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="State"
+                      value={formData.address.state}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        address: { ...formData.address, state: e.target.value } 
+                      })}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Pin Code"
+                      value={formData.address.pincode}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        address: { ...formData.address, pincode: e.target.value } 
+                      })}
+                    />
+                  </Grid>
+                </Grid>
               </Grid>
             </Grid>
           </DialogContent>

@@ -14,6 +14,7 @@ import {
   Stack,
   Divider,
   Chip,
+  TextField,
 } from '@mui/material';
 import {
   Today as CalendarIcon,
@@ -21,6 +22,7 @@ import {
   Event as EventIcon,
   Assignment as TaskIcon,
   CheckCircle as TodoIcon,
+  Add as AddIcon,
 } from '@mui/icons-material';
 import { format, isSameDay } from 'date-fns';
 import { useProjects } from '@/contexts/ProjectContext';
@@ -31,6 +33,8 @@ import { useSnackbar } from '@/contexts/SnackbarContext';
 interface MiniCalendarProps {
   userId: string;
 }
+
+type EventPriority = 'low' | 'medium' | 'high';
 
 export const MiniCalendar: React.FC<MiniCalendarProps> = ({ userId }) => {
   const navigate = useNavigate();
@@ -53,6 +57,26 @@ export const MiniCalendar: React.FC<MiniCalendarProps> = ({ userId }) => {
     window.location.href = '/calendar';
   };
 
+  const handleAddTask = async () => {
+    if (!newTask.trim()) return;
+    
+    try {
+      await addDoc(collection(db, 'tasks'), {
+        title: newTask.trim(),
+        completed: false,
+        priority: 'medium',
+        dueDate: selectedDate,
+        userId: userId,
+        createdAt: serverTimestamp(),
+      });
+      setNewTask('');
+      showSnackbar('Task created successfully', 'success');
+    } catch (error) {
+      console.error('Error creating task:', error);
+      showSnackbar('Failed to create task', 'error');
+    }
+  };
+
   // Get today's events and tasks
   const [todaysEvents, setTodaysEvents] = React.useState<Array<{
     type: 'project' | 'task' | 'event';
@@ -62,7 +86,11 @@ export const MiniCalendar: React.FC<MiniCalendarProps> = ({ userId }) => {
 
   React.useEffect(() => {
     const loadTodaysEvents = async () => {
-      const events = [];
+      const events: Array<{
+        type: 'project' | 'task' | 'event';
+        title: string;
+        priority?: 'low' | 'medium' | 'high';
+      }> = [];
       
       try {
         // Load calendar events
@@ -102,7 +130,7 @@ export const MiniCalendar: React.FC<MiniCalendarProps> = ({ userId }) => {
             events.push({
               type: 'project',
               title: `${project.name} Due`,
-              priority: project.priority,
+              priority: (project.priority === 'urgent' ? 'high' : project.priority) as EventPriority,
             });
           }
         });
@@ -174,48 +202,16 @@ export const MiniCalendar: React.FC<MiniCalendarProps> = ({ userId }) => {
               placeholder="Add a quick task..."
               value={newTask}
               onChange={(e) => setNewTask(e.target.value)}
-              onKeyPress={async (e) => {
+              onKeyPress={(e) => {
                 if (e.key === 'Enter' && newTask.trim()) {
-                  try {
-                    await addDoc(collection(db, 'tasks'), {
-                      title: newTask.trim(),
-                      completed: false,
-                      priority: 'medium',
-                      dueDate: selectedDate,
-                      userId: userId,
-                      createdAt: serverTimestamp(),
-                    });
-                    setNewTask('');
-                    showSnackbar('Task created successfully', 'success');
-                  } catch (error) {
-                    console.error('Error creating task:', error);
-                    showSnackbar('Failed to create task', 'error');
-                  }
+                  handleAddTask();
                 }
               }}
               InputProps={{
                 endAdornment: (
                   <IconButton
                     size="small"
-                    onClick={async () => {
-                      if (newTask.trim()) {
-                        try {
-                          await addDoc(collection(db, 'tasks'), {
-                            title: newTask.trim(),
-                            completed: false,
-                            priority: 'medium',
-                            dueDate: selectedDate,
-                            userId: userId,
-                            createdAt: serverTimestamp(),
-                          });
-                          setNewTask('');
-                          showSnackbar('Task created successfully', 'success');
-                        } catch (error) {
-                          console.error('Error creating task:', error);
-                          showSnackbar('Failed to create task', 'error');
-                        }
-                      }
-                    }}
+                    onClick={handleAddTask}
                   >
                     <AddIcon />
                   </IconButton>
@@ -241,15 +237,17 @@ export const MiniCalendar: React.FC<MiniCalendarProps> = ({ userId }) => {
                           <TodoIcon color="warning" fontSize="small" />
                         )}
                         <Typography variant="body2">{event.title}</Typography>
-                        <Chip
-                          label={event.priority}
-                          size="small"
-                          color={
-                            event.priority === 'high' ? 'error' :
-                            event.priority === 'medium' ? 'warning' :
-                            'success'
-                          }
-                        />
+                        {event.priority && (
+                          <Chip
+                            label={event.priority}
+                            size="small"
+                            color={
+                              event.priority === 'high' ? 'error' :
+                              event.priority === 'medium' ? 'warning' :
+                              'success'
+                            }
+                          />
+                        )}
                       </Stack>
                     }
                   />

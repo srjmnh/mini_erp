@@ -65,6 +65,12 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
     departments: 'Departments',
     documents: 'Documents',
     settings: 'Settings',
+    hr: 'HR',
+    'time-off': 'Time Off',
+    'leave-requests': 'Leave Requests',
+    payroll: 'Payroll',
+    performance: 'Performance',
+    roles: 'Role Configuration',
   };
 
   return (

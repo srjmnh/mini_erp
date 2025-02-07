@@ -24,32 +24,38 @@ import { useAuth } from './AuthContext';
 // Types
 export interface Employee {
   id: string;
-  firstName: string;
-  lastName: string;
+  name: string;
   email: string;
-  position: string;
-  departmentId?: string;
-  subDepartmentId?: string;
-  role?: string;
+  phone: string;
+  role: 'Department Head' | 'Team Lead' | 'Manager' | 'Employee' | string;
+  department: string;
+  departmentId: string;
+  currentLevel: number;
   salary: number;
-  status: 'active' | 'inactive';
-  reportsTo?: string | null;
-  photoUrl?: string;
-  isManager?: boolean;
-  isDeputyManager?: boolean;
-  isSubDepartmentHead?: boolean;
-  order?: number;
-  createdAt: string;
-  updatedAt: string;
-  name: string; // Add computed name field
+  address?: {
+    street: string;
+    city: string;
+    state: string;
+    pincode: string;
+  };
+  joiningDate: any;
+  skills: string[];
+  education?: {
+    degree: string;
+    field: string;
+    university: string;
+    graduationYear: number;
+  };
+  status?: 'active' | 'inactive';
+  createdAt?: any;
+  updatedAt?: any;
 }
 
 export interface Department {
   id: string;
   name: string;
   description?: string;
-  managerId?: string;
-  deputyManagerId?: string;
+  headId?: string;
   parentDepartmentId?: string;
   order?: number;
   createdAt: string;
@@ -168,10 +174,20 @@ export const FirestoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       (snapshot: QuerySnapshot<DocumentData>) => {
         const employees = snapshot.docs.map(doc => {
           const data = doc.data();
+          const timestamp = data.joiningDate?.toDate?.();
+          const joiningDate = timestamp ? timestamp.toISOString().split('T')[0] : '';
+          
           return {
             id: doc.id,
             ...data,
-            name: `${data.firstName} ${data.lastName}` // Add computed name field
+            // Ensure required fields have default values
+            name: data.name || 'Unnamed Employee',
+            role: data.role || 'Unassigned',
+            position: data.position || data.role || 'Unassigned',
+            department: data.department || 'Unassigned',
+            currentLevel: data.currentLevel || 1,
+            status: data.status || 'active',
+            joiningDate: joiningDate
           };
         }) as Employee[];
         setState(prev => ({ ...prev, employees }));
