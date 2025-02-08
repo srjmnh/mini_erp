@@ -1,5 +1,5 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
   Grid,
@@ -24,15 +24,16 @@ import {
   ArrowForward as ArrowForwardIcon,
   TrendingUp as TrendingUpIcon,
   AccessTime as AccessTimeIcon,
+  CalendarMonth as CalendarIcon,
 } from '@mui/icons-material';
 import { useFirestore } from '@/contexts/FirestoreContext';
 import { useProjects } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import ManagerDashboard from './ManagerDashboard';
-import { EmployeeDashboard } from './EmployeeDashboard';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const theme = useTheme();
   const { employees, departments, loading } = useFirestore();
   const { projects } = useProjects();
@@ -40,22 +41,17 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-        <CircularProgress />
+      <Box sx={{ width: '100%', mt: 2 }}>
+        <LinearProgress />
       </Box>
     );
   }
 
-  // Route based on user role
+  // Show manager dashboard for managers
   if (userRole === 'manager') {
     return <ManagerDashboard />;
   }
 
-  if (userRole === 'employee') {
-    return <EmployeeDashboard />;
-  }
-
-  // HR roles get the full dashboard
   const menuCards = [
     {
       title: 'Employees',
@@ -105,6 +101,14 @@ export default function DashboardPage() {
   ];
 
   const recentProjects = projects.slice(0, 3);
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ pb: 4 }}>
@@ -278,6 +282,7 @@ export default function DashboardPage() {
           </Grid>
         ))}
       </Grid>
+
     </Box>
   );
 }

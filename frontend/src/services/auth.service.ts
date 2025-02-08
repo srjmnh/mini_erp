@@ -51,8 +51,13 @@ export class AuthService {
       // Send password reset email so user can set their own password
       await sendPasswordResetEmail(auth, data.email);
 
+      // Sign out the newly created user to prevent automatic sign-in
+      await signOut(auth);
+
       return userAccount;
     } catch (error: any) {
+      // If there's an error, make sure to sign out
+      await signOut(auth).catch(console.error);
       console.error('Error creating user account:', error);
       throw new Error(error.message || 'Failed to create user account');
     }

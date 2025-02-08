@@ -37,6 +37,7 @@ import {
   Visibility as ViewIcon,
   Email as EmailIcon,
   Phone as PhoneIcon,
+  Key as KeyIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFirestore } from '@/contexts/FirestoreContext';
@@ -44,10 +45,12 @@ import { useSupabase } from '@/hooks/useSupabase';
 import { useProjects } from '@/contexts/ProjectContext';
 import { useSnackbar } from '@/contexts/SnackbarContext';
 import { getFirestore, collection, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { getAuth, sendPasswordResetEmail } from 'firebase/auth';
 import { app } from '@/config/firebase';
 
-// Get Firestore instance
+// Get Firebase instances
 const db = getFirestore(app);
+const auth = getAuth(app);
 
 interface EmployeeFormData {
   name: string;
@@ -496,7 +499,7 @@ export default function EmployeesPage() {
                 },
               })}
             >
-              <Box sx={{ display: 'flex', gap: 2 }}>
+              <Box sx={{ display: 'flex', gap: 2, position: 'relative' }}>
                 {/* Left section - Avatar */}
                 <Avatar
                   sx={{
@@ -567,6 +570,50 @@ export default function EmployeesPage() {
                       </Typography>
                     </Grid>
                   </Grid>
+                </Box>
+
+                {/* Actions */}
+                <Box sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 1 }}>
+                  <Tooltip title="Edit Employee">
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditEmployee(employee);
+                      }}
+                    >
+                      <EditIcon />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Reset Password">
+                    <IconButton
+                      size="small"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await sendPasswordResetEmail(auth, employee.email);
+                          showSnackbar('Password reset email sent successfully', 'success');
+                        } catch (error) {
+                          console.error('Error sending reset email:', error);
+                          showSnackbar('Failed to send password reset email', 'error');
+                        }
+                      }}
+                    >
+                      <KeyIcon />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Delete Employee">
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(employee);
+                      }}
+                      sx={{ color: 'error.main' }}
+                    >
+                      <DeleteIcon />
+                    </IconButton>
+                  </Tooltip>
                 </Box>
               </Box>
 

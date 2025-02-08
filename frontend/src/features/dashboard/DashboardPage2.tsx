@@ -1,42 +1,13 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  Box,
-  Grid,
-  Card,
-  CardContent,
-  Typography,
-  IconButton,
-  Avatar,
-  AvatarGroup,
-  LinearProgress,
-  Stack,
-  useTheme,
-  CircularProgress,
-} from '@mui/material';
-import {
-  People as PeopleIcon,
-  Business as BusinessIcon,
-  Description as DocumentsIcon,
-  Work as HRIcon,
-  Assignment as ProjectsIcon,
-  Settings as SettingsIcon,
-  ArrowForward as ArrowForwardIcon,
-  TrendingUp as TrendingUpIcon,
-  AccessTime as AccessTimeIcon,
-} from '@mui/icons-material';
-import { useFirestore } from '@/contexts/FirestoreContext';
-import { useProjects } from '@/contexts/ProjectContext';
+import { Box, CircularProgress } from '@mui/material';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFirestore } from '@/contexts/FirestoreContext';
 import ManagerDashboard from './ManagerDashboard';
 import { EmployeeDashboard } from './EmployeeDashboard';
 
 export default function DashboardPage() {
-  const navigate = useNavigate();
-  const theme = useTheme();
-  const { employees, departments, loading } = useFirestore();
-  const { projects } = useProjects();
   const { userRole } = useAuth();
+  const { loading } = useFirestore();
 
   if (loading) {
     return (
@@ -46,116 +17,14 @@ export default function DashboardPage() {
     );
   }
 
-  // Route based on user role
+  // Route to appropriate dashboard based on role
   if (userRole === 'manager') {
     return <ManagerDashboard />;
   }
 
-  if (userRole === 'employee') {
-    return <EmployeeDashboard />;
-  }
-
-  // HR roles get the full dashboard
-  const menuCards = [
-    {
-      title: 'Employees',
-      icon: <PeopleIcon sx={{ fontSize: 24 }} />,
-      to: '/employees',
-      color: '#4CAF50',
-      count: employees.length,
-      subtitle: 'Total team members',
-    },
-    {
-      title: 'Departments',
-      icon: <BusinessIcon sx={{ fontSize: 24 }} />,
-      to: '/departments',
-      color: '#2196F3',
-      count: departments.length,
-      subtitle: 'Active departments',
-    },
-    {
-      title: 'Projects',
-      icon: <ProjectsIcon sx={{ fontSize: 24 }} />,
-      to: '/projects',
-      color: '#9C27B0',
-      count: projects.length,
-      subtitle: 'Ongoing projects',
-    },
-    {
-      title: 'Documents',
-      icon: <DocumentsIcon sx={{ fontSize: 24 }} />,
-      to: '/documents',
-      color: '#FF9800',
-      subtitle: 'Document management',
-    },
-    {
-      title: 'HR',
-      icon: <HRIcon sx={{ fontSize: 24 }} />,
-      to: '/hr',
-      color: '#F44336',
-      subtitle: 'Human resources',
-    },
-    {
-      title: 'Settings',
-      icon: <SettingsIcon sx={{ fontSize: 24 }} />,
-      to: '/settings',
-      color: '#607D8B',
-      subtitle: 'System preferences',
-    },
-  ];
-
-  const recentProjects = projects.slice(0, 3);
-
-  return (
-    <Box sx={{ pb: 4 }}>
-      <Typography variant="h4" sx={{ mb: 4, fontWeight: 600 }}>
-        Welcome back!
-      </Typography>
-
-      {/* Main Menu Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        {menuCards.map((card) => (
-          <Grid item xs={12} sm={6} md={4} key={card.title}>
-            <Card
-              sx={{
-                height: '100%',
-                cursor: 'pointer',
-                transition: 'transform 0.2s, box-shadow 0.2s',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: theme.shadows[8],
-                },
-              }}
-              onClick={() => navigate(card.to)}
-            >
-              <CardContent>
-                <Stack spacing={2}>
-                  <Stack
-                    direction="row"
-                    justifyContent="space-between"
-                    alignItems="center"
-                  >
-                    <Avatar
-                      sx={{
-                        bgcolor: card.color,
-                        width: 48,
-                        height: 48,
-                      }}
-                    >
-                      {card.icon}
-                    </Avatar>
-                    <IconButton
-                      size="small"
-                      sx={{
-                        bgcolor: theme.palette.action.hover,
-                        '&:hover': { bgcolor: theme.palette.action.selected },
-                      }}
-                    >
-                      <ArrowForwardIcon />
-                    </IconButton>
-                  </Stack>
-
-                  <Box>
+  // Default to employee dashboard
+  return <EmployeeDashboard />;
+}
                     <Typography variant="h6" gutterBottom>
                       {card.title}
                     </Typography>
@@ -278,6 +147,7 @@ export default function DashboardPage() {
           </Grid>
         ))}
       </Grid>
+
     </Box>
   );
 }

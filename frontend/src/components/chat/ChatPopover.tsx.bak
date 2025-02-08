@@ -1,0 +1,389 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Box,
+  Typography,
+  IconButton,
+  List,
+  ListItemText,
+  ListItemAvatar,
+  ListItemButton,
+  Avatar,
+  Stack,
+  Divider,
+  Badge,
+  Paper,
+  InputBase,
+  Popover,
+  useTheme,
+  alpha,
+  Autocomplete,
+  TextField,
+  CircularProgress,
+  Fade,
+} from '@mui/material';
+import {
+  Send as SendIcon,
+  Search as SearchIcon,
+  AttachFile as AttachFileIcon,
+  EmojiEmotions as EmojiIcon,
+  Circle as CircleIcon,
+  Chat as ChatIcon,
+} from '@mui/icons-material';
+import { motion, AnimatePresence } from 'framer-motion';
+import { supabase } from '@/config/supabase';
+import { useAuth } from '@/contexts/AuthContext';
+
+interface Employee {
+  id: string;
+  name: string;
+  email: string;
+  avatar_url?: string;
+  department_id: string;
+  role: string;
+  online?: boolean;
+}
+
+interface Message {
+  id: string;
+  content: string;
+  sender_id: string;
+  receiver_id: string;
+  created_at: string;
+}
+
+export default function ChatPopover() {
+  const theme = useTheme();
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [loading, setLoading] = useState(false);
+  const { user } = useAuth();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Fetch employees for search
+  useEffect(() => {
+    const fetchEmployees = async () => {
+      try {
+        const { data: employees, error } = await supabase
+          .from('employees')
+          .select('*')
+          .neq('id', user?.uid); // Exclude current user
+
+        if (error) throw error;
+        setEmployees(employees || []);
+      } catch (error) {
+        console.error('Error fetching employees:', error);
+      }
+    };
+
+    fetchEmployees();
+  }, [user?.uid]);
+
+  // Fetch messages when employee is selected
+  useEffect(() => {
+    if (!selectedEmployee) return;
+
+    const fetchMessages = async () => {
+      setLoading(true);
+      try {
+        const { data: messages, error } = await supabase
+          .from('chat_messages')
+          .select('*')
+          .or(\`sender_id.eq.\${user?.uid},receiver_id.eq.\${user?.uid}\`)
+          .or(\`sender_id.eq.\${selectedEmployee.id},receiver_id.eq.\${selectedEmployee.id}\`)
+          .order('created_at', { ascending: true });
+
+        if (error) throw error;
+        setMessages(messages || []);
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      } catch (error) {
+        console.error('Error fetching messages:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMessages();
+
+    // Subscribe to new messages
+    const channel = supabase
+      .channel('chat')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: \`or(sender_id=eq.\${user?.uid},receiver_id=eq.\${user?.uid})\`
+        },
+        (payload) => {
+          const newMessage = payload.new as Message;
+          if (
+            (newMessage.sender_id === selectedEmployee.id && newMessage.receiver_id === user?.uid) ||
+            (newMessage.sender_id === user?.uid && newMessage.receiver_id === selectedEmployee.id)
+          ) {
+            setMessages(prev => [...prev, newMessage]);
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [selectedEmployee, user?.uid]);
+
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !selectedEmployee || !user) return;
+
+    try {
+      const { error } = await supabase
+        .from('chat_messages')
+        .insert([
+          {
+            content: newMessage,
+            sender_id: user.uid,
+            receiver_id: selectedEmployee.id,
+          }
+        ]);
+
+      if (error) throw error;
+      setNewMessage('');
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
+  };
+
+  const handleClick = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleClose = () => {
+    setAnchorEl(null);
+    setSelectedEmployee(null);
+  };
+
+  const open = Boolean(anchorEl);
+
+  return (
+    <>
+      <IconButton
+        onClick={handleClick}
+        sx={{
+          position: 'fixed',
+          bottom: 20,
+          right: 20,
+          bgcolor: 'primary.main',
+          color: 'white',
+          '&:hover': {
+            bgcolor: 'primary.dark',
+          },
+          boxShadow: 4,
+        }}
+      >
+        <Badge badgeContent={unreadCount} color="error">
+          <ChatIcon />
+        </Badge>
+      </IconButton>
+
+      <Popover
+        open={open}
+        anchorEl={anchorEl}
+        onClose={handleClose}
+        anchorOrigin={{
+          vertical: 'top',
+          horizontal: 'left',
+        }}
+        transformOrigin={{
+          vertical: 'bottom',
+          horizontal: 'right',
+        }}
+        sx={{
+          '& .MuiPopover-paper': {
+            width: 320,
+            height: 480,
+            overflow: 'hidden',
+            borderRadius: 2,
+          },
+        }}
+      >
+        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          {/* Search Header */}
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              borderBottom: 1,
+              borderColor: 'divider',
+            }}
+          >
+            <Autocomplete
+              options={employees}
+              getOptionLabel={(option) => option.name}
+              value={selectedEmployee}
+              onChange={(_, newValue) => setSelectedEmployee(newValue)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  placeholder="Search employees..."
+                  variant="outlined"
+                  size="small"
+                  fullWidth
+                  InputProps={{
+                    ...params.InputProps,
+                    startAdornment: <SearchIcon color="action" sx={{ mr: 1 }} />,
+                  }}
+                />
+              )}
+              renderOption={(props, option) => (
+                <ListItemButton {...props}>
+                  <ListItemAvatar>
+                    <Avatar src={option.avatar_url}>{option.name[0]}</Avatar>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={option.name}
+                    secondary={option.role}
+                    primaryTypographyProps={{
+                      variant: 'subtitle2',
+                    }}
+                  />
+                </ListItemButton>
+              )}
+            />
+          </Paper>
+
+          {/* Messages Area */}
+          {selectedEmployee ? (
+            <>
+              <Box
+                sx={{
+                  flex: 1,
+                  overflow: 'auto',
+                  p: 2,
+                  bgcolor: (theme) => alpha(theme.palette.primary.main, 0.02),
+                }}
+              >
+                <AnimatePresence>
+                  {messages.map((message) => (
+                    <motion.div
+                      key={message.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -20 }}
+                    >
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems:
+                            message.sender_id === user?.uid ? 'flex-end' : 'flex-start',
+                          mb: 1,
+                        }}
+                      >
+                        <Paper
+                          elevation={0}
+                          sx={{
+                            p: 1.5,
+                            maxWidth: '75%',
+                            bgcolor: message.sender_id === user?.uid
+                              ? 'primary.main'
+                              : 'background.paper',
+                            color: message.sender_id === user?.uid
+                              ? 'primary.contrastText'
+                              : 'text.primary',
+                            borderRadius: 2,
+                          }}
+                        >
+                          <Typography variant="body2">{message.content}</Typography>
+                        </Paper>
+                        <Typography
+                          variant="caption"
+                          sx={{ mt: 0.5, color: 'text.secondary' }}
+                        >
+                          {new Date(message.created_at).toLocaleTimeString()}
+                        </Typography>
+                      </Box>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+                <div ref={messagesEndRef} />
+              </Box>
+
+              {/* Input Area */}
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 1,
+                  borderTop: 1,
+                  borderColor: 'divider',
+                }}
+              >
+                <Stack direction="row" spacing={1} alignItems="flex-end">
+                  <IconButton size="small">
+                    <EmojiIcon />
+                  </IconButton>
+                  <IconButton size="small">
+                    <AttachFileIcon />
+                  </IconButton>
+                  <InputBase
+                    fullWidth
+                    multiline
+                    maxRows={4}
+                    placeholder="Type a message..."
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
+                    sx={{
+                      flex: 1,
+                      bgcolor: (theme) => alpha(theme.palette.primary.main, 0.04),
+                      borderRadius: 2,
+                      p: 1,
+                    }}
+                  />
+                  <IconButton
+                    onClick={handleSendMessage}
+                    disabled={!newMessage.trim()}
+                    color="primary"
+                    sx={{
+                      bgcolor: (theme) =>
+                        newMessage.trim()
+                          ? alpha(theme.palette.primary.main, 0.1)
+                          : 'transparent',
+                    }}
+                  >
+                    <SendIcon />
+                  </IconButton>
+                </Stack>
+              </Paper>
+            </>
+          ) : (
+            <Box
+              sx={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                p: 3,
+                color: 'text.secondary',
+              }}
+            >
+              <Typography variant="body2" align="center">
+                Search for an employee to start chatting
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      </Popover>
+    </>
+  );
+}

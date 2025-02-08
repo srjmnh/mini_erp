@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, addDoc, updateDoc, doc, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, query, where, orderBy, onSnapshot, getDoc } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import { LeaveType, LeaveStatus, ExpenseCategory, ExpenseStatus } from '@/config/firestore-schema';
@@ -48,24 +48,64 @@ export function useRequests() {
   const { employees } = useFirestore();
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setLoading(true);
+      return;
+    }
 
-    // Find the current employee's record
+    // For HR users, we don't need an employee record
+    if (userRole === 'HR0' || userRole === 'hr') {
+      // Set up query for all leave requests
+      const leaveQuery = query(
+        collection(db, 'leaveRequests'),
+        orderBy('createdAt', 'desc')
+      );
+      
+      // Set up listeners
+      const unsubLeave = onSnapshot(leaveQuery, (snapshot) => {
+        const requests = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setLeaveRequests(requests as LeaveRequest[]);
+        setLoading(false);
+      });
+
+      return () => {
+        unsubLeave();
+      };
+    }
+
+    // For regular users, find their employee record
+    if (!employees.length) {
+      setLoading(true);
+      return;
+    }
+
     const currentEmployee = employees.find(emp => emp.email === user.email);
-    if (!currentEmployee) return;
+    if (!currentEmployee) {
+      console.error('Employee record not found for:', user.email);
+      setLoading(false);
+      return;
+    }
 
     // Query based on user role
-    const leaveQuery = userRole === 'manager' 
-      ? query(
-          collection(db, 'leaveRequests'),
-          where('departmentId', '==', currentEmployee.departmentId),
-          orderBy('createdAt', 'desc')
-        )
-      : query(
-          collection(db, 'leaveRequests'),
-          where('employeeId', '==', currentEmployee.id),
-          orderBy('createdAt', 'desc')
-        );
+    let leaveQuery;
+    if (userRole === 'manager') {
+      // Managers see their department's requests
+      leaveQuery = query(
+        collection(db, 'leaveRequests'),
+        where('departmentId', '==', currentEmployee.departmentId),
+        orderBy('createdAt', 'desc')
+      );
+    } else {
+      // Regular employees see their own requests
+      leaveQuery = query(
+        collection(db, 'leaveRequests'),
+        where('employeeId', '==', currentEmployee.id),
+        orderBy('createdAt', 'desc')
+      );
+    }
 
     const expenseQuery = userRole === 'manager'
       ? query(
@@ -122,34 +162,69 @@ export function useRequests() {
   }, [user, userRole, employees]);
 
   // Submit new leave request
-  const submitLeaveRequest = async (data: Omit<LeaveRequest, 'id' | 'employeeId' | 'departmentId' | 'status' | 'createdAt' | 'updatedAt' | 'notified'>) => {
+  const submitLeaveRequest = async (data: Omit<LeaveRequest, 'id' | 'employeeId' | 'departmentId' | 'status' | 'createdAt' | 'updatedAt' | 'notified'> & { employeeId?: string }) => {
     if (!user) throw new Error('User not authenticated');
     
-    const currentEmployee = employees.find(emp => emp.email === user.email);
-    if (!currentEmployee) throw new Error('Employee not found');
+    // For HR submitting on behalf of other employees
+    const targetEmployeeId = data.employeeId || user.uid;
+    const targetEmployee = employees.find(emp => emp.id === targetEmployeeId);
+    if (!targetEmployee) throw new Error('Target employee not found');
+    
+    let submitterInfo;
+    if (userRole === 'HR0' || userRole === 'hr') {
+      // For HR users, use default HR info
+      submitterInfo = {
+        submittedBy: 'HR_SYSTEM',
+        submittedByName: 'HR Department'
+      };
+    } else {
+      const currentEmployee = employees.find(emp => emp.email === user.email);
+      if (!currentEmployee) throw new Error('Current employee not found');
+      submitterInfo = {
+        submittedBy: currentEmployee.id,
+        submittedByName: `${currentEmployee.firstName} ${currentEmployee.lastName}`
+      };
+    }
 
     const leaveRequest = {
       ...data,
-      employeeId: currentEmployee.id,
-      departmentId: currentEmployee.departmentId,
+      employeeId: targetEmployee.id,
+      departmentId: targetEmployee.departmentId,
       status: 'pending' as LeaveStatus,
       createdAt: new Date(),
       updatedAt: new Date(),
       notified: false,
+      ...submitterInfo
     };
 
-    const docRef = await addDoc(collection(db, 'leaveRequests'), leaveRequest);
-    
-    // Create notification for manager
-    await addDoc(collection(db, 'notifications'), {
-      userId: currentEmployee.managerId,
-      type: 'leave_request',
-      title: 'New Leave Request',
-      message: `${currentEmployee.firstName} ${currentEmployee.lastName} has submitted a leave request`,
-      read: false,
-      requestId: docRef.id,
+    // Convert dates to Firestore Timestamps
+    const firestoreLeaveRequest = {
+      ...leaveRequest,
+      startDate: new Date(leaveRequest.startDate),
+      endDate: new Date(leaveRequest.endDate),
       createdAt: new Date(),
-    });
+      updatedAt: new Date()
+    };
+
+    const docRef = await addDoc(collection(db, 'leaveRequests'), firestoreLeaveRequest);
+    
+    // Get department head/manager ID
+    const departmentDoc = await getDoc(doc(db, 'departments', targetEmployee.departmentId));
+    const departmentData = departmentDoc.data();
+    const managerId = departmentData?.headId;
+
+    if (managerId) {
+      // Create notification for manager
+      await addDoc(collection(db, 'notifications'), {
+        userId: managerId,
+        type: 'leave_request',
+        title: 'New Leave Request',
+        message: `${submitterInfo.submittedByName} has submitted a leave request for ${targetEmployee.firstName} ${targetEmployee.lastName}`,
+        read: false,
+        requestId: docRef.id,
+        createdAt: new Date(),
+      });
+    }
   };
 
   // Submit new expense request

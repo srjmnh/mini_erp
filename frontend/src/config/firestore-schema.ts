@@ -1,8 +1,8 @@
 // This is a reference file for the Firestore schema structure
 
 // Leave Request Types
-export type LeaveType = 'sick' | 'vacation' | 'personal' | 'other';
-export type LeaveStatus = 'pending' | 'approved' | 'rejected';
+export type LeaveType = 'casual' | 'sick';
+export type LeaveStatus = 'pending' | 'approved' | 'declined';
 
 // Expense Types
 export type ExpenseCategory = 'travel' | 'office' | 'equipment' | 'other';
@@ -46,9 +46,27 @@ Collection: leaveRequests
 Document ID: auto-generated
 {
   employeeId: string,
+  employeeName: string,
   departmentId: string,
   type: LeaveType,
   startDate: timestamp,
+  endDate: timestamp,
+  reason: string,
+  status: LeaveStatus,
+  medicalCertificate?: string, // URL to uploaded certificate
+  managerComment?: string,
+  createdAt: timestamp,
+  updatedAt: timestamp
+}
+
+Collection: leaveBalances
+Document ID: employeeId
+{
+  employeeId: string,
+  casualLeaves: number, // Default: 25
+  sickLeaves: number, // Unlimited
+  updatedAt: timestamp
+}
   endDate: timestamp,
   reason: string,
   status: LeaveStatus,

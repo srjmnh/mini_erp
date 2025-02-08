@@ -1,0 +1,1076 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Box,
+  Paper,
+  Grid,
+  Typography,
+  Button,
+  TextField,
+  MenuItem,
+  CircularProgress,
+  Chip,
+  Link,
+  IconButton,
+  Avatar,
+  Stack,
+  Alert,
+  LinearProgress,
+  Tooltip,
+  Card,
+  CardContent,
+} from '@mui/material';
+import { alpha } from '@mui/material/styles';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { format, differenceInDays } from 'date-fns';
+import {
+  AccessTime as AccessTimeIcon,
+  Sick as SickIcon,
+  BeachAccess as BeachAccessIcon,
+  Upload as UploadIcon,
+  Person as PersonIcon,
+} from '@mui/icons-material';
+
+import { LeaveType, LeaveStatus } from '@/config/firestore-schema';
+import { calculateLeaveDuration } from '@/services/leaveManagement';
+import { useAuth } from '@/contexts/AuthContext';
+import { useRequests } from '@/hooks/useRequests';
+import { useSnackbar } from '@/contexts/SnackbarContext';
+import { getLeaveBalance, uploadMedicalCertificate } from '@/services/leaveManagement';
+import { getEmployeeManager } from '@/services/employeeManagement';
+import { ApprovedIcon, RejectedIcon } from '@/components/icons';
+import { Comment as CommentIcon } from '@mui/icons-material';
+
+const CASUAL_LEAVE_DEFAULT = 25;
+
+const leaveTypes = [
+  { 
+    value: 'casual', 
+    label: 'Casual Leave',
+    icon: <BeachAccessIcon />,
+    color: '#4CAF50',
+    description: `Personal time off and vacations (${CASUAL_LEAVE_DEFAULT} days per year)`,
+    defaultBalance: CASUAL_LEAVE_DEFAULT
+  },
+  { 
+    value: 'sick', 
+    label: 'Sick Leave',
+    icon: <SickIcon />,
+    color: '#F44336',
+    description: 'Medical reasons (requires certificate for >3 days)',
+    defaultBalance: -1 // -1 indicates unlimited
+  },
+];
+
+export default function TimeOffPage() {
+  // Debug logging
+  console.log('[TimeOffPage] Component mounted');
+
+  const { showSnackbar } = useSnackbar();
+  const { user } = useAuth();
+  // Handle legacy 'hr' role
+  const userRole = 'hr';
+  console.log('[TimeOffPage] Using hardcoded HR role for testing');
+  
+  // Debug logging
+  console.log('[TimeOffPage] Auth state:', {
+    user: user ? {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName
+    } : null,
+    userRole,
+    timestamp: new Date().toISOString()
+  });
+  const {
+    leaveRequests,
+    loading,
+    submitLeaveRequest,
+    updateRequestStatus,
+  } = useRequests();
+
+  // Filter states for HR view
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterType, setFilterType] = useState<string>('all');
+  const [filterDepartment, setFilterDepartment] = useState<string>('all');
+
+  const [showRequestForm, setShowRequestForm] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState<string | null>(userRole === 'HR0' ? null : user?.uid || null);
+
+  // Get filtered leave requests
+  const filteredLeaveRequests = useMemo(() => {
+    return leaveRequests.filter(request => {
+      const matchesStatus = filterStatus === 'all' || request.status === filterStatus;
+      const matchesType = filterType === 'all' || request.type === filterType;
+      const matchesDepartment = filterDepartment === 'all' || request.departmentId === filterDepartment;
+      return matchesStatus && matchesType && matchesDepartment;
+    }).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }, [leaveRequests, filterStatus, filterType, filterDepartment]);
+
+  const [leaveForm, setLeaveForm] = useState({
+    type: 'casual' as LeaveType,
+    startDate: new Date(),
+    endDate: new Date(),
+    reason: '',
+    medicalCertificate: null as File | null,
+  });
+
+  // For HR: Get all employees
+  const { employees } = useFirestore();
+  const sortedEmployees = [...employees].sort((a, b) => 
+    `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`)
+  );
+
+  const needsMedicalCertificate = leaveForm.type === 'sick' && 
+    differenceInDays(leaveForm.endDate, leaveForm.startDate) > 3;
+
+  const [leaveBalance, setLeaveBalance] = useState<{
+    casual: number;
+    sick: number;
+    year: number;
+    used: {
+      casual: number;
+      sick: number;
+    };
+  } | null>(null);
+
+  const [loadingBalance, setLoadingBalance] = useState(true);
+
+  const [manager, setManager] = useState<{
+    name: string;
+    position: string;
+    photoUrl?: string;
+  } | null>(null);
+
+  const [loadingManager, setLoadingManager] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      if (!user) return;
+      
+      try {
+        // Load leave balance
+        setLoadingBalance(true);
+        const balance = await getLeaveBalance(user.uid);
+        setLeaveBalance({
+          casual: balance?.casual ?? CASUAL_LEAVE_DEFAULT,
+          sick: -1, // Unlimited sick leave
+          year: balance?.year ?? new Date().getFullYear(),
+          used: {
+            casual: balance?.used?.casual ?? 0,
+            sick: balance?.used?.sick ?? 0
+          }
+        });
+
+        // Load manager info
+        setLoadingManager(true);
+        const managerData = await getEmployeeManager(user.uid);
+        if (managerData) {
+          setManager({
+            name: `${managerData.firstName} ${managerData.lastName}`,
+            position: managerData.position,
+            photoUrl: managerData.photoUrl
+          });
+        } else {
+          setManager(null);
+        }
+      } catch (error) {
+        console.error('Failed to load data:', error);
+        setLeaveBalance({
+          casual: CASUAL_LEAVE_DEFAULT,
+          sick: -1, // Unlimited sick leave
+          year: new Date().getFullYear(),
+          used: {
+            casual: 0,
+            sick: 0
+          }
+        });
+        setManager(null);
+      } finally {
+        setLoadingBalance(false);
+        setLoadingManager(false);
+      }
+    };
+    loadData();
+  }, [user]);
+
+  const handleSubmit = async () => {
+    try {
+      const duration = calculateLeaveDuration(leaveForm.startDate, leaveForm.endDate);
+      
+      // Check if leave balance is loaded
+      if (!leaveBalance) {
+        showSnackbar('Leave balance not loaded. Please try again.', 'error');
+        return;
+      }
+
+      // Check casual leave balance
+      if (leaveForm.type === 'casual') {
+        const remainingCasual = leaveBalance.casual - leaveBalance.used.casual;
+        if (duration > remainingCasual) {
+          showSnackbar(`Insufficient casual leave balance. You have ${remainingCasual} days remaining.`, 'error');
+          return;
+        }
+      }
+
+      // Check if medical certificate is required for sick leave > 3 days
+      if (needsMedicalCertificate && !leaveForm.medicalCertificate) {
+        showSnackbar('Please upload a medical certificate for sick leave over 3 days', 'error');
+        return;
+      }
+
+      // Upload medical certificate if present
+      let certificateUrl = '';
+      if (leaveForm.medicalCertificate) {
+        certificateUrl = await uploadMedicalCertificate(leaveForm.medicalCertificate, user.uid);
+      }
+
+      // For HR roles, require employee selection
+      if (userRole === 'HR0' && !selectedEmployee) {
+        showSnackbar('Please select an employee', 'error');
+        return;
+      }
+
+      // Submit leave request
+      await submitLeaveRequest({
+        ...leaveForm,
+        medicalCertificateUrl: certificateUrl,
+        employeeId: selectedEmployee || user.uid,
+        status: 'pending' as LeaveStatus,
+      });
+
+      showSnackbar('Leave request submitted successfully', 'success');
+      
+      // Reset form
+      setLeaveForm({
+        type: 'casual',
+        startDate: new Date(),
+        endDate: new Date(),
+        reason: '',
+        medicalCertificate: null,
+      });
+    } catch (error) {
+      console.error('Error submitting leave request:', error);
+      showSnackbar('Failed to submit leave request', 'error');
+    }
+  };
+
+  const handleStatusUpdate = async (requestId: string, status: LeaveStatus) => {
+    try {
+      await updateRequestStatus(requestId, status);
+      showSnackbar(`Leave request ${status} successfully`, 'success');
+    } catch (error) {
+      showSnackbar(`Failed to ${status} leave request`, 'error');
+    }
+  };
+
+  if (loading || loadingBalance) {
+    return (
+      <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" minHeight="60vh">
+        <CircularProgress sx={{ mb: 2 }} />
+        <Typography color="text.secondary">
+          {loading ? 'Loading leave requests...' : 'Loading leave balance...'}
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (!leaveBalance) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
+        <Typography color="error">
+          Failed to load leave balance. Please refresh the page.
+        </Typography>
+      </Box>
+    );
+  }
+
+  console.log('Current user role:', userRole); // Debug log
+
+  // Handle request form close
+  const handleCloseRequestForm = () => {
+    setShowRequestForm(false);
+    setLeaveForm({
+      type: 'casual',
+      startDate: new Date(),
+      endDate: new Date(),
+      reason: '',
+      medicalCertificate: null,
+    });
+  };
+
+  return (
+    <LocalizationProvider dateAdapter={AdapterDateFns}>
+      {showRequestForm ? (
+        // Request Form Dialog
+        <Box p={3}>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+            <Typography variant="h4" gutterBottom>
+              Request Time Off
+            </Typography>
+            <Button
+              variant="outlined"
+              onClick={handleCloseRequestForm}
+            >
+              Back to Dashboard
+            </Button>
+          </Box>
+          {/* Request Form Content */}
+          <Paper elevation={0} sx={{ p: 3, bgcolor: 'background.paper' }}>
+            <Grid container spacing={3}>
+              {userRole === 'HR0' && (
+                <Grid item xs={12}>
+                  <TextField
+                    select
+                    fullWidth
+                    label="Employee"
+                    value={selectedEmployee || ''}
+                    onChange={(e) => setSelectedEmployee(e.target.value)}
+                    required
+                    error={!selectedEmployee}
+                    helperText={!selectedEmployee ? 'Please select an employee' : ''}
+                  >
+                    {sortedEmployees.map((emp) => (
+                      <MenuItem key={emp.id} value={emp.id}>
+                        {emp.firstName} {emp.lastName} - {emp.department}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Grid>
+              )}
+              <Grid item xs={12}>
+                <TextField
+                  select
+                  fullWidth
+                  label="Leave Type"
+                  value={leaveForm.type}
+                  onChange={(e) => setLeaveForm({ ...leaveForm, type: e.target.value as LeaveType })}
+                >
+                  {leaveTypes.map((type) => (
+                    <MenuItem key={type.value} value={type.value}>
+                      {type.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <DatePicker
+                  label="Start Date"
+                  value={leaveForm.startDate}
+                  onChange={(date) => date && setLeaveForm({ ...leaveForm, startDate: date })}
+                  renderInput={(params) => <TextField {...params} fullWidth />}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <DatePicker
+                  label="End Date"
+                  value={leaveForm.endDate}
+                  onChange={(date) => date && setLeaveForm({ ...leaveForm, endDate: date })}
+                  renderInput={(params) => <TextField {...params} fullWidth />}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={4}
+                  label="Reason"
+                  value={leaveForm.reason}
+                  onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={handleSubmit}
+                  fullWidth
+                >
+                  Submit Request
+                </Button>
+              </Grid>
+            </Grid>
+          </Paper>
+        </Box>
+      ) : (
+        // Main Dashboard
+        <Box p={3}>
+          {/* Header */}
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+            <Typography variant="h4" gutterBottom>
+              {userRole === 'HR0' ? 'Leave Management' : 'Time Off'}
+            </Typography>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => setShowRequestForm(true)}
+            >
+              Request Time Off
+            </Button>
+          </Box>
+
+        {/* Main Content */}
+        <Grid container spacing={3}>
+          {/* HR Dashboard */}
+          {(userRole === 'HR0' || userRole === 'hr') && (
+            <Grid item xs={12}>
+              <Box mb={4}>
+                <Typography variant="h6" gutterBottom>
+                  Select Employee
+                </Typography>
+                <TextField
+                  select
+                  fullWidth
+                  label="Employee"
+                  value={selectedEmployee || ''}
+                  onChange={(e) => setSelectedEmployee(e.target.value)}
+                  required
+                  error={!selectedEmployee}
+                  helperText={!selectedEmployee ? 'Please select an employee' : ''}
+                >
+                  {sortedEmployees.map((emp) => (
+                    <MenuItem key={emp.id} value={emp.id}>
+                      {emp.firstName} {emp.lastName} - {emp.department}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Box>
+            </Grid>
+          )}
+          <Grid item xs={12} md={8}>
+            <Typography variant="h4" gutterBottom>
+              Leave Management
+            </Typography>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Card sx={{ bgcolor: (theme) => alpha(theme.palette.primary.main, 0.05) }}>
+              <CardContent>
+                {loadingManager ? (
+                  <Box display="flex" justifyContent="center">
+                    <CircularProgress size={24} />
+                  </Box>
+                ) : manager ? (
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <Avatar
+                      src={manager.photoUrl}
+                      alt={manager.name}
+                      sx={{ width: 56, height: 56 }}
+                    >
+                      {manager.name.charAt(0)}
+                    </Avatar>
+                    <Box>
+                      <Typography variant="subtitle1" gutterBottom>
+                        Your Leave Approver
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {manager.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {manager.position}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                ) : (
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <Avatar sx={{ width: 56, height: 56, bgcolor: 'grey.200' }}>
+                      <PersonIcon sx={{ color: 'grey.400' }} />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="subtitle1" gutterBottom>
+                        No Leave Approver
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Contact HR to assign a manager
+                      </Typography>
+                    </Box>
+                  </Stack>
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Leave Balance */}
+          <Grid item xs={12}>
+            <Box mb={4}>
+              <Typography variant="h6" gutterBottom>
+                Leave Balance
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6}>
+                  <Card>
+                    <CardContent>
+                      <Stack direction="row" spacing={2} alignItems="center">
+                        <BeachAccessIcon sx={{ color: '#4CAF50', fontSize: 40 }} />
+                        <Box>
+                          <Typography variant="subtitle1">
+                            Casual Leave
+                          </Typography>
+                          <Typography variant="h4">
+                            {leaveBalance.casual - leaveBalance.used.casual} / {leaveBalance.casual}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {leaveBalance.used.casual} days used
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <Card>
+                    <CardContent>
+                      <Stack direction="row" spacing={2} alignItems="center">
+                        <SickIcon sx={{ color: '#F44336', fontSize: 40 }} />
+                        <Box>
+                          <Typography variant="subtitle1">
+                            Sick Leave
+                          </Typography>
+                          <Typography variant="h4">
+                            {leaveBalance.used.sick} used
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Unlimited available
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </Grid>
+            </Box>
+          </Grid>
+
+          {/* Leave Requests Overview */}
+          {(userRole === 'HR0' || userRole === 'hr') && (
+            <Grid item xs={12}>
+              <Box mb={4}>
+                <Typography variant="h6" gutterBottom>
+                  All Leave Requests
+                </Typography>
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={12} sm={4}>
+                    <TextField
+                      select
+                      fullWidth
+                      label="Status"
+                      value={filterStatus || 'all'}
+                      onChange={(e) => setFilterStatus(e.target.value)}
+                    >
+                      <MenuItem value="all">All Status</MenuItem>
+                      <MenuItem value="pending">Pending</MenuItem>
+                      <MenuItem value="approved">Approved</MenuItem>
+                      <MenuItem value="declined">Declined</MenuItem>
+                    </TextField>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <TextField
+                      select
+                      fullWidth
+                      label="Leave Type"
+                      value={filterType || 'all'}
+                      onChange={(e) => setFilterType(e.target.value)}
+                    >
+                      <MenuItem value="all">All Types</MenuItem>
+                      <MenuItem value="casual">Casual Leave</MenuItem>
+                      <MenuItem value="sick">Sick Leave</MenuItem>
+                    </TextField>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <TextField
+                      select
+                      fullWidth
+                      label="Department"
+                      value={filterDepartment || 'all'}
+                      onChange={(e) => setFilterDepartment(e.target.value)}
+                    >
+                      <MenuItem value="all">All Departments</MenuItem>
+                      {departments.map((dept) => (
+                        <MenuItem key={dept.id} value={dept.id}>
+                          {dept.name}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  </Grid>
+                </Grid>
+
+                {/* Stats Cards */}
+                <Grid container spacing={2} sx={{ mb: 3 }}>
+                  <Grid item xs={12} sm={4}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="subtitle2" color="text.secondary">
+                          Pending Requests
+                        </Typography>
+                        <Typography variant="h4">
+                          {leaveRequests.filter(r => r.status === 'pending').length}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="subtitle2" color="text.secondary">
+                          Approved This Month
+                        </Typography>
+                        <Typography variant="h4">
+                          {leaveRequests.filter(r => 
+                            r.status === 'approved' && 
+                            r.startDate.getMonth() === new Date().getMonth()
+                          ).length}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="subtitle2" color="text.secondary">
+                          Total Requests
+                        </Typography>
+                        <Typography variant="h4">
+                          {leaveRequests.length}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+
+                {/* Filtered Leave Requests */}
+                <Stack spacing={2}>
+                  {filteredLeaveRequests.map((request) => (
+                    <Card key={request.id}>
+                      <CardContent>
+                        <Stack spacing={2}>
+                          <Box display="flex" justifyContent="space-between" alignItems="center">
+                            <Stack direction="row" spacing={2} alignItems="center">
+                              {request.type === 'casual' ? (
+                                <BeachAccessIcon sx={{ color: '#4CAF50' }} />
+                              ) : (
+                                <SickIcon sx={{ color: '#F44336' }} />
+                              )}
+                              <Box>
+                                <Typography variant="subtitle1">
+                                  {employees.find(e => e.id === request.employeeId)?.firstName} {employees.find(e => e.id === request.employeeId)?.lastName}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {departments.find(d => d.id === request.departmentId)?.name}
+                                </Typography>
+                              </Box>
+                            </Stack>
+                            <Chip
+                              label={request.status.toUpperCase()}
+                              color={
+                                request.status === 'approved'
+                                  ? 'success'
+                                  : request.status === 'declined'
+                                  ? 'error'
+                                  : 'warning'
+                              }
+                              size="small"
+                            />
+                          </Box>
+
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <AccessTimeIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                            <Typography variant="body2" color="text.secondary">
+                              {format(request.startDate, 'MMM d, yyyy')} - {format(request.endDate, 'MMM d, yyyy')}
+                              ({differenceInDays(request.endDate, request.startDate)} days)
+                            </Typography>
+                          </Stack>
+
+                          <Typography variant="body2">
+                            {request.reason}
+                          </Typography>
+
+                          {request.medicalCertificateUrl && (
+                            <Link href={request.medicalCertificateUrl} target="_blank" rel="noopener">
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <UploadIcon sx={{ fontSize: 16 }} />
+                                <Typography variant="body2">
+                                  View Medical Certificate
+                                </Typography>
+                              </Stack>
+                            </Link>
+                          )}
+
+                          {request.submittedByName && (
+                            <Typography variant="caption" color="text.secondary">
+                              Submitted by HR: {request.submittedByName}
+                            </Typography>
+                          )}
+
+                          {request.approverNote && (
+                            <Box bgcolor="grey.50" p={1} borderRadius={1}>
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <CommentIcon color="action" fontSize="small" />
+                                <Typography variant="body2">
+                                  {request.approverNote}
+                                </Typography>
+                              </Stack>
+                            </Box>
+                          )}
+                        </Stack>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </Stack>
+              </Box>
+            </Grid>
+          )}
+
+          {/* Employee Leave Requests */}
+          {userRole !== 'HR0' && userRole !== 'hr' && (
+            <Grid item xs={12}>
+              <Typography variant="h6" gutterBottom>
+                Your Leave Requests
+            </Typography>
+            {leaveRequests.length === 0 ? (
+              <Box textAlign="center" py={4}>
+                <Typography color="text.secondary">
+                  No leave requests yet
+                </Typography>
+              </Box>
+            ) : (
+              <Stack spacing={2}>
+                {leaveRequests.map((request) => (
+                  <Card key={request.id}>
+                    <CardContent>
+                      <Stack spacing={2}>
+                        <Box display="flex" justifyContent="space-between" alignItems="center">
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            {request.type === 'casual' ? (
+                              <BeachAccessIcon sx={{ color: '#4CAF50' }} />
+                            ) : (
+                              <SickIcon sx={{ color: '#F44336' }} />
+                            )}
+                            <Typography variant="subtitle1">
+                              {request.type === 'casual' ? 'Casual Leave' : 'Sick Leave'}
+                            </Typography>
+                          </Stack>
+                          <Chip
+                            label={request.status.toUpperCase()}
+                            color={
+                              request.status === 'approved'
+                                ? 'success'
+                                : request.status === 'rejected'
+                                ? 'error'
+                                : 'warning'
+                            }
+                            size="small"
+                          />
+                        </Box>
+                        
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <AccessTimeIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                          <Typography variant="body2" color="text.secondary">
+                            {format(request.startDate, 'MMM d, yyyy')} - {format(request.endDate, 'MMM d, yyyy')}
+                            ({differenceInDays(request.endDate, request.startDate)} days)
+                          </Typography>
+                        </Stack>
+                        
+                        <Typography variant="body2">
+                          {request.reason}
+                        </Typography>
+
+                        {request.medicalCertificateUrl && (
+                          <Link href={request.medicalCertificateUrl} target="_blank" rel="noopener">
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <UploadIcon sx={{ fontSize: 16 }} />
+                              <Typography variant="body2">
+                                View Medical Certificate
+                              </Typography>
+                            </Stack>
+                          </Link>
+                        )}
+
+                        {request.approverNote && (
+                          <Box bgcolor="grey.50" p={1} borderRadius={1}>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <CommentIcon color="action" fontSize="small" />
+                              <Typography variant="body2">
+                                {request.approverNote}
+                              </Typography>
+                            </Stack>
+                          </Box>
+                        )}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Stack>
+            </Grid>
+          )}
+
+          {/* Leave Balance Cards */}
+          <Grid item xs={12}>
+        <Grid container spacing={3} mb={4}>
+          {leaveTypes.map((type) => (
+            <Grid item xs={12} sm={6} key={type.value}>
+              <Card sx={{ bgcolor: alpha(type.color, 0.05) }}>
+                <CardContent>
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <Avatar sx={{ bgcolor: alpha(type.color, 0.2), color: type.color }}>
+                      {type.icon}
+                    </Avatar>
+                    <Box sx={{ flexGrow: 1 }}>
+                      <Typography variant="h6" gutterBottom>
+                        {type.label}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        {type.description}
+                      </Typography>
+                      {loadingBalance ? (
+                        <LinearProgress />
+                      ) : (
+                        <>
+                          <LinearProgress
+                            variant="determinate"
+                            value={type.value === 'casual' && leaveBalance ?
+                              (leaveBalance.used.casual / (leaveBalance.casual + leaveBalance.used.casual)) * 100 :
+                              0
+                            }
+                            sx={{
+                              height: 8,
+                              borderRadius: 4,
+                              bgcolor: alpha(type.color, 0.1),
+                              '& .MuiLinearProgress-bar': {
+                                bgcolor: type.color,
+                              }
+                            }}
+                          />
+                          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                            {type.value === 'casual' && leaveBalance ?
+                              `${leaveBalance.casual} days remaining of ${leaveBalance.casual + leaveBalance.used.casual} days` :
+                              'Unlimited days available'
+                            }
+                          </Typography>
+                        </>
+                      )}
+                    </Box>
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+          </Grid>
+
+          {/* Submit Leave Request Section */}
+          <Grid item xs={12}>
+            <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+              <Typography variant="h6" gutterBottom sx={{ mb: 3 }}>
+                Request Time Off
+              </Typography>
+
+              {leaveForm.type === 'sick' && 
+               differenceInDays(leaveForm.endDate, leaveForm.startDate) > 3 && 
+               !leaveForm.medicalCertificate && (
+                <Alert severity="warning" sx={{ mb: 3 }}>
+                  Medical certificate is required for sick leave longer than 3 days
+                </Alert>
+              )}
+          
+              <Grid container spacing={3}>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    select
+                    fullWidth
+                    label="Leave Type"
+                    value={leaveForm.type}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, type: e.target.value as LeaveType })}
+                  >
+                    {leaveTypes.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {option.label} ({option.value === 'casual' ? leaveBalance.casual : 'Unlimited'} days remaining)
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Grid>
+            
+            <Grid item xs={12} sm={6}>
+              <DatePicker
+                label="Start Date"
+                value={leaveForm.startDate}
+                onChange={(date) => date && setLeaveForm({ ...leaveForm, startDate: date })}
+              />
+            </Grid>
+            
+            <Grid item xs={12} sm={6}>
+              <DatePicker
+                label="End Date"
+                value={leaveForm.endDate}
+                onChange={(date) => date && setLeaveForm({ ...leaveForm, endDate: date })}
+              />
+            </Grid>
+            
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                multiline
+                rows={3}
+                label="Reason"
+                value={leaveForm.reason}
+                onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })}
+              />
+            </Grid>
+            
+            {leaveForm.type === 'sick' && (
+              <Grid item xs={12}>
+                <Paper 
+                  variant="outlined" 
+                  sx={{
+                    p: 2,
+                    bgcolor: (theme) => alpha(theme.palette.warning.main, 0.05),
+                    border: '1px dashed',
+                    borderColor: 'warning.main',
+                    textAlign: 'center'
+                  }}
+                >
+                  <input
+                    accept="image/*,.pdf"
+                    style={{ display: 'none' }}
+                    id="medical-certificate"
+                    type="file"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setLeaveForm({ ...leaveForm, medicalCertificate: file });
+                      }
+                    }}
+                  />
+                  <label htmlFor="medical-certificate">
+                    <Button
+                      variant="outlined"
+                      component="span"
+                      startIcon={<UploadIcon />}
+                      sx={{ mb: 1 }}
+                    >
+                      Upload Medical Certificate
+                    </Button>
+                  </label>
+                  {leaveForm.medicalCertificate ? (
+                    <Box>
+                      <Typography variant="caption" display="block" color="success.main">
+                        ✓ {leaveForm.medicalCertificate.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Click button above to change file
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Typography variant="caption" color="text.secondary">
+                      Accepts images and PDF files
+                    </Typography>
+                  )}
+                </Paper>
+              </Grid>
+            )}
+            
+            <Grid item xs={12}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                size="large"
+                onClick={handleSubmit}
+                startIcon={<AccessTimeIcon />}
+                sx={{ px: 4, py: 1 }}
+              >
+                Submit Leave Request
+              </Button>
+            </Grid>
+          </Grid>
+        </Paper>
+
+        {/* Leave Requests List */}
+        <Paper elevation={2} sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Leave Requests
+          </Typography>
+
+          <Grid container spacing={3}>
+            {leaveRequests.map((request) => (
+              <Grid item xs={12} md={6} lg={4} key={request.id}>
+                <Paper
+                  sx={{
+                    p: 2,
+                    height: '100%',
+                    bgcolor: (theme) =>
+                      request.status === 'approved'
+                        ? alpha(theme.palette.success.main, 0.1)
+                        : request.status === 'rejected'
+                        ? alpha(theme.palette.error.main, 0.1)
+                        : alpha(theme.palette.warning.main, 0.1),
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
+                      {request.type.charAt(0).toUpperCase() + request.type.slice(1)} Leave
+                    </Typography>
+                    {request.status === 'approved' && (
+                      <ApprovedIcon sx={{ color: 'success.main' }} />
+                    )}
+                    {request.status === 'rejected' && (
+                      <RejectedIcon sx={{ color: 'error.main' }} />
+                    )}
+                    {request.status === 'pending' && userRole === 'manager' && (
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <IconButton
+                          size="small"
+                          color="success"
+                          onClick={() => handleStatusUpdate(request.id, 'approved')}
+                        >
+                          <ApprovedIcon />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => handleStatusUpdate(request.id, 'rejected')}
+                        >
+                          <RejectedIcon />
+                        </IconButton>
+                      </Box>
+                    )}
+                  </Box>
+
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    {format(new Date(request.startDate), 'MMM dd')} -{' '}
+                    {format(new Date(request.endDate), 'MMM dd, yyyy')}
+                  </Typography>
+
+                  <Typography variant="body2" gutterBottom>
+                    {request.reason}
+                  </Typography>
+
+                  {request.medicalCertificateUrl && (
+                    <Link
+                      href={request.medicalCertificateUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      sx={{ display: 'block', mt: 1 }}
+                    >
+                      View Medical Certificate
+                    </Link>
+                  )}
+
+                  <Chip
+                    size="small"
+                    label={request.status.toUpperCase()}
+                    color={
+                      request.status === 'approved'
+                        ? 'success'
+                        : request.status === 'rejected'
+                        ? 'error'
+                        : 'warning'
+                    }
+                    sx={{ mt: 2 }}
+                  />
+                </Paper>
+              </Grid>
+            ))}
+          </Grid>
+        </Paper>
+      </Box>
+    </LocalizationProvider>
+  );
+}

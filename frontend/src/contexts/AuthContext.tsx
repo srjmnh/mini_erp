@@ -55,18 +55,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           // Get user role from Firestore
           const userDoc = await getDoc(doc(db, 'users', user.uid));
-          let role: UserRole = 'HR0'; // Default to HR0 for legacy accounts
+          console.log('Raw user document:', userDoc.exists() ? userDoc.data() : 'not found');
           
           if (userDoc.exists()) {
             const userData = userDoc.data();
-            // Only use the role from Firestore if it exists, otherwise keep HR0
-            role = userData.role ? (userData.role as UserRole) : 'HR0';
+            console.log('Found user document:', userData);
+            
+            // If role is HR0 or hr, set as HR0
+            const role = (userData.role === 'HR0' || userData.role === 'hr') ? 'HR0' : (userData.role as UserRole);
+            console.log('Setting user role:', role, 'from userData.role:', userData.role);
+            setUserRole(role);
+          } else {
+            console.log('No user document found, checking email');
+            // For demo@demo.com, set as HR0
+            if (user.email === 'demo@demo.com') {
+              console.log('Setting demo user as HR0');
+              setUserRole('HR0');
+            } else {
+              console.log('Defaulting to employee role');
+              setUserRole('employee');
+            }
           }
-          
-          console.log('User document:', userDoc.exists() ? userDoc.data() : 'not found', 'Assigned role:', role);
-          
-          setUserRole(role);
-          console.log('User role set:', role);
         } catch (error) {
           console.error('Error getting user role:', error);
           setUserRole('HR0'); // Fallback to HR0 for legacy accounts

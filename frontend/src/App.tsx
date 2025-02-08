@@ -17,7 +17,7 @@ import RequestsPage from './features/requests/RequestsPage';
 import PayrollPage from './features/payroll/PayrollPage';
 import RoleConfigurationPage from './features/roles/RoleConfigurationPage';
 import PerformancePage from './features/hr/PerformancePage';
-import TimeOffPage from './features/hr/TimeOffPage';
+import { TimeOff } from './features/hr/pages/TimeOff';
 import ExpensePage from './features/hr/ExpensePage';
 import HRDashboard from './features/hr/HRDashboard';
 import SettingsPage from './features/settings/SettingsPage';
@@ -71,7 +71,7 @@ function App() {
                             <Route path="requests" element={<RequestsPage />} />
                             <Route path="hr" element={<Outlet />}>
                               <Route index element={<HRDashboard />} />
-                              <Route path="time-off" element={<TimeOffPage />} />
+                              <Route path="time-off" element={<TimeOff />} />
                               <Route path="expenses" element={<ExpensePage />} />
                               <Route path="payroll" element={<PayrollPage />} />
                               <Route path="performance" element={<PerformancePage />} />

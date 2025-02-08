@@ -136,14 +136,27 @@ export const ProjectsPage: React.FC = () => {
     name: dept.name,
   }));
 
-  const uniqueDepartments = Array.from(
-    new Set(projects.map(project => project.department))
-  ).map(deptName => {
+  // Get all departments that have projects
+  const departmentsWithProjects = new Set();
+  projects.forEach(project => {
+    project.departments?.forEach(dept => {
+      departmentsWithProjects.add(dept.name);
+    });
+  });
+
+  // Create unique departments array including all departments with projects
+  const uniqueDepartments = Array.from(departmentsWithProjects).map(deptName => {
     const dept = departments.find(d => d.name === deptName);
     return {
-      id: dept?.id || `dept-${deptName}`, // Ensure unique ID even if department not found
-      name: deptName
+      id: dept?.id || `dept-${deptName}`,
+      name: deptName || 'Uncategorized'
     };
+  });
+
+  // Always add an 'All Projects' section at the beginning
+  uniqueDepartments.unshift({
+    id: 'all',
+    name: 'All Projects'
   });
 
   return (
@@ -176,7 +189,12 @@ export const ProjectsPage: React.FC = () => {
             </Typography>
             <Grid container spacing={2}>
               {projects
-                .filter(project => project.department === dept.name)
+                .filter(project => {
+                  if (dept.name === 'All Projects') {
+                    return true; // Show all projects
+                  }
+                  return project.departments?.some(d => d.name === dept.name);
+                })
                 .map(project => (
                   <Grid item xs={12} sm={6} md={4} key={`project-${project.id}`}>
                     <Card
@@ -285,7 +303,7 @@ export const ProjectsPage: React.FC = () => {
                                 <Stack direction="row" spacing={1} alignItems="center">
                                   <TeamIcon color="action" sx={{ fontSize: 20 }} />
                                   <Typography variant="body2">
-                                    {project.members.length} members
+                                    {project.members?.length || 0} members
                                   </Typography>
                                 </Stack>
                                 <Stack direction="row" spacing={1} alignItems="center">
@@ -299,7 +317,7 @@ export const ProjectsPage: React.FC = () => {
                               {/* Team */}
                               <Box>
                                 <AvatarGroup max={5} sx={{ justifyContent: 'flex-end' }}>
-                                  {project.members.map((member) => {
+                                  {project.members?.map((member) => {
                                     const employee = employees.find(
                                       (e) => e.id === member.employeeId
                                     );
@@ -307,11 +325,9 @@ export const ProjectsPage: React.FC = () => {
                                       <Avatar
                                         key={member.employeeId}
                                         src={employee?.photoUrl}
-                                        alt={employee ? `${employee.firstName} ${employee.lastName}` : ''}
+                                        alt={employee?.firstName ? `${employee.firstName} ${employee.lastName}` : 'User'}
                                       >
-                                        {employee
-                                          ? `${employee.firstName[0]}${employee.lastName[0]}`
-                                          : ''}
+                                        {employee?.firstName ? `${employee.firstName[0]}${employee.lastName[0]}` : 'U'}
                                       </Avatar>
                                     );
                                   })}

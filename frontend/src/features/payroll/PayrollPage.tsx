@@ -67,9 +67,16 @@ export default function PayrollPage() {
   const roleColumns = [
     { field: 'title', headerName: 'Role Title', width: 200 },
     { field: 'level', headerName: 'Level', width: 150 },
-    { field: 'minSalary', headerName: 'Min Salary', width: 150 },
-    { field: 'maxSalary', headerName: 'Max Salary', width: 150 },
-    { field: 'departmentName', headerName: 'Department', width: 200 },
+    { field: 'baseSalary', headerName: 'Base Salary', width: 150 },
+    { field: 'overtimeRate', headerName: 'Overtime Rate', width: 150 },
+    { 
+      field: 'seniorityLevels', 
+      headerName: 'Seniority Levels', 
+      width: 200,
+      renderCell: (params: any) => (
+        params.value?.map((level: any) => level.title).join(', ')
+      )
+    },
   ];
 
   return (
@@ -126,7 +133,7 @@ export default function PayrollPage() {
       <RoleForm
         open={openRoleDialog}
         onClose={() => setOpenRoleDialog(false)}
-        onSubmit={fetchRoles}
+        onSubmit={fetchData}
       />
 
       <PromotionDialog
@@ -135,8 +142,7 @@ export default function PayrollPage() {
         employee={selectedEmployee}
         roles={roles}
         onSubmit={() => {
-          fetchEmployees();
-          fetchRoleHistory();
+          fetchData();
         }}
       />
     </Box>

@@ -27,9 +27,16 @@ const ROLE_LEVELS: RoleLevel[] = ['junior', 'mid', 'senior', 'lead', 'head'];
 export default function RoleForm({ open, onClose, onSubmit }: RoleFormProps) {
   const [title, setTitle] = useState('');
   const [level, setLevel] = useState<RoleLevel>('junior');
-  const [minSalary, setMinSalary] = useState('');
-  const [maxSalary, setMaxSalary] = useState('');
+  const [baseSalary, setBaseSalary] = useState('');
+  const [overtimeRate, setOvertimeRate] = useState('');
   const [departmentId, setDepartmentId] = useState('');
+  const [seniorityLevels, setSeniorityLevels] = useState([
+    { level: 1, title: 'Junior', salaryMultiplier: 1.0 },
+    { level: 2, title: 'Intermediate', salaryMultiplier: 1.2 },
+    { level: 3, title: 'Senior', salaryMultiplier: 1.5 },
+    { level: 4, title: 'Lead', salaryMultiplier: 1.8 },
+    { level: 5, title: 'Principal', salaryMultiplier: 2.0 }
+  ]);
   const [departments, setDepartments] = useState<any[]>([]);
 
   React.useEffect(() => {
@@ -47,9 +54,12 @@ export default function RoleForm({ open, onClose, onSubmit }: RoleFormProps) {
       await createRole({
         title,
         level,
-        minSalary: Number(minSalary),
-        maxSalary: Number(maxSalary),
+        baseSalary: Number(baseSalary),
+        overtimeRate: Number(overtimeRate),
         departmentId,
+        seniorityLevels,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       });
       onSubmit();
       onClose();
@@ -62,8 +72,8 @@ export default function RoleForm({ open, onClose, onSubmit }: RoleFormProps) {
   const resetForm = () => {
     setTitle('');
     setLevel('junior');
-    setMinSalary('');
-    setMaxSalary('');
+    setBaseSalary('');
+    setOvertimeRate('');
     setDepartmentId('');
   };
 
@@ -97,21 +107,23 @@ export default function RoleForm({ open, onClose, onSubmit }: RoleFormProps) {
             </FormControl>
 
             <TextField
-              label="Minimum Salary"
+              label="Base Salary"
               type="number"
-              value={minSalary}
-              onChange={(e) => setMinSalary(e.target.value)}
+              value={baseSalary}
+              onChange={(e) => setBaseSalary(e.target.value)}
               required
               fullWidth
+              helperText="Base salary for the role"
             />
 
             <TextField
-              label="Maximum Salary"
+              label="Overtime Rate"
               type="number"
-              value={maxSalary}
-              onChange={(e) => setMaxSalary(e.target.value)}
+              value={overtimeRate}
+              onChange={(e) => setOvertimeRate(e.target.value)}
               required
               fullWidth
+              helperText="Hourly rate for overtime"
             />
 
             <FormControl fullWidth>
