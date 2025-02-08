@@ -26,6 +26,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSnackbar } from '@/contexts/SnackbarContext';
 import { motion } from 'framer-motion';
 import { MiniCalendar } from '@/components/calendar/MiniCalendar';
+import ChatDrawer from '@/components/chat/ChatDrawer';
+import { Chat as ChatIcon } from '@mui/icons-material';
 
 interface HeaderProps {
   onDrawerToggle?: () => void;
@@ -39,6 +41,7 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
   const { user, userRole, signOut } = useAuth();
   const { showSnackbar } = useSnackbar();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [chatOpen, setChatOpen] = React.useState(false);
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -75,7 +78,8 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
   };
 
   return (
-    <AppBar 
+    <>
+      <AppBar 
       position="fixed" 
       color="default" 
       elevation={0}
@@ -209,6 +213,18 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
           )}
           <MiniCalendar userId={user?.uid || ''} />
           <IconButton
+            color="inherit"
+            onClick={() => setChatOpen(true)}
+            sx={{
+              bgcolor: (theme) => alpha(theme.palette.primary.main, 0.1),
+              '&:hover': {
+                bgcolor: (theme) => alpha(theme.palette.primary.main, 0.2),
+              }
+            }}
+          >
+            <ChatIcon />
+          </IconButton>
+          <IconButton
             onClick={handleMenuOpen}
             size="small"
             sx={{ ml: 2 }}
@@ -266,5 +282,13 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
         </Menu>
       </Toolbar>
     </AppBar>
+
+    {/* Chat Drawer */}
+    <ChatDrawer
+      open={chatOpen}
+      onClose={() => setChatOpen(false)}
+      departmentId={user?.departmentId || ''}
+    />
+    </>
   );
 }
