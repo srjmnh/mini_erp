@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -7,12 +8,16 @@ import {
   Card,
   CardContent,
   Stack,
+  Button,
 } from '@mui/material';
 import {
   TrendingUp as TrendingUpIcon,
   AccessTime as AccessTimeIcon,
   Business as BusinessIcon,
+  Receipt as ExpenseIcon,
 } from '@mui/icons-material';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '@/config/firebase';
 
 export default function HRDashboard() {
   const navigate = useNavigate();
@@ -47,6 +52,55 @@ export default function HRDashboard() {
       subtitle: 'Manage roles & salaries',
     },
   ];
+
+  interface ExpenseStats {
+    pending: number;
+    thisMonth: number;
+  }
+
+  const [expenseStats, setExpenseStats] = useState<ExpenseStats>({
+    pending: 0,
+    thisMonth: 0,
+  });
+
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      try {
+        // Existing data loading code...
+
+        // Load expense stats
+        const expensesRef = collection(db, 'expenses');
+        const pendingQuery = query(expensesRef, where('status', '==', 'pending'));
+        const pendingSnapshot = await getDocs(pendingQuery);
+        
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        
+        const thisMonthQuery = query(
+          expensesRef,
+          where('submittedAt', '>=', startOfMonth),
+          where('submittedAt', '<=', endOfMonth)
+        );
+        const thisMonthSnapshot = await getDocs(thisMonthQuery);
+        
+        const thisMonthTotal = thisMonthSnapshot.docs.reduce(
+          (sum, doc) => sum + doc.data().amount,
+          0
+        );
+
+        setExpenseStats({
+          pending: pendingSnapshot.size,
+          thisMonth: thisMonthTotal,
+        });
+
+      } catch (error) {
+        console.error('Error loading dashboard data:', error);
+      }
+    };
+
+    loadDashboardData();
+  }, []);
 
   return (
     <Box sx={{ p: 3 }}>
@@ -98,6 +152,44 @@ export default function HRDashboard() {
             </Card>
           </Grid>
         ))}
+        {/* Add Expense Management Module */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <ExpenseIcon sx={{ mr: 1 }} />
+                <Typography variant="h6">Expense Management</Typography>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Pending Approvals
+                  </Typography>
+                  <Typography variant="h4">
+                    {expenseStats.pending}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    This Month's Total
+                  </Typography>
+                  <Typography variant="h4">
+                    ${expenseStats.thisMonth.toFixed(2)}
+                  </Typography>
+                </Box>
+              </Box>
+              <Button
+                variant="contained"
+                startIcon={<ExpenseIcon />}
+                component={Link}
+                to="/expenses"
+                fullWidth
+              >
+                Manage Expenses
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
     </Box>
   );

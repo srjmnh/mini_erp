@@ -30,6 +30,7 @@ export interface Employee {
   role: 'Department Head' | 'Team Lead' | 'Manager' | 'Employee' | string;
   department: string;
   departmentId: string;
+  managerId: string;
   currentLevel: number;
   salary: number;
   address?: {
@@ -210,6 +211,8 @@ export const FirestoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             role: data.role || 'Unassigned',
             position: data.position || data.role || 'Unassigned',
             department: data.department || 'Unassigned',
+            departmentId: data.departmentId || null,
+            managerId: data.managerId || null,
             currentLevel: data.currentLevel || 1,
             status: data.status || 'active',
             joiningDate: joiningDate

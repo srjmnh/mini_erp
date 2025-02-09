@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import {
   Box,
@@ -13,24 +13,18 @@ import {
   alpha,
 } from '@mui/material';
 import {
-  PeopleAltRounded as PeopleIcon,
-  AccountTreeRounded as DepartmentsIcon,
-  FolderRounded as DocumentsIcon,
-  SettingsRounded as SettingsIcon,
-  SpaceDashboardRounded as DashboardIcon,
+  Dashboard as DashboardIcon,
+  People as PeopleIcon,
+  Event as EventIcon,
+  Settings as SettingsIcon,
+  AccessTime as TimeOffIcon,
+  Assessment as PerformanceIcon,
+  Receipt as ExpenseIcon,
 } from '@mui/icons-material';
 import Header from './Header';
 import { useAuth } from '@/contexts/AuthContext';
 
 const DRAWER_WIDTH = 280;
-
-const navItems = [
-  { path: '/dashboard', label: 'Dashboard', icon: DashboardIcon },
-  { path: '/employees', label: 'Employees', icon: PeopleIcon },
-  { path: '/departments', label: 'Departments', icon: DepartmentsIcon },
-  { path: '/documents', label: 'Documents', icon: DocumentsIcon },
-  { path: '/settings', label: 'Settings', icon: SettingsIcon },
-];
 
 export default function AppLayout() {
   const theme = useTheme();
@@ -47,10 +41,32 @@ export default function AppLayout() {
     }
   };
 
+  const getNavigationItems = useCallback(() => {
+    const items = [
+      { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
+    ];
+
+    if (user?.role === 'hr' || user?.role === 'admin') {
+      items.push(
+        { text: 'Employees', icon: <PeopleIcon />, path: '/employees' },
+        { text: 'Time Off', icon: <TimeOffIcon />, path: '/time-off' },
+        { text: 'Performance', icon: <PerformanceIcon />, path: '/performance' },
+        { text: 'Expenses', icon: <ExpenseIcon />, path: '/expenses' }
+      );
+    }
+
+    items.push(
+      { text: 'Calendar', icon: <EventIcon />, path: '/calendar' },
+      { text: 'Settings', icon: <SettingsIcon />, path: '/settings' }
+    );
+
+    return items;
+  }, [user]);
+
   const drawer = (
     <Box>
       <List component="nav" sx={{ px: 2, py: 2 }}>
-        {navItems.map((item) => (
+        {getNavigationItems().map((item) => (
           <ListItem key={item.path} disablePadding sx={{ mb: 0.5 }}>
             <ListItemButton
               component={Link}
@@ -76,9 +92,9 @@ export default function AppLayout() {
               }}
             >
               <ListItemIcon sx={{ minWidth: 40 }}>
-                <item.icon />
+                {item.icon}
               </ListItemIcon>
-              <ListItemText primary={item.label} />
+              <ListItemText primary={item.text} />
             </ListItemButton>
           </ListItem>
         ))}

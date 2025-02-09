@@ -52,7 +52,7 @@ export const getEmployeeLeaveBalance = async (employeeId: string): Promise<Leave
 
 export const getEmployeeManager = async (employeeId: string): Promise<Employee | null> => {
   try {
-    // Get employee's department
+    // Get employee data
     const employeeRef = doc(db, 'employees', employeeId);
     const employeeDoc = await getDoc(employeeRef);
     
@@ -61,23 +61,14 @@ export const getEmployeeManager = async (employeeId: string): Promise<Employee |
     }
 
     const employeeData = employeeDoc.data();
-    const departmentId = employeeData.departmentId;
-
-    // Get department info to find manager
-    const departmentRef = doc(db, 'departments', departmentId);
-    const departmentDoc = await getDoc(departmentRef);
-
-    if (!departmentDoc.exists()) {
+    
+    // Check if employee has a manager assigned
+    if (!employeeData.managerId) {
       return null;
     }
 
-    const departmentData = departmentDoc.data() as Department;
-    if (!departmentData.headId) {
-      return null;
-    }
-
-    // Get department head's info
-    const managerRef = doc(db, 'employees', departmentData.headId);
+    // Get manager's info
+    const managerRef = doc(db, 'employees', employeeData.managerId);
     const managerDoc = await getDoc(managerRef);
 
     if (!managerDoc.exists()) {

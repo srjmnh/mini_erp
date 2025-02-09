@@ -20,6 +20,9 @@ interface LeaveRequest {
   createdAt: Date;
   updatedAt: Date;
   notified: boolean;
+  managerId?: string;
+  managerName?: string;
+  statusText?: string;
 }
 
 interface ExpenseRequest {
@@ -38,6 +41,9 @@ interface ExpenseRequest {
   createdAt: Date;
   updatedAt: Date;
   notified: boolean;
+  managerId?: string;
+  managerName?: string;
+  statusText?: string;
 }
 
 export function useRequests() {
@@ -276,6 +282,9 @@ export function useRequests() {
       approvedBy: user.uid,
       approvedAt: new Date(),
       updatedAt: new Date(),
+      managerId: user.uid,
+      managerName: user.displayName || user.email,
+      statusText: `${status} by ${user.displayName || user.email}`,
     });
 
     // Get the request details

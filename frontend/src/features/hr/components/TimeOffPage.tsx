@@ -118,8 +118,10 @@ export function TimeOffPage() {
   const [loadingBalance, setLoadingBalance] = useState(true);
   const [loadingManager, setLoadingManager] = useState(true);
   const [manager, setManager] = useState<{
+    id: string;
     name: string;
     position: string;
+    email: string;
     photoUrl?: string;
   } | null>(null);
 
@@ -148,10 +150,14 @@ export function TimeOffPage() {
         const managerData = await getEmployeeManager(targetUid);
         if (managerData) {
           setManager({
+            id: managerData.id,
             name: `${managerData.firstName} ${managerData.lastName}`,
             position: managerData.position,
+            email: managerData.email,
             photoUrl: managerData.photoUrl
           });
+        } else {
+          setManager(null);
         }
       } catch (error) {
         console.error('Failed to load data:', error);
@@ -223,6 +229,42 @@ export function TimeOffPage() {
     } catch (error) {
       showSnackbar('Failed to update leave request', 'error');
     }
+  };
+
+  const renderManagerInfo = () => {
+    if (loadingManager) {
+      return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <CircularProgress size={20} />
+          <Typography color="text.secondary">Loading manager info...</Typography>
+        </Box>
+      );
+    }
+
+    if (!manager) {
+      return (
+        <Typography color="error">
+          No manager assigned. Please contact HR.
+        </Typography>
+      );
+    }
+
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Avatar src={manager.photoUrl} alt={manager.name}>
+          {manager.name[0]}
+        </Avatar>
+        <Box>
+          <Typography variant="subtitle2">{manager.name}</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {manager.position}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {manager.email}
+          </Typography>
+        </Box>
+      </Box>
+    );
   };
 
   if (loading || loadingBalance) {
@@ -544,6 +586,16 @@ export function TimeOffPage() {
                   </Button>
                 </Grid>
               </Grid>
+            </Paper>
+          </Grid>
+
+          {/* Manager Info */}
+          <Grid item xs={12}>
+            <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+              <Typography variant="h6" gutterBottom sx={{ mb: 3 }}>
+                Manager Info
+              </Typography>
+              {renderManagerInfo()}
             </Paper>
           </Grid>
         </Grid>

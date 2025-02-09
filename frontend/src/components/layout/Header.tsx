@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar,
@@ -13,6 +13,8 @@ import {
   Breadcrumbs,
   useTheme,
   alpha,
+  Popover,
+  Stack,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -21,11 +23,14 @@ import {
   Logout as LogoutIcon,
   NavigateNext as NavigateNextIcon,
   Home as HomeIcon,
+  CalendarToday as CalendarIcon,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSnackbar } from '@/contexts/SnackbarContext';
 import { motion } from 'framer-motion';
-import { MiniCalendar } from '@/components/calendar/MiniCalendar';
+import { MiniCalendar as MiniCalendarComponent } from '@/components/calendar/MiniCalendar';
+import { format } from 'date-fns';
 
 interface HeaderProps {
   onDrawerToggle?: () => void;
@@ -39,7 +44,8 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
   const { user, userRole, signOut } = useAuth();
   const { showSnackbar } = useSnackbar();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
-
+  const [calendarAnchorEl, setCalendarAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [selectedDate, setSelectedDate] = React.useState(new Date());
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -59,6 +65,23 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
     }
   };
 
+  const handleCalendarClick = (event: React.MouseEvent<HTMLElement>) => {
+    setCalendarAnchorEl(event.currentTarget);
+  };
+
+  const handleCalendarClose = () => {
+    setCalendarAnchorEl(null);
+  };
+
+  const handleDateChange = (date: Date) => {
+    setSelectedDate(date);
+  };
+
+  const handleAddQuickTask = (date: Date) => {
+    // Handle quick task addition if needed
+    console.log('Add quick task for date:', date);
+  };
+
   // Generate breadcrumbs based on current path
   const pathnames = location.pathname.split('/').filter((x) => x);
   const breadcrumbNameMap: { [key: string]: string } = {
@@ -76,18 +99,7 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
   };
 
   return (
-    <>
-      <AppBar 
-      position="fixed" 
-      color="default" 
-      elevation={0}
-      sx={{
-        borderBottom: '1px solid',
-        borderColor: 'divider',
-        bgcolor: 'background.paper',
-        zIndex: theme.zIndex.drawer + 1,
-      }}
-    >
+    <AppBar position="fixed" color="default" elevation={0} sx={{ backgroundColor: 'background.paper' }}>
       <Toolbar sx={{ minHeight: 64 }}>
         {showDrawerToggle && (
           <IconButton
@@ -147,17 +159,8 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
         </motion.div>
 
         <Box sx={{ ml: 3, flex: 1 }}>
-          <Breadcrumbs 
-            separator={<NavigateNextIcon fontSize="small" />}
-            aria-label="breadcrumb"
-          >
-            <Button
-              component={Link}
-              to="/"
-              startIcon={<HomeIcon />}
-              color="inherit"
-              size="small"
-            >
+          <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} aria-label="breadcrumb">
+            <Button component={Link} to="/" startIcon={<HomeIcon />} color="inherit" size="small">
               Home
             </Button>
             {pathnames.map((value, index) => {
@@ -169,13 +172,7 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
                   {breadcrumbNameMap[value] || value}
                 </Typography>
               ) : (
-                <Button
-                  component={Link}
-                  to={to}
-                  key={to}
-                  color="inherit"
-                  size="small"
-                >
+                <Button component={Link} to={to} key={to} color="inherit" size="small">
                   {breadcrumbNameMap[value] || value}
                 </Button>
               );
@@ -184,7 +181,62 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
         </Box>
 
         <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-          <MiniCalendar userId={user?.uid || ''} />
+          <IconButton
+            onClick={handleCalendarClick}
+            size="small"
+            sx={{ ml: 2 }}
+            aria-controls={Boolean(calendarAnchorEl) ? 'calendar-menu' : undefined}
+            aria-haspopup="true"
+            aria-expanded={Boolean(calendarAnchorEl) ? 'true' : undefined}
+          >
+            <CalendarIcon />
+          </IconButton>
+
+          <Popover
+            id="calendar-menu"
+            open={Boolean(calendarAnchorEl)}
+            anchorEl={calendarAnchorEl}
+            onClose={handleCalendarClose}
+            anchorOrigin={{
+              vertical: 'bottom',
+              horizontal: 'right',
+            }}
+            transformOrigin={{
+              vertical: 'top',
+              horizontal: 'right',
+            }}
+            PaperProps={{
+              sx: {
+                width: 320,
+                maxHeight: 500,
+                p: 2,
+              },
+            }}
+          >
+            <Stack spacing={2}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="h6">{format(selectedDate, 'MMMM d, yyyy')}</Typography>
+                <Button
+                  endIcon={<OpenInNewIcon />}
+                  onClick={() => {
+                    handleCalendarClose();
+                    navigate('/calendar');
+                  }}
+                  size="small"
+                >
+                  Open Calendar
+                </Button>
+              </Stack>
+
+              <MiniCalendarComponent
+                userId={user?.uid || ''}
+                selectedDate={selectedDate}
+                onDateChange={handleDateChange}
+                onAddTask={handleAddQuickTask}
+              />
+            </Stack>
+          </Popover>
+
           {userRole && (
             <Box
               sx={{
@@ -195,7 +247,7 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
                 fontWeight: 600,
                 display: 'flex',
                 alignItems: 'center',
-                bgcolor: (theme) => 
+                bgcolor: (theme) =>
                   userRole === 'HR0' ? alpha(theme.palette.error.main, 0.1) :
                   userRole === 'manager' ? alpha(theme.palette.warning.main, 0.1) :
                   alpha(theme.palette.info.main, 0.1),
@@ -219,9 +271,9 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
             aria-haspopup="true"
             aria-expanded={Boolean(anchorEl) ? 'true' : undefined}
           >
-            <Avatar 
-              sx={{ 
-                width: 32, 
+            <Avatar
+              sx={{
+                width: 32,
                 height: 32,
                 bgcolor: 'primary.main',
               }}
@@ -269,6 +321,5 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
         </Menu>
       </Toolbar>
     </AppBar>
-    </>
   );
 }

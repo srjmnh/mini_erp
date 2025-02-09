@@ -28,6 +28,7 @@ import {
   Tabs,
   Tab,
   TextField,
+  MenuItem,
 } from '@mui/material';
 import {
   People as PeopleIcon,
@@ -39,12 +40,18 @@ import {
   Download as DownloadIcon,
 } from '@mui/icons-material';
 import { useManagerData } from '@/hooks/useManagerData';
-import { collection, query, where, getDocs, doc as firestoreDoc, getDoc, updateDoc, orderBy, onSnapshot, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc as firestoreDoc, getDoc, updateDoc, orderBy, onSnapshot, limit, addDoc } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/contexts/AuthContext';
-import { format, formatDistanceToNow } from 'date-fns';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { supabase } from '@/config/supabase';
+import { format, formatDistanceToNow } from 'date-fns';
+import ExpenseApprovals from '../expenses/ExpenseApprovals';
+import ManagerExpenseForm from '../expenses/ManagerExpenseForm';
+import ManagerLeaveForm from '../leave/ManagerLeaveForm';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 
 export default function ManagerDashboard() {
   const theme = useTheme();
@@ -64,6 +71,16 @@ export default function ManagerDashboard() {
   const { department, departmentEmployees = [], departmentProjects = [], loading, error } = useManagerData();
   const { user, userRole } = useAuth();
   const [pendingLeaveRequests, setPendingLeaveRequests] = useState<any[]>([]);
+  const [leaveType, setLeaveType] = useState('');
+  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(null);
+  const [leaveReason, setLeaveReason] = useState('');
+  const [historyTab, setHistoryTab] = useState('expenses');
+  const [teamHistoryTab, setTeamHistoryTab] = useState('expenses');
+  const [myExpenses, setMyExpenses] = useState<any[]>([]);
+  const [myLeaves, setMyLeaves] = useState<any[]>([]);
+  const [historicalExpenses, setHistoricalExpenses] = useState<any[]>([]);
+  const [historicalLeaves, setHistoricalLeaves] = useState<any[]>([]);
 
   // Listen to leave requests
   // Fetch department documents
@@ -133,6 +150,176 @@ export default function ManagerDashboard() {
       channel.unsubscribe();
     };
   }, [department?.id]);
+
+  useEffect(() => {
+    if (!user?.uid || !department?.id) {
+      console.log('Missing user or department:', { userId: user?.uid, departmentId: department?.id });
+      return;
+    }
+
+    // Log the current department info
+    console.log('Current department:', {
+      id: department.id,
+      name: department.name,
+      managerId: department.managerId
+    });
+
+    console.log('Setting up listeners with:', { 
+      userId: user.uid, 
+      departmentId: department.id 
+    });
+
+    const fetchMyExpenses = async () => {
+      console.log('Fetching my expenses...');
+      const myExpensesQuery = query(
+        collection(db, 'expenses'),
+        where('userId', '==', user.uid),
+        orderBy('submittedAt', 'desc')
+      );
+
+      return onSnapshot(myExpensesQuery, (snapshot) => {
+        console.log('Got my expenses snapshot:', { 
+          count: snapshot.docs.length,
+          empty: snapshot.empty,
+          metadata: snapshot.metadata
+        });
+        console.log('Got my expenses snapshot, count:', snapshot.docs.length);
+        const expenses = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            submittedAt: data.submittedAt?.toDate() || null,
+          };
+        });
+        console.log('Processed my expenses:', expenses);
+        setMyExpenses(expenses);
+      });
+    };
+
+    const fetchMyLeaves = async () => {
+      console.log('Fetching my leaves...');
+      // Query for both userId and employeeId since we've used both in different places
+      const myLeavesQuery = query(
+        collection(db, 'leaveRequests'),
+        where('userId', '==', user.uid),
+        orderBy('submittedAt', 'desc')
+      );
+
+      return onSnapshot(myLeavesQuery, (snapshot) => {
+        console.log('Got my leaves snapshot:', { 
+          count: snapshot.docs.length,
+          empty: snapshot.empty,
+          metadata: snapshot.metadata
+        });
+        const leaves = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            submittedAt: data.submittedAt?.toDate() || null,
+            startDate: data.startDate?.toDate() || null,
+            endDate: data.endDate?.toDate() || null,
+          };
+        });
+        console.log('Processed my leaves:', leaves);
+        setMyLeaves(leaves);
+      });
+    };
+
+    const fetchHistoricalExpenses = async () => {
+      console.log('Fetching historical expenses with:', {
+        userDepartment: department.id,
+        status: ['approved', 'rejected']
+      });
+
+      const historicalExpensesQuery = query(
+        collection(db, 'expenses'),
+        where('userDepartment', '==', department.id),
+        where('status', 'in', ['approved', 'rejected']),
+        orderBy('submittedAt', 'desc'),
+        limit(50)
+      );
+
+      return onSnapshot(historicalExpensesQuery, (snapshot) => {
+        console.log('Got historical expenses snapshot:', { 
+          count: snapshot.docs.length,
+          empty: snapshot.empty,
+          metadata: snapshot.metadata,
+          docs: snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }))
+        });
+        const expenses = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            submittedAt: data.submittedAt?.toDate() || null,
+            lastUpdatedAt: data.lastUpdatedAt?.toDate() || null,
+            approvedAt: data.approvedAt?.toDate() || null,
+          };
+        });
+        console.log('Processed historical expenses:', expenses);
+        setHistoricalExpenses(expenses);
+      });
+    };
+
+    const fetchHistoricalLeaves = async () => {
+      console.log('Fetching historical leaves with:', {
+        departmentId: department.id,
+        status: ['approved', 'rejected']
+      });
+
+      const historicalLeavesQuery = query(
+        collection(db, 'leaveRequests'),
+        where('departmentId', '==', department.id),
+        where('status', 'in', ['approved', 'rejected']),
+        orderBy('updatedAt', 'desc'),
+        limit(50)
+      );
+
+      return onSnapshot(historicalLeavesQuery, (snapshot) => {
+        console.log('Got historical leaves snapshot:', { 
+          count: snapshot.docs.length,
+          empty: snapshot.empty,
+          metadata: snapshot.metadata
+        });
+        const leaves = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            lastUpdatedAt: data.updatedAt?.toDate() || null,
+            updatedAt: data.updatedAt?.toDate() || null,
+            approvedAt: data.approvedAt?.toDate() || null,
+            startDate: data.startDate?.toDate() || null,
+            endDate: data.endDate?.toDate() || null,
+          };
+        });
+        console.log('Processed historical leaves:', leaves);
+        setHistoricalLeaves(leaves);
+      });
+    };
+
+    // Set up all listeners
+    let unsubscribers: Array<() => void> = [];
+
+    Promise.all([
+      fetchMyExpenses(),
+      fetchMyLeaves(),
+      fetchHistoricalExpenses(),
+      fetchHistoricalLeaves()
+    ]).then(unsubs => {
+      unsubscribers = unsubs.filter(Boolean) as Array<() => void>;
+    });
+
+    // Cleanup function
+    return () => {
+      unsubscribers.forEach(unsubscribe => unsubscribe());
+    };
+  }, [department?.id, user?.uid]);
 
   useEffect(() => {
     console.log('Department:', department);
@@ -228,6 +415,49 @@ export default function ManagerDashboard() {
       unsubscribeHistorical();
     };
   }, [department?.id]);
+
+  // Handle leave request submission for manager
+  const handleLeaveSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.email || !department?.id) return;
+
+    try {
+      const employeeData = departmentEmployees.find(emp => emp.email === user.email);
+      if (!employeeData) {
+        console.error('Employee record not found');
+        return;
+      }
+
+      const leaveData = {
+        employeeId: employeeData.id,
+        departmentId: department.id,
+        type: leaveType,
+        startDate: startDate,
+        endDate: endDate,
+        reason: leaveReason,
+        status: 'approved', // Auto-approve for managers
+        statusText: 'Auto-approved (Manager\'s leave request)',
+        approvedBy: user.uid,
+        approverName: `${employeeData.firstName} ${employeeData.lastName}`,
+        approvedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        notified: false
+      };
+
+      await addDoc(collection(db, 'leaveRequests'), leaveData);
+      console.log('Leave request submitted and auto-approved');
+      
+      // Reset form
+      setLeaveType('');
+      setStartDate(null);
+      setEndDate(null);
+      setLeaveReason('');
+      
+    } catch (error) {
+      console.error('Error submitting leave request:', error);
+    }
+  };
 
   if (loading) {
     return (
@@ -358,102 +588,59 @@ export default function ManagerDashboard() {
               }}
             >
               <Tab label="Leave Requests" value="leaves" />
+              <Tab label="Expense Approvals" value="expenses" />
               <Tab label="History" value="history" />
               <Tab label="Projects" value="projects" />
               <Tab label="Documents" value="documents" />
             </Tabs>
             <Box sx={{ p: 3, flex: 1, overflowY: 'auto' }}>
-              {activeTab === 'leaves' && (
-                <>
-                  {pendingLeaveRequests.length === 0 ? (
-                    <Typography color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
-                      No pending leave requests
+              {activeTab === 'expenses' && (
+                <Box>
+                  {/* Submit Expense Section */}
+                  <Paper sx={{ p: 3, mb: 4 }}>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                      Submit New Expense
                     </Typography>
-                  ) : (
-                    <Stack spacing={1}>
-                      {pendingLeaveRequests.map((request) => (
-                        <Card key={request.id} variant="outlined" sx={{ p: 2 }}>
-                          <Stack spacing={1}>
-                            <Stack direction="row" justifyContent="space-between" alignItems="center">
-                              <Typography variant="subtitle2">
-                                {request.employeeName}
-                              </Typography>
-                              <Chip
-                                size="small"
-                                label={request.type}
-                                color="primary"
-                                variant="outlined"
-                                sx={{ height: '24px' }}
-                              />
-                            </Stack>
-                            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
-                              {request.startDate && format(request.startDate, 'MMM d')} - {request.endDate && format(request.endDate, 'MMM d, yyyy')}
-                            </Typography>
-                            {request.reason && (
-                              <Typography variant="body2" color="text.secondary" sx={{ 
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                display: '-webkit-box',
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: 'vertical',
-                                fontSize: '0.875rem'
-                              }}>
-                                {request.reason}
-                              </Typography>
-                            )}
-                            <Stack direction="row" spacing={1}>
-                              <Button
-                                variant="contained"
-                                color="success"
-                                size="small"
-                                sx={{ minWidth: '90px', py: 0.5 }}
-                                onClick={() => setCommentDialog({
-                                  open: true,
-                                  requestId: request.id,
-                                  action: 'approve',
-                                  comment: ''
-                                })}
-                              >
-                                Approve
-                              </Button>
-                              <Button
-                                variant="contained"
-                                color="error"
-                                size="small"
-                                sx={{ minWidth: '90px', py: 0.5 }}
-                                onClick={() => setCommentDialog({
-                                  open: true,
-                                  requestId: request.id,
-                                  action: 'reject',
-                                  comment: ''
-                                })}
-                              >
-                                Reject
-                              </Button>
-                            </Stack>
-                          </Stack>
-                        </Card>
-                      ))}
-                    </Stack>
-                  )}
-                </>
+                    <ManagerExpenseForm />
+                  </Paper>
+
+                  {/* Expense Approvals Section */}
+                  <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                      Pending Expense Approvals
+                    </Typography>
+                    <ExpenseApprovals />
+                  </Paper>
+                </Box>
               )}
-              {activeTab === 'history' && (
-                <>
-                  {historicalRequests.length === 0 ? (
-                    <Typography color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
-                      No historical leave requests
+              {activeTab === 'leaves' && (
+                <Box>
+                  {/* Submit Leave Request Section */}
+                  <Paper sx={{ p: 3, mb: 4 }}>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                      Submit Leave Request
                     </Typography>
-                  ) : (
-                    <Stack spacing={1}>
-                      {historicalRequests.map((request) => (
-                        <Card key={request.id} variant="outlined" sx={{ p: 2 }}>
-                          <Stack spacing={1}>
-                            <Stack direction="row" justifyContent="space-between" alignItems="center">
-                              <Typography variant="subtitle2">
-                                {request.employeeName}
-                              </Typography>
-                              <Stack direction="row" spacing={1} alignItems="center">
+                    <ManagerLeaveForm />
+                  </Paper>
+
+                  {/* Leave Approvals Section */}
+                  <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                      Pending Leave Requests
+                    </Typography>
+                    {pendingLeaveRequests.length === 0 ? (
+                      <Typography color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
+                        No pending leave requests
+                      </Typography>
+                    ) : (
+                      <Stack spacing={1}>
+                        {pendingLeaveRequests.map((request) => (
+                          <Card key={request.id} variant="outlined" sx={{ p: 2 }}>
+                            <Stack spacing={1}>
+                              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                <Typography variant="subtitle1">
+                                  {request.employeeName}
+                                </Typography>
                                 <Chip
                                   size="small"
                                   label={request.type}
@@ -461,42 +648,214 @@ export default function ManagerDashboard() {
                                   variant="outlined"
                                   sx={{ height: '24px' }}
                                 />
+                              </Stack>
+                              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
+                                {request.startDate && format(request.startDate, 'MMM d')} - {request.endDate && format(request.endDate, 'MMM d, yyyy')}
+                              </Typography>
+                              {request.reason && (
+                                <Typography variant="body2" color="text.secondary" sx={{ 
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  fontSize: '0.875rem'
+                                }}>
+                                  {request.reason}
+                                </Typography>
+                              )}
+                              <Stack direction="row" spacing={1}>
+                                <Button
+                                  variant="contained"
+                                  color="success"
+                                  size="small"
+                                  sx={{ minWidth: '90px', py: 0.5 }}
+                                  onClick={() => setCommentDialog({
+                                    open: true,
+                                    requestId: request.id,
+                                    action: 'approve',
+                                    comment: ''
+                                  })}
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  variant="contained"
+                                  color="error"
+                                  size="small"
+                                  sx={{ minWidth: '90px', py: 0.5 }}
+                                  onClick={() => setCommentDialog({
+                                    open: true,
+                                    requestId: request.id,
+                                    action: 'reject',
+                                    comment: ''
+                                  })}
+                                >
+                                  Reject
+                                </Button>
+                              </Stack>
+                            </Stack>
+                          </Card>
+                        ))}
+                      </Stack>
+                    )}
+                  </Paper>
+                </Box>
+              )}
+              {activeTab === 'history' && (
+                <Box>
+                  {/* Manager's Personal History */}
+                  <Paper sx={{ p: 3, mb: 4 }}>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                      My History
+                    </Typography>
+                    <Tabs value={historyTab} onChange={(e, val) => setHistoryTab(val)} sx={{ mb: 2 }}>
+                      <Tab label="My Expenses" value="expenses" />
+                      <Tab label="My Leave Requests" value="leaves" />
+                    </Tabs>
+                    
+                    {historyTab === 'expenses' && (
+                      <Stack spacing={2}>
+                        {myExpenses.map((expense) => (
+                          <Card key={expense.id} variant="outlined" sx={{ p: 2 }}>
+                            <Stack spacing={1}>
+                              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                <Typography variant="subtitle1">
+                                  ${expense.amount} - {expense.category}
+                                </Typography>
                                 <Chip
                                   size="small"
-                                  label={request.status}
-                                  color={request.status === 'approved' ? 'success' : 'error'}
+                                  label="Auto-approved"
+                                  color="success"
                                   sx={{ height: '24px' }}
                                 />
                               </Stack>
-                            </Stack>
-                            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
-                              {request.startDate && format(request.startDate, 'MMM d')} - {request.endDate && format(request.endDate, 'MMM d, yyyy')}
-                            </Typography>
-                            {request.reason && (
-                              <Typography variant="body2" color="text.secondary" sx={{ 
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                display: '-webkit-box',
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: 'vertical',
-                                fontSize: '0.875rem'
-                              }}>
-                                {request.reason}
+                              <Typography variant="body2" color="text.secondary">
+                                {expense.description}
                               </Typography>
-                            )}
-                            {request.comment && (
-                              <Box sx={{ mt: 1, p: 1, bgcolor: 'grey.50', borderRadius: 1 }}>
-                                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
-                                  <strong>Comment:</strong> {request.comment}
+                              <Typography variant="caption" color="text.secondary">
+                                Submitted on {expense.submittedAt ? format(expense.submittedAt, 'MMM d, yyyy') : 'Unknown date'}
+                              </Typography>
+                            </Stack>
+                          </Card>
+                        ))}
+                      </Stack>
+                    )}
+
+                    {historyTab === 'leaves' && (
+                      <Stack spacing={2}>
+                        {myLeaves.map((leave) => (
+                          <Card key={leave.id} variant="outlined" sx={{ p: 2 }}>
+                            <Stack spacing={1}>
+                              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                <Typography variant="subtitle1">
+                                  {leave.type}
                                 </Typography>
-                              </Box>
-                            )}
-                          </Stack>
-                        </Card>
-                      ))}
-                    </Stack>
-                  )}
-                </>
+                                <Chip
+                                  size="small"
+                                  label="Auto-approved"
+                                  color="success"
+                                  sx={{ height: '24px' }}
+                                />
+                              </Stack>
+                              <Typography variant="body2">
+                                {leave.startDate ? format(leave.startDate, 'MMM d') : 'Unknown'} - {leave.endDate ? format(leave.endDate, 'MMM d, yyyy') : 'Unknown'}
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                {leave.reason}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                Submitted on {leave.submittedAt ? format(leave.submittedAt, 'MMM d, yyyy') : 'Unknown date'}
+                              </Typography>
+                            </Stack>
+                          </Card>
+                        ))}
+                      </Stack>
+                    )}
+                  </Paper>
+
+                  {/* Team History */}
+                  <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                      Team History
+                    </Typography>
+                    <Tabs value={teamHistoryTab} onChange={(e, val) => setTeamHistoryTab(val)} sx={{ mb: 2 }}>
+                      <Tab label="Expense Approvals" value="expenses" />
+                      <Tab label="Leave Approvals" value="leaves" />
+                    </Tabs>
+
+                    {teamHistoryTab === 'expenses' && (
+                      <Stack spacing={2}>
+                        {historicalExpenses.length === 0 ? (
+                          <Typography color="text.secondary" align="center" py={4}>
+                            No processed expense requests found
+                          </Typography>
+                        ) : (
+                          historicalExpenses.map((expense) => (
+                            <Card key={expense.id} variant="outlined" sx={{ p: 2 }}>
+                              <Stack spacing={1}>
+                                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                  <Typography variant="subtitle1">
+                                    {expense.userName} - ${expense.amount}
+                                  </Typography>
+                                  <Chip
+                                    size="small"
+                                    label={expense.status}
+                                    color={expense.status === 'approved' ? 'success' : 'error'}
+                                    sx={{ height: '24px' }}
+                                  />
+                                </Stack>
+                                <Typography variant="body2" color="text.secondary">
+                                  {expense.description}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {expense.status} on {expense.lastUpdatedAt ? format(expense.lastUpdatedAt, 'MMM d, yyyy') : 'Unknown date'}
+                                </Typography>
+                              </Stack>
+                            </Card>
+                          ))
+                        )}
+                      </Stack>
+                    )}
+
+                    {teamHistoryTab === 'leaves' && (
+                      <Stack spacing={2}>
+                        {historicalLeaves.length === 0 ? (
+                          <Typography color="text.secondary" align="center" py={4}>
+                            No processed leave requests found
+                          </Typography>
+                        ) : (
+                          historicalLeaves.map((leave) => (
+                            <Card key={leave.id} variant="outlined" sx={{ p: 2 }}>
+                              <Stack spacing={1}>
+                                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                  <Typography variant="subtitle1">
+                                    {leave.employeeName} - {leave.type}
+                                  </Typography>
+                                  <Chip
+                                    size="small"
+                                    label={leave.status}
+                                    color={leave.status === 'approved' ? 'success' : 'error'}
+                                    sx={{ height: '24px' }}
+                                  />
+                                </Stack>
+                                <Typography variant="body2">
+                                  {leave.startDate ? format(leave.startDate, 'MMM d') : 'Unknown'} - {leave.endDate ? format(leave.endDate, 'MMM d, yyyy') : 'Unknown'}
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                  {leave.reason}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {leave.status} on {leave.lastUpdatedAt ? format(leave.lastUpdatedAt, 'MMM d, yyyy') : 'Unknown date'}
+                                </Typography>
+                              </Stack>
+                            </Card>
+                          ))
+                        )}
+                      </Stack>
+                    )}
+                  </Paper>
+                </Box>
               )}
               {activeTab === 'documents' && (
                 <>

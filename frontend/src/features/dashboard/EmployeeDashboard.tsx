@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
   Container,
@@ -26,6 +26,9 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Checkbox,
+  CircularProgress,
+  Paper,
 } from '@mui/material';
 import {
   Person as PersonIcon,
@@ -33,24 +36,89 @@ import {
   Assignment as TaskIcon,
   MoreVert as MoreIcon,
   AccessTime as TimeIcon,
+  Add as AddIcon,
+  Receipt as ExpenseIcon,
 } from '@mui/icons-material';
 import {
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  doc, 
-  getDoc, 
-  updateDoc, 
-  orderBy, 
-  onSnapshot 
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  getDoc,
+  updateDoc,
+  orderBy,
+  onSnapshot,
 } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/contexts/AuthContext';
-import { format } from 'date-fns';
+import { format, isAfter } from 'date-fns';
 import { TaskStatus } from '@/config/project-schema';
 import { DatePicker } from '@mui/x-date-pickers';
 import { useRequests } from '@/hooks/useRequests';
+import { MiniCalendar } from '@/components/calendar/MiniCalendar';
+import ExpenseForm from '../expenses/ExpenseForm';
+import ExpenseCard from './components/ExpenseCard';
+
+// Helper function to check if a date is overdue
+const isOverdue = (date: Date) => {
+  return isAfter(new Date(), date);
+};
+
+// Safe date conversion helper
+const safeConvertToDate = (date: any): Date | null => {
+  try {
+    if (!date) return null;
+    
+    // If it's a Firebase Timestamp
+    if (date?.toDate) {
+      const converted = date.toDate();
+      return isNaN(converted.getTime()) ? null : converted;
+    }
+    
+    // If it's already a Date
+    if (date instanceof Date) {
+      return isNaN(date.getTime()) ? null : date;
+    }
+    
+    // If it's an ISO string
+    if (typeof date === 'string' && date.match(/^\d{4}-\d{2}-\d{2}/)) {
+      const parsed = new Date(date);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+    
+    // If it's a timestamp number
+    if (typeof date === 'number') {
+      const parsed = new Date(date);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error converting date:', error, { date });
+    return null;
+  }
+};
+
+const formatProjectDate = (date: any) => {
+  if (!date) return 'No date';
+  
+  try {
+    // Handle Firestore Timestamp
+    if (date?.toDate) {
+      return format(date.toDate(), 'MMM d, yyyy');
+    }
+    // Handle Date object
+    if (date instanceof Date) {
+      return format(date, 'MMM d, yyyy');
+    }
+    // Handle string date
+    return format(new Date(date), 'MMM d, yyyy');
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return 'Invalid date';
+  }
+};
 
 // Team Member Card
 const TeamMemberCard = ({ member }) => (
@@ -150,7 +218,7 @@ const ProjectCard = ({ project }) => {
               }}
             >
               <TimeIcon fontSize="small" />
-              Due: {format(project.endDate instanceof Date ? project.endDate : new Date(project.endDate), 'MMM d, yyyy')}
+              Due: {formatProjectDate(project.endDate)}
             </Typography>
           </Box>
         </Stack>
@@ -255,7 +323,7 @@ const TaskCard = ({ task, onStatusChange }) => {
               }}
             >
               <TimeIcon fontSize="small" />
-              Due: {format(task.dueDate.toDate(), 'MMM d')}
+              Due: {format(safeConvertToDate(task.dueDate) || new Date(), 'MMM d, yyyy')}
             </Typography>
           </Box>
         </Stack>
@@ -688,12 +756,73 @@ export const EmployeeDashboard = () => {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(0);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [recentExpenses, setRecentExpenses] = useState([]);
+  const [showExpenseDialog, setShowExpenseDialog] = useState(false);
+
+  // Load tasks for user
+  const loadTasks = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      let allTasks = [];
+
+      // Load tasks from projects
+      const projectsRef = collection(db, 'projects');
+      const projectsSnapshot = await getDocs(projectsRef);
+
+      for (const projectDoc of projectsSnapshot.docs) {
+        const tasksRef = collection(db, `projects/${projectDoc.id}/tasks`);
+        const tasksQuery = query(tasksRef, where('assigneeId', '==', user.uid));
+        const tasksSnapshot = await getDocs(tasksQuery);
+
+        const projectTasks = tasksSnapshot.docs.map(doc => ({
+          id: doc.id,
+          projectId: projectDoc.id,
+          projectName: projectDoc.data().name,
+          ...doc.data(),
+          dueDate: doc.data().dueDate // Keep as Timestamp
+        }));
+
+        allTasks = [...allTasks, ...projectTasks];
+      }
+
+      // Load tasks from root collection
+      const rootTasksRef = collection(db, 'tasks');
+      const rootTasksQuery = query(rootTasksRef, where('assigneeId', '==', user.uid));
+      const rootTasksSnapshot = await getDocs(rootTasksQuery);
+
+      const rootTasks = rootTasksSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        dueDate: doc.data().dueDate // Keep as Timestamp
+      }));
+
+      allTasks = [...allTasks, ...rootTasks];
+
+      // Sort tasks by due date and completion status
+      const sortedTasks = allTasks.sort((a, b) => {
+        if (a.completed === b.completed) {
+          const aDate = safeConvertToDate(a.dueDate);
+          const bDate = safeConvertToDate(b.dueDate);
+          return (aDate?.getTime() || 0) - (bDate?.getTime() || 0);
+        }
+        return a.completed ? 1 : -1;
+      });
+
+      console.log('Loaded tasks for mini calendar:', sortedTasks);
+      setTasks(sortedTasks);
+    } catch (error) {
+      console.error('Error loading tasks:', error);
+    }
+  }, [user]);
 
   useEffect(() => {
     const loadDashboardData = async () => {
       if (!user) return;
-
+      setLoading(true);
       try {
+        await loadTasks();
         let departmentId: string | null = null;
         let employeeId: string | null = null;
 
@@ -737,38 +866,26 @@ export const EmployeeDashboard = () => {
           );
         }
 
-        // Get projects
-        let projectsSnapshot;
-        if (userRole === 'HR0') {
-          // HR can see all projects
-          projectsSnapshot = await getDocs(collection(db, 'projects'));
-        } else {
-          // Regular employees see only their department's projects
-          const projectsQuery = query(
-            collection(db, 'projects'),
-            where('departmentId', '==', departmentId)
-          );
-          projectsSnapshot = await getDocs(projectsQuery);
-        }
-        setProjects(
-          projectsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-        );
+        // Load projects
+        const projectsRef = collection(db, 'projects');
+        const projectsSnapshot = await getDocs(projectsRef);
+        const projectsData = projectsSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setProjects(projectsData);
 
-        // Get assigned tasks
-        const tasksPromises = projectsSnapshot.docs.map(async (projectDoc) => {
-          const tasksQuery = query(
-            collection(db, `projects/${projectDoc.id}/tasks`),
-            where('assigneeId', '==', employeeId || user.uid)
-          );
-          const tasksSnapshot = await getDocs(tasksQuery);
-          return tasksSnapshot.docs.map(doc => ({
-            id: doc.id,
-            projectId: projectDoc.id,
-            ...doc.data()
-          }));
-        });
-        const allTasks = await Promise.all(tasksPromises);
-        setTasks(allTasks.flat());
+        // Load recent expenses
+        const expensesRef = collection(db, 'expenses');
+        const expensesQuery = query(expensesRef, where('employeeId', '==', user.uid), orderBy('createdAt', 'desc'));
+        const expensesSnapshot = await getDocs(expensesQuery);
+        const recentExpensesData = expensesSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          createdAt: doc.data().createdAt?.toDate(),
+          submittedAt: doc.data().submittedAt?.toDate(),
+        }));
+        setRecentExpenses(recentExpensesData);
       } catch (error) {
         console.error('Error loading dashboard data:', error);
       } finally {
@@ -785,7 +902,7 @@ export const EmployeeDashboard = () => {
     if (!task) return;
 
     try {
-      await updateDoc(doc(db, `projects/${task.projectId}/tasks`, taskId), {
+      await updateDoc(doc(db, 'tasks', taskId), {
         status: newStatus,
         updatedAt: new Date()
       });
@@ -799,10 +916,96 @@ export const EmployeeDashboard = () => {
     }
   };
 
+  const handleAddQuickTask = async (title: string) => {
+    if (!user) return;
+
+    try {
+      // Create a new task in the default project or personal tasks
+      const newTask = {
+        title,
+        description: '',
+        status: 'todo',
+        assigneeId: user.uid,
+        createdAt: new Date(),
+        dueDate: selectedDate,
+        priority: 'medium'
+      };
+
+      // Add task logic here
+      console.log('Adding quick task:', newTask);
+    } catch (error) {
+      console.error('Error adding quick task:', error);
+    }
+  };
+
+  const handleToggleTaskStatus = (task: any) => {
+    const newStatus = task.status === 'done' ? 'todo' : 'done';
+    handleTaskStatusChange(task.id, newStatus);
+  };
+
+  const calendarEvents = useMemo(() => {
+    return tasks
+      .filter(task => {
+        const dueDate = safeConvertToDate(task.dueDate);
+        return dueDate !== null && !task.completed;
+      })
+      .map(task => {
+        const dueDate = safeConvertToDate(task.dueDate);
+        if (!dueDate) return null;
+
+        return {
+          id: task.id,
+          title: task.title,
+          start: dueDate,
+          end: dueDate,
+          backgroundColor: task.priority === 'high' ? '#ef4444' : 
+                          task.priority === 'medium' ? '#f97316' : '#22c55e',
+          borderColor: 'transparent',
+          textColor: '#fff',
+          allDay: true,
+          extendedProps: {
+            description: task.description,
+            projectName: task.projectName,
+            priority: task.priority
+          }
+        };
+      })
+      .filter(Boolean);
+  }, [tasks]);
+
+  const renderEventContent = (eventInfo: any) => {
+    const event = eventInfo.event;
+    return (
+      <Box sx={{ 
+        p: 0.5, 
+        display: 'flex', 
+        alignItems: 'center',
+        gap: 0.5,
+        fontSize: '0.75rem',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis'
+      }}>
+        <Box sx={{ 
+          width: 8, 
+          height: 8, 
+          borderRadius: '50%',
+          backgroundColor: event.backgroundColor,
+          flexShrink: 0
+        }} />
+        <Typography variant="caption" noWrap>
+          {event.title}
+          {event.extendedProps.projectName && 
+            ` (${event.extendedProps.projectName})`}
+        </Typography>
+      </Box>
+    );
+  };
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-        <Typography>Loading dashboard...</Typography>
+        <CircularProgress size={24} />
       </Box>
     );
   }
@@ -816,155 +1019,172 @@ export const EmployeeDashboard = () => {
       label: 'Overview',
       content: (
         <Box sx={{ py: 3 }}>
-          {/* Summary Cards */}
-          <Grid container spacing={3} sx={{ mb: 4 }}>
-            <Grid item xs={12} md={4}>
-              <Card sx={{ 
-                height: '100%',
-                bgcolor: 'primary.light',
-                color: 'primary.contrastText',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: 4
-                },
-                transition: 'all 0.3s'
-              }}>
-                <CardContent>
-                  <Box display="flex" alignItems="center" gap={2}>
-                    <Avatar sx={{ bgcolor: 'primary.main' }}>
-                      <ProjectIcon />
-                    </Avatar>
-                    <Box>
-                      <Typography variant="h4" fontWeight="bold">
-                        {activeProjects}
-                      </Typography>
-                      <Typography variant="subtitle2">
-                        Active Projects
-                      </Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
+          <Grid container spacing={3}>
+            {/* Summary Cards - Left Column */}
+            <Grid item xs={12} md={9}>
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={4}>
+                  <Card sx={{ 
+                    height: '100%',
+                    bgcolor: 'primary.light',
+                    color: 'primary.contrastText',
+                    '&:hover': {
+                      transform: 'translateY(-4px)',
+                      boxShadow: 4
+                    },
+                    transition: 'all 0.3s'
+                  }}>
+                    <CardContent>
+                      <Box display="flex" alignItems="center" gap={2}>
+                        <Avatar sx={{ bgcolor: 'primary.main' }}>
+                          <ProjectIcon />
+                        </Avatar>
+                        <Box>
+                          <Typography variant="h4" fontWeight="bold">
+                            {activeProjects}
+                          </Typography>
+                          <Typography variant="subtitle2">
+                            Active Projects
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Card sx={{ 
+                    height: '100%',
+                    bgcolor: 'success.light',
+                    color: 'success.contrastText',
+                    '&:hover': {
+                      transform: 'translateY(-4px)',
+                      boxShadow: 4
+                    },
+                    transition: 'all 0.3s'
+                  }}>
+                    <CardContent>
+                      <Box display="flex" alignItems="center" gap={2}>
+                        <Avatar sx={{ bgcolor: 'success.main' }}>
+                          <TaskIcon />
+                        </Avatar>
+                        <Box>
+                          <Typography variant="h4" fontWeight="bold">
+                            {completedTasks}
+                          </Typography>
+                          <Typography variant="subtitle2">
+                            Completed Tasks
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Card sx={{ 
+                    height: '100%',
+                    bgcolor: 'warning.light',
+                    color: 'warning.contrastText',
+                    '&:hover': {
+                      transform: 'translateY(-4px)',
+                      boxShadow: 4
+                    },
+                    transition: 'all 0.3s'
+                  }}>
+                    <CardContent>
+                      <Box display="flex" alignItems="center" gap={2}>
+                        <Avatar sx={{ bgcolor: 'warning.main' }}>
+                          <TimeIcon />
+                        </Avatar>
+                        <Box>
+                          <Typography variant="h4" fontWeight="bold">
+                            {pendingTasks}
+                          </Typography>
+                          <Typography variant="subtitle2">
+                            Pending Tasks
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </Grid>
+
+              {/* Recent Activity */}
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  Recent Activity
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="subtitle1" gutterBottom>
+                          Latest Tasks
+                        </Typography>
+                        <List>
+                          {tasks.slice(0, 3).map((task) => (
+                            <ListItem key={task.id} disablePadding>
+                              <ListItemButton>
+                                <ListItemIcon>
+                                  <TaskIcon color={task.status === 'done' ? 'success' : 'action'} />
+                                </ListItemIcon>
+                                <ListItemText 
+                                  primary={
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                      <Typography variant="body1">{task.title}</Typography>
+                                      {task.priority && (
+                                        <Chip 
+                                          size="small" 
+                                          label={task.priority}
+                                          color={
+                                            task.priority === 'high' ? 'error' :
+                                            task.priority === 'medium' ? 'warning' : 'default'
+                                          }
+                                          sx={{ height: 20 }}
+                                        />
+                                      )}
+                                    </Box>
+                                  }
+                                  secondary={
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                                      {task.dueDate && (
+                                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                          <TimeIcon fontSize="small" />
+                                          Due: {format(safeConvertToDate(task.dueDate) || new Date(), 'MMM d, yyyy')}
+                                        </Typography>
+                                      )}
+                                      <Chip 
+                                        size="small"
+                                        label={task.status}
+                                        color={task.status === 'done' ? 'success' : 'default'}
+                                        sx={{ height: 20 }}
+                                      />
+                                    </Box>
+                                  }
+                                />
+                              </ListItemButton>
+                            </ListItem>
+                          ))}
+                        </List>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+              </Box>
             </Grid>
-            <Grid item xs={12} md={4}>
-              <Card sx={{ 
-                height: '100%',
-                bgcolor: 'success.light',
-                color: 'success.contrastText',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: 4
-                },
-                transition: 'all 0.3s'
-              }}>
-                <CardContent>
-                  <Box display="flex" alignItems="center" gap={2}>
-                    <Avatar sx={{ bgcolor: 'success.main' }}>
-                      <TaskIcon />
-                    </Avatar>
-                    <Box>
-                      <Typography variant="h4" fontWeight="bold">
-                        {completedTasks}
-                      </Typography>
-                      <Typography variant="subtitle2">
-                        Completed Tasks
-                      </Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <Card sx={{ 
-                height: '100%',
-                bgcolor: 'warning.light',
-                color: 'warning.contrastText',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: 4
-                },
-                transition: 'all 0.3s'
-              }}>
-                <CardContent>
-                  <Box display="flex" alignItems="center" gap={2}>
-                    <Avatar sx={{ bgcolor: 'warning.main' }}>
-                      <TimeIcon />
-                    </Avatar>
-                    <Box>
-                      <Typography variant="h4" fontWeight="bold">
-                        {pendingTasks}
-                      </Typography>
-                      <Typography variant="subtitle2">
-                        Pending Tasks
-                      </Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
+
+            {/* Calendar - Right Column */}
+            <Grid item xs={12} md={3}>
+              <MiniCalendar
+                userId={user?.uid || ''}
+                events={calendarEvents}
+                selectedDate={selectedDate}
+                onDateChange={setSelectedDate}
+                onAddTask={handleAddQuickTask}
+                renderEventContent={renderEventContent}
+              />
             </Grid>
           </Grid>
-
-          {/* Recent Activity */}
-          <Box sx={{ mt: 4 }}>
-            <Typography variant="h6" gutterBottom>
-              Recent Activity
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={12} md={6}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="subtitle1" gutterBottom>
-                      Latest Tasks
-                    </Typography>
-                    <List>
-                      {tasks.slice(0, 3).map((task) => (
-                        <ListItem key={task.id} disablePadding>
-                          <ListItemButton>
-                            <ListItemIcon>
-                              <TaskIcon color={task.status === 'done' ? 'success' : 'action'} />
-                            </ListItemIcon>
-                            <ListItemText 
-                              primary={task.title}
-                              secondary={`Due: ${format(task.dueDate.toDate(), 'MMM d')}`}
-                            />
-                            <Chip 
-                              label={task.status.replace('_', ' ')} 
-                              size="small"
-                              color={task.status === 'done' ? 'success' : 'default'}
-                            />
-                          </ListItemButton>
-                        </ListItem>
-                      ))}
-                    </List>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="subtitle1" gutterBottom>
-                      Active Projects
-                    </Typography>
-                    <List>
-                      {projects.filter(p => p.status === 'active').slice(0, 3).map((project) => (
-                        <ListItem key={project.id} disablePadding>
-                          <ListItemButton>
-                            <ListItemIcon>
-                              <ProjectIcon color="primary" />
-                            </ListItemIcon>
-                            <ListItemText 
-                              primary={project.name}
-                              secondary={`Due: ${format(project.endDate instanceof Date ? project.endDate : new Date(project.endDate), 'MMM d, yyyy')}`}
-                            />
-                          </ListItemButton>
-                        </ListItem>
-                      ))}
-                    </List>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-          </Box>
         </Box>
       )
     },
@@ -1023,16 +1243,156 @@ export const EmployeeDashboard = () => {
                 View All Tasks
               </Button>
             </Box>
-            <Grid container spacing={2}>
-              {tasks.map((task) => (
-                <Grid item xs={12} md={6} key={task.id}>
-                  <TaskCard
-                    task={task}
-                    onStatusChange={handleTaskStatusChange}
-                  />
-                </Grid>
-              ))}
-            </Grid>
+            <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider' }}>
+              <Typography variant="h6" gutterBottom>
+                My Tasks
+              </Typography>
+              {loading ? (
+                <Box sx={{ p: 2, textAlign: 'center' }}>
+                  <CircularProgress size={24} />
+                </Box>
+              ) : tasks.length === 0 ? (
+                <Box sx={{ p: 2, textAlign: 'center' }}>
+                  <Typography color="text.secondary">
+                    No tasks assigned to you
+                  </Typography>
+                </Box>
+              ) : (
+                <List>
+                  {tasks.map((task) => (
+                    <ListItem 
+                      key={task.id} 
+                      disablePadding 
+                      sx={{ 
+                        mb: 1,
+                        '&:hover': {
+                          bgcolor: 'action.hover',
+                          borderRadius: 1
+                        }
+                      }}
+                    >
+                      <ListItemButton sx={{ borderRadius: 1 }}>
+                        <ListItemIcon>
+                          <Checkbox
+                            edge="start"
+                            checked={task.status === 'done'}
+                            onChange={() => handleToggleTaskStatus(task)}
+                            sx={{ 
+                              color: task.status === 'done' ? 'success.main' : 'action.active',
+                              '&.Mui-checked': {
+                                color: 'success.main',
+                              },
+                            }}
+                          />
+                        </ListItemIcon>
+                        <ListItemText 
+                          primary={
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography 
+                                variant="body1"
+                                sx={{ 
+                                  textDecoration: task.status === 'done' ? 'line-through' : 'none',
+                                  color: task.status === 'done' ? 'text.secondary' : 'text.primary'
+                                }}
+                              >
+                                {task.title}
+                              </Typography>
+                              {task.priority && (
+                                <Chip 
+                                  size="small" 
+                                  label={task.priority}
+                                  color={
+                                    task.priority === 'high' ? 'error' :
+                                    task.priority === 'medium' ? 'warning' : 'default'
+                                  }
+                                  sx={{ height: 20 }}
+                                />
+                              )}
+                            </Box>
+                          }
+                          secondary={
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                              {task.dueDate && (
+                                <Typography 
+                                  variant="caption" 
+                                  sx={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: 0.5,
+                                    color: isOverdue(safeConvertToDate(task.dueDate) || new Date()) ? 'error.main' : 'text.secondary'
+                                  }}
+                                >
+                                  <TimeIcon fontSize="small" />
+                                  Due: {format(safeConvertToDate(task.dueDate) || new Date(), 'MMM d, yyyy')}
+                                </Typography>
+                              )}
+                              <Chip 
+                                size="small"
+                                label={task.status}
+                                color={task.status === 'done' ? 'success' : 'default'}
+                                sx={{ height: 20 }}
+                              />
+                            </Box>
+                          }
+                        />
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+            </Box>
+          </Box>
+
+          {/* Expenses Section */}
+          <Box sx={{ mt: 4 }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="h6">
+                Expenses
+              </Typography>
+              <Button
+                startIcon={<AddIcon />}
+                onClick={() => setShowExpenseDialog(true)}
+                size="small"
+              >
+                New Expense
+              </Button>
+            </Box>
+            <Paper elevation={0} sx={{ p: 2, height: '100%' }}>
+              <List dense>
+                {recentExpenses.slice(0, 5).map((expense) => (
+                  <ListItem
+                    key={expense.id}
+                    divider
+                    sx={{
+                      borderLeft: 2,
+                      borderColor: 
+                        expense.status === 'approved' ? 'success.main' :
+                        expense.status === 'declined' ? 'error.main' : 'warning.main',
+                      pl: 1
+                    }}
+                  >
+                    <ListItemText
+                      primary={
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Typography variant="body2">
+                            ${expense.amount.toFixed(2)} - {expense.category.replace('_', ' ')}
+                          </Typography>
+                          <Chip
+                            label={expense.status}
+                            size="small"
+                            color={
+                              expense.status === 'approved' ? 'success' :
+                              expense.status === 'declined' ? 'error' : 'warning'
+                            }
+                          />
+                        </Box>
+                      }
+                      secondary={format(expense.submittedAt.toDate(), 'MMM d, yyyy')}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Paper>
           </Box>
         </Box>
       )
@@ -1061,12 +1421,32 @@ export const EmployeeDashboard = () => {
           <TimeOffCard />
         </Box>
       )
-    }
+    },
+    {
+      label: 'Expenses',
+      content: (
+        <Box>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Typography variant="h6">
+              My Expenses
+            </Typography>
+            <Button
+              variant="contained"
+              startIcon={<ExpenseIcon />}
+              onClick={() => setShowExpenseDialog(true)}
+            >
+              Submit Expense
+            </Button>
+          </Box>
+          <ExpenseCard />
+        </Box>
+      ),
+    },
   ];
 
   return (
-    <Container maxWidth="lg">
-      <Box sx={{ width: '100%', py: 3 }}>
+    <>
+      <Container maxWidth="xl" sx={{ py: 4 }}>
         {/* Page Title */}
         <Box sx={{ mb: 4 }}>
           <Typography variant="h4" gutterBottom fontWeight="medium">
@@ -1115,7 +1495,22 @@ export const EmployeeDashboard = () => {
             {activeTab === index && tab.content}
           </div>
         ))}
-      </Box>
-    </Container>
+      </Container>
+
+      <Dialog
+        open={showExpenseDialog}
+        onClose={() => setShowExpenseDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Submit New Expense</DialogTitle>
+        <DialogContent>
+          <ExpenseForm onSubmit={() => {
+            setShowExpenseDialog(false);
+            loadRecentExpenses();
+          }} />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };

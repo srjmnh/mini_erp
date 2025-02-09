@@ -18,7 +18,7 @@ import PayrollPage from './features/payroll/PayrollPage';
 import RoleConfigurationPage from './features/roles/RoleConfigurationPage';
 import PerformancePage from './features/hr/PerformancePage';
 import { TimeOff } from './features/hr/pages/TimeOff';
-import ExpensePage from './features/hr/ExpensePage';
+import ExpensePage from './features/expenses/ExpensePage';
 import HRDashboard from './features/hr/HRDashboard';
 import SettingsPage from './features/settings/SettingsPage';
 import CalendarPage from './features/calendar/CalendarPage';
@@ -30,6 +30,7 @@ import { SnackbarProvider } from './contexts/SnackbarContext';
 import { ChatProvider } from './contexts/ChatContext';
 import theme from './theme';
 import StreamChatPopover from '@/components/chat/StreamChatPopover';
+import ProtectedRoute from './components/auth/ProtectedRoute';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -81,6 +82,16 @@ function App() {
                               </Route>
                               <Route path="settings" element={<SettingsPage />} />
                             </Route>
+
+                            {/* Add Expense Management Route */}
+                            <Route
+                              path="/expenses"
+                              element={
+                                <ProtectedRoute allowedRoles={['hr', 'admin']}>
+                                  <ExpensePage />
+                                </ProtectedRoute>
+                              }
+                            />
 
                             {/* Redirect all other routes to dashboard */}
                             <Route path="*" element={<Navigate to="/dashboard" replace />} />

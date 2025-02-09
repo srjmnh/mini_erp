@@ -1138,66 +1138,50 @@ const DepartmentDetailsPage = () => {
   };
 
   const handleSaveField = async (field: string, value: any) => {
-    if (!id) return;
+    if (!id || !department) return;
 
     try {
       const batch = writeBatch(db);
       const departmentRef = doc(db, 'departments', id);
-      const updateData: any = {
-        updatedAt: new Date().toISOString()
-      };
+      const updateData: any = {};
 
-      // Handle leadership position assignments
       if (field === 'head' || field === 'deputy') {
-        const isHead = field === 'head';
-        const employeeId = value?.id;
-        const currentDepartmentId = department.id;
-        
-        if (employeeId) {
-          // First, clean up old head if exists
-          if (isHead && department.headId && department.headId !== employeeId) {
-            const oldHeadRef = doc(db, 'employees', department.headId);
-            batch.update(oldHeadRef, {
-              role: 'Employee',
-              isManager: false,
-              updatedAt: new Date().toISOString()
-            });
-          } else if (!isHead && department.deputyId && department.deputyId !== employeeId) {
-            const oldDeputyRef = doc(db, 'employees', department.deputyId);
-            batch.update(oldDeputyRef, {
-              role: 'Employee',
-              isManager: false,
-              updatedAt: new Date().toISOString()
-            });
-          }
+        if (value) {
+          // Update the department with new head/deputy
+          updateData[`${field}Id`] = value.id;
+          updateData[field] = {
+            id: value.id,
+            name: value.name,
+            email: value.email
+          };
 
-          // Update the new employee's role and department
-          batch.update(doc(db, 'employees', employeeId), {
-            role: isHead ? 'Department Head' : 'Team Lead',
-            isManager: isHead, // Set isManager true for department head
-            departmentId: currentDepartmentId,
-            department: department.name,
+          // Update the employee's role
+          const employeeRef = doc(db, 'employees', value.id);
+          batch.update(employeeRef, {
+            role: field === 'head' ? 'Department Head' : 'Deputy Head',
+            isManager: true,
             updatedAt: new Date().toISOString()
           });
 
-          // Update department's head/deputy references
-          if (isHead) {
-            updateData.headId = employeeId;
-            updateData.head = value;
-            updateData.headId = employeeId;
-          } else {
-            updateData.deputyId = employeeId;
-            updateData.deputy = value;
-            updateData.deputyManagerId = employeeId;
-          }
-        } else {
-          // Removing head/deputy
-          if (isHead) {
-            updateData.headId = null;
-            updateData.head = null;
-            updateData.headId = null;
-            
-            if (department.headId) {
+          // If setting a new head
+          if (field === 'head') {
+            // Update all department employees to have this head as their manager
+            const departmentEmployeesRef = collection(db, 'employees');
+            const departmentEmployeesQuery = query(departmentEmployeesRef, where('departmentId', '==', id));
+            const employeesSnapshot = await getDocs(departmentEmployeesQuery);
+
+            employeesSnapshot.docs.forEach(empDoc => {
+              // Don't update the head's own managerId
+              if (empDoc.id !== value.id) {
+                batch.update(doc(db, 'employees', empDoc.id), {
+                  managerId: value.id,
+                  updatedAt: new Date().toISOString()
+                });
+              }
+            });
+
+            // Remove old head if exists
+            if (department.headId && department.headId !== value.id) {
               const oldHeadRef = doc(db, 'employees', department.headId);
               batch.update(oldHeadRef, {
                 role: 'Employee',
@@ -1206,9 +1190,56 @@ const DepartmentDetailsPage = () => {
               });
             }
           } else {
+            // If setting deputy, their manager should be the department head
+            if (department.headId) {
+              batch.update(employeeRef, {
+                managerId: department.headId,
+                updatedAt: new Date().toISOString()
+              });
+            }
+
+            // Remove old deputy if exists
+            if (department.deputyId && department.deputyId !== value.id) {
+              const oldDeputyRef = doc(db, 'employees', department.deputyId);
+              batch.update(oldDeputyRef, {
+                role: 'Employee',
+                isManager: false,
+                updatedAt: new Date().toISOString()
+              });
+            }
+          }
+        } else {
+          // Removing head/deputy
+          if (field === 'head') {
+            updateData.headId = null;
+            updateData.head = null;
+            
+            if (department.headId) {
+              // Remove the head role from the employee
+              const oldHeadRef = doc(db, 'employees', department.headId);
+              batch.update(oldHeadRef, {
+                role: 'Employee',
+                isManager: false,
+                updatedAt: new Date().toISOString()
+              });
+
+              // Remove this manager from all department employees
+              const departmentEmployeesRef = collection(db, 'employees');
+              const departmentEmployeesQuery = query(departmentEmployeesRef, where('departmentId', '==', id));
+              const employeesSnapshot = await getDocs(departmentEmployeesQuery);
+
+              employeesSnapshot.docs.forEach(empDoc => {
+                if (empDoc.data().managerId === department.headId) {
+                  batch.update(doc(db, 'employees', empDoc.id), {
+                    managerId: null,
+                    updatedAt: new Date().toISOString()
+                  });
+                }
+              });
+            }
+          } else {
             updateData.deputyId = null;
             updateData.deputy = null;
-            updateData.deputyManagerId = null;
             
             if (department.deputyId) {
               const oldDeputyRef = doc(db, 'employees', department.deputyId);
@@ -1219,9 +1250,6 @@ const DepartmentDetailsPage = () => {
               });
             }
           }
-
-          updateData[`${field}Id`] = null;
-          updateData[field] = null;
         }
       } else {
         // Handle other fields
