@@ -1,35 +1,36 @@
 import React, { useState, useEffect } from 'react';
+import { StreamChat, Channel } from 'stream-chat';
 import {
-  Avatar,
-  Badge,
   Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Divider,
   IconButton,
+  Typography,
+  Popover,
   List,
   ListItem,
+  ListItemText,
   ListItemAvatar,
   ListItemIcon,
-  ListItemText,
+  Avatar,
+  TextField,
+  Button,
+  CircularProgress,
+  Badge,
   Menu,
   MenuItem,
-  Popover,
-  TextField,
-  Typography,
-  useTheme,
+  Tooltip,
+  Chip,
 } from '@mui/material';
 import {
-  AccountCircle,
-  AttachFile,
-  FiberManualRecord,
-  Send,
+  Chat as ChatIcon,
+  Send as SendIcon,
+  AttachFile as AttachFileIcon,
+  CircleOutlined,
+  CheckCircleOutline,
+  RemoveCircleOutline,
 } from '@mui/icons-material';
-import { chatClient, initializeStreamUser } from '@/config/stream';
 import { useAuth } from '@/contexts/AuthContext';
-import { Channel } from 'stream-chat';
-import { useStreamMessages } from '@/hooks/useStreamMessages';
+import { useTheme } from '@mui/material/styles';
+import { useSnackbar } from '@/contexts/SnackbarContext';
 import Message from './Message';
 import FileMessage from './FileMessage';
 import NewChatDialog from './NewChatDialog';
@@ -41,73 +42,81 @@ interface Employee {
   id: string;
   name: string;
   email: string;
-  position?: string;
   photoURL?: string;
+  position?: string;
 }
 
 export default function StreamChatPopover() {
   const { user } = useAuth();
+  const theme = useTheme();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [message, setMessage] = useState('');
+  const [chatClient, setChatClient] = useState<StreamChat | null>(null);
   const [channel, setChannel] = useState<Channel | null>(null);
   const [loading, setLoading] = useState(false);
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
   const [newChatOpen, setNewChatOpen] = useState(false);
-  const theme = useTheme();
   const [userStatus, setUserStatus] = useState<'online' | 'away' | 'busy'>('online');
   const [isConnected, setIsConnected] = useState(false);
   const [statusAnchorEl, setStatusAnchorEl] = useState<null | HTMLElement>(null);
-  const { messages } = useStreamMessages(channel);
 
-  // Initialize chat client
   useEffect(() => {
-    if (user?.email) {
-      const initChat = async () => {
-        try {
-          setLoading(true);
-          const userId = user.email.replace(/[.@]/g, '_');
-          const client = await initializeStreamUser(userId, user.email, user.displayName, user.photoURL);
-          
-          // Set initial status after successful connection
-          if (client.userID) {
-            await client.partialUpdateUser({
-              id: userId,
-              set: {
-                status: userStatus,
-              },
-            });
-            setIsConnected(true);
-          }
-          setLoading(false);
-        } catch (error) {
-          console.error('Error initializing chat:', error);
-          setLoading(false);
-        }
-      };
-      initChat();
+    const initChat = async () => {
+      if (!user?.email) return;
 
-      // Cleanup function
-      return () => {
-        const cleanup = async () => {
-          if (chatClient?.userID) {
-            await chatClient.disconnectUser();
-            setIsConnected(false);
-          }
-        };
-        cleanup();
-      };
-    }
+      try {
+        const userId = user.email.replace(/[.@]/g, '_');
+        console.log('Initializing chat with user:', user);
+        
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/stream/token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId,
+            email: user.email,
+            name: user.name || user.email.split('@')[0],
+            image: user.photoURL,
+          }),
+        });
+
+        const { token } = await response.json();
+        const client = StreamChat.getInstance(import.meta.env.VITE_STREAM_API_KEY);
+        await client.connectUser(
+          {
+            id: userId,
+            name: user.name || user.email.split('@')[0],
+            email: user.email,
+            image: user.photoURL,
+          },
+          token
+        );
+
+        setChatClient(client);
+        setIsConnected(true);
+      } catch (error) {
+        console.error('Error initializing chat:', error);
+        setIsConnected(false);
+      }
+    };
+
+    initChat();
+    return () => {
+      chatClient?.disconnectUser();
+    };
   }, [user]);
 
-  // Fetch channels only after successful connection
   useEffect(() => {
-    if (isConnected && chatClient?.userID) {
+    if (chatClient) {
       const fetchChannels = async () => {
         try {
           const filter = { 
             type: 'messaging',
-            members: { $in: [chatClient.userID] }
+            members: { $in: [chatClient?.userID] }
           };
           const sort = { last_message_at: -1 };
           
@@ -124,11 +133,10 @@ export default function StreamChatPopover() {
       };
       fetchChannels();
     }
-  }, [isConnected, chatClient]);
+  }, [chatClient]);
 
-  // Update user status in Stream - only when client is connected
   useEffect(() => {
-    if (isConnected && chatClient?.userID && userStatus) {
+    if (chatClient) {
       const updateStatus = async () => {
         try {
           await chatClient.partialUpdateUser({
@@ -143,11 +151,10 @@ export default function StreamChatPopover() {
       };
       updateStatus();
     }
-  }, [userStatus, chatClient, isConnected]);
+  }, [userStatus, chatClient]);
 
-  // Listen for user presence changes
   useEffect(() => {
-    if (isConnected && chatClient) {
+    if (chatClient) {
       chatClient.on('user.presence.changed', event => {
         setChannels(prev => prev.map(ch => {
           const members = ch.state.members;
@@ -175,7 +182,83 @@ export default function StreamChatPopover() {
         chatClient.off('user.presence.changed');
       };
     }
-  }, [chatClient, isConnected]);
+  }, [chatClient]);
+
+  useEffect(() => {
+    const loadMessages = async () => {
+      if (!channel) return;
+      
+      try {
+        const response = await channel.watch();
+        setMessages(response.messages || []);
+      } catch (error) {
+        console.error('Error loading messages:', error);
+      }
+    };
+
+    loadMessages();
+
+    // Subscribe to new messages
+    const handleNewMessage = (event: any) => {
+      setMessages(prev => [...prev, event.message]);
+    };
+
+    if (channel) {
+      channel.on('message.new', handleNewMessage);
+    }
+
+    return () => {
+      if (channel) {
+        channel.off('message.new', handleNewMessage);
+      }
+    };
+  }, [channel]);
+
+  useEffect(() => {
+    if (channel) {
+      channel.on('message.new', (event) => {
+        if (event.message.user?.id !== chatClient?.userID) {
+          setChannels(prev => prev.map(ch => 
+            ch.id === channel.id 
+              ? { ...ch, unreadCount: (ch.countUnread() || 0) + 1 }
+              : ch
+          ));
+        }
+      });
+
+      return () => {
+        channel.off('message.new');
+      };
+    }
+  }, [channel, chatClient]);
+
+  useEffect(() => {
+    if (!chatClient) return;
+
+    const handleChannelUpdated = (event: any) => {
+      const loadChannels = async () => {
+        if (!chatClient || !user?.email) return;
+
+        try {
+          const filter = { type: 'messaging', members: { $in: [user.email.replace(/[.@]/g, '_')] } };
+          const sort = { last_message_at: -1 };
+          const channels = await chatClient.queryChannels(filter, sort);
+          setChannels(channels);
+        } catch (error) {
+          console.error('Error loading channels:', error);
+        }
+      };
+      loadChannels();
+    };
+
+    chatClient.on('message.new', handleChannelUpdated);
+    chatClient.on('channel.updated', handleChannelUpdated);
+
+    return () => {
+      chatClient.off('message.new', handleChannelUpdated);
+      chatClient.off('channel.updated', handleChannelUpdated);
+    };
+  }, [chatClient]);
 
   const handleStatusClick = (event: React.MouseEvent<HTMLElement>) => {
     setStatusAnchorEl(event.currentTarget);
@@ -203,25 +286,11 @@ export default function StreamChatPopover() {
     }
   };
 
-  // Track unread messages
-  useEffect(() => {
-    if (channel) {
-      channel.on('message.new', (event) => {
-        if (event.message.user?.id !== chatClient?.userID) {
-          // Update unread count for this channel
-          setChannels(prev => prev.map(ch => 
-            ch.id === channel.id 
-              ? { ...ch, unreadCount: (ch.countUnread() || 0) + 1 }
-              : ch
-          ));
-        }
-      });
-
-      return () => {
-        channel.off('message.new');
-      };
-    }
-  }, [channel, chatClient]);
+  const handleEmployeeSelect = async (employee: Employee) => {
+    setSelectedEmployee(employee);
+    setNewChatOpen(false);
+    await createChannel(employee);
+  };
 
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -232,64 +301,42 @@ export default function StreamChatPopover() {
   };
 
   const createChannel = async (employee: Employee) => {
-    setLoading(true);
-    try {
-      if (!user?.email || !employee.email) {
-        console.error('Missing user or employee email');
-        return;
-      }
+    if (!chatClient || !user?.email) return;
 
-      const currentUserId = user.email.replace(/[.@]/g, '_');
+    try {
+      setLoading(true);
+      const userId = user.email.replace(/[.@]/g, '_');
       const employeeId = employee.email.replace(/[.@]/g, '_');
 
-      // Create users via backend
-      await axios.post('http://localhost:3000/api/stream/create-chat', {
-        currentUser: {
-          id: currentUserId,
-          name: user.displayName || user.email.split('@')[0],
-          email: user.email,
-          image: user.photoURL,
-          position: user.role || 'Employee',
+      // Create the employee user on backend
+      await fetch(`${import.meta.env.VITE_API_URL}/api/stream/create-user`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        otherUser: {
-          id: employeeId,
-          name: employee.name,
+        body: JSON.stringify({
+          userId: employeeId,
           email: employee.email,
+          name: employee.name,
           image: employee.photoURL,
-          position: employee.position || 'Employee',
-        },
+        }),
       });
 
-      // Create unique channel ID using sorted IDs
-      const sortedIds = [currentUserId, employeeId].sort();
-      const channelId = `chat_${sortedIds[0]}_${sortedIds[1]}`;
-
-      // Check if channel exists
-      const existingChannel = channels.find(ch => ch.id === channelId);
-      if (existingChannel) {
-        setChannel(existingChannel);
-        setSelectedEmployee(employee);
-        setLoading(false);
-        return;
-      }
-
-      // Create new channel
+      // Create channel
+      const channelId = [userId, employeeId].sort().join('_');
       const newChannel = chatClient.channel('messaging', channelId, {
-        members: [currentUserId, employeeId],
-        created_by: currentUserId,
-        receiver: employeeId,
+        members: [userId, employeeId],
+        created_by_id: userId,
       });
 
       await newChannel.create();
-      await newChannel.watch();
-      
       setChannel(newChannel);
-      setSelectedEmployee(employee);
-      setChannels(prev => [newChannel, ...prev]);
+      await loadChannels(); // Refresh channels list
     } catch (error) {
       console.error('Error creating channel:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleSendMessage = async () => {
@@ -331,39 +378,52 @@ export default function StreamChatPopover() {
 
   const open = Boolean(anchorEl);
 
-  if (!chatClient.userID) {
+  if (!chatClient) {
     return null;
   }
 
   return (
-    <>
+    <Box
+      sx={{
+        position: 'fixed',
+        bottom: '20px',
+        right: '80px', // Move it 80px from right (chatbot is at 20px)
+        zIndex: 1200,
+      }}
+    >
       <IconButton
-        onClick={handleClick}
-        size="small"
+        onClick={(e) => setAnchorEl(e.currentTarget)}
         sx={{
-          ml: 2,
-          position: 'relative',
+          backgroundColor: 'background.paper',
+          boxShadow: 2,
+          '&:hover': {
+            backgroundColor: 'background.paper',
+          },
         }}
       >
-        <Badge 
-          color={userStatus === 'online' ? 'success' : userStatus === 'away' ? 'warning' : 'error'} 
-          variant="dot"
-        >
-          <AccountCircle />
+        <Badge color="error" variant="dot" invisible={!hasUnreadMessages}>
+          <ChatIcon />
         </Badge>
       </IconButton>
 
       <Popover
         open={Boolean(anchorEl)}
         anchorEl={anchorEl}
-        onClose={handleClose}
+        onClose={() => setAnchorEl(null)}
         anchorOrigin={{
-          vertical: 'bottom',
+          vertical: 'top',
           horizontal: 'right',
         }}
         transformOrigin={{
-          vertical: 'top',
+          vertical: 'bottom',
           horizontal: 'right',
+        }}
+        PaperProps={{
+          sx: {
+            width: '800px',
+            height: '600px',
+            marginBottom: '16px',
+          }
         }}
       >
         <Box sx={{ width: 800, height: 600, display: 'flex' }}>
@@ -383,7 +443,7 @@ export default function StreamChatPopover() {
                       },
                     }}
                   >
-                    <AccountCircle />
+                    <CircleOutlined />
                   </Badge>
                 }
               >
@@ -396,19 +456,19 @@ export default function StreamChatPopover() {
               >
                 <MenuItem onClick={() => handleStatusChange('online')}>
                   <ListItemIcon>
-                    <FiberManualRecord sx={{ color: getStatusColor('online') }} fontSize="small" />
+                    <CircleOutlined sx={{ color: getStatusColor('online') }} fontSize="small" />
                   </ListItemIcon>
                   <ListItemText>Online</ListItemText>
                 </MenuItem>
                 <MenuItem onClick={() => handleStatusChange('away')}>
                   <ListItemIcon>
-                    <FiberManualRecord sx={{ color: getStatusColor('away') }} fontSize="small" />
+                    <CircleOutlined sx={{ color: getStatusColor('away') }} fontSize="small" />
                   </ListItemIcon>
                   <ListItemText>Away</ListItemText>
                 </MenuItem>
                 <MenuItem onClick={() => handleStatusChange('busy')}>
                   <ListItemIcon>
-                    <FiberManualRecord sx={{ color: getStatusColor('busy') }} fontSize="small" />
+                    <CircleOutlined sx={{ color: getStatusColor('busy') }} fontSize="small" />
                   </ListItemIcon>
                   <ListItemText>Busy</ListItemText>
                 </MenuItem>
@@ -424,7 +484,6 @@ export default function StreamChatPopover() {
                     )?.user
                   : null;
 
-                // Safely get last message
                 const messages = ch.state?.messages || [];
                 const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
                 const unreadCount = ch.countUnread?.() || 0;
@@ -514,7 +573,7 @@ export default function StreamChatPopover() {
               <Button
                 fullWidth
                 variant="contained"
-                startIcon={<AccountCircle />}
+                startIcon={<ChatIcon />}
                 onClick={() => setNewChatOpen(true)}
               >
                 New Chat
@@ -566,7 +625,7 @@ export default function StreamChatPopover() {
                     >
                       <CircularProgress />
                     </Box>
-                  ) : channel && messages.length > 0 ? (
+                  ) : messages.length > 0 ? (
                     <Box>
                       {messages.map((msg) => {
                         const fileAttachment = msg.attachments?.[0];
@@ -638,7 +697,6 @@ export default function StreamChatPopover() {
                             }],
                           });
 
-                          // Clear the input
                           e.target.value = '';
                         } catch (error) {
                           console.error('Error uploading file:', error);
@@ -652,7 +710,7 @@ export default function StreamChatPopover() {
                       onClick={() => document.getElementById('chat-file-input')?.click()}
                       disabled={loading}
                     >
-                      <AttachFile />
+                      <AttachFileIcon />
                     </IconButton>
                     <TextField
                       fullWidth
@@ -672,7 +730,7 @@ export default function StreamChatPopover() {
                       onClick={handleSendMessage}
                       disabled={!message.trim() || loading}
                     >
-                      <Send />
+                      <SendIcon />
                     </IconButton>
                   </Box>
                 </Box>
@@ -689,7 +747,7 @@ export default function StreamChatPopover() {
                   textAlign: 'center',
                 }}
               >
-                <AccountCircle sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                <ChatIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
                 <Typography variant="h6" color="text.secondary">
                   Select a chat or start a new one
                 </Typography>
@@ -705,9 +763,8 @@ export default function StreamChatPopover() {
       <NewChatDialog
         open={newChatOpen}
         onClose={() => setNewChatOpen(false)}
-        onSelectEmployee={createChannel}
-        currentUserEmail={user?.email || ''}
+        onSelect={handleEmployeeSelect}
       />
-    </>
+    </Box>
   );
 }

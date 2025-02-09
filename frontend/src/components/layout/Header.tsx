@@ -26,7 +26,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSnackbar } from '@/contexts/SnackbarContext';
 import { motion } from 'framer-motion';
 import { MiniCalendar } from '@/components/calendar/MiniCalendar';
-import { Chat as ChatIcon } from '@mui/icons-material';
 
 interface HeaderProps {
   onDrawerToggle?: () => void;
@@ -185,6 +184,7 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
         </Box>
 
         <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+          <MiniCalendar userId={user?.uid || ''} />
           {userRole && (
             <Box
               sx={{
@@ -205,12 +205,11 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
                   theme.palette.info.main,
               }}
             >
-              {userRole === 'HR0' ? 'HR Admin' : 
-               userRole === 'manager' ? 'Manager' : 
+              {userRole === 'HR0' ? 'HR Admin' :
+               userRole === 'manager' ? 'Manager' :
                'Employee'}
             </Box>
           )}
-          <MiniCalendar userId={user?.uid || ''} />
 
           <IconButton
             onClick={handleMenuOpen}
