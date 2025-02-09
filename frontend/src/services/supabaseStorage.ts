@@ -122,3 +122,34 @@ export const deleteEmployeePhoto = async (photoUrl: string) => {
     throw new StorageError('Failed to delete photo. Please try again.');
   }
 };
+
+export const uploadChatFile = async (file: File, userId: string) => {
+  try {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
+    const filePath = `employees/${userId}/chat/${fileName}`;  // Store in employee's folder
+
+    const { data, error } = await supabase.storage
+      .from('documents')  // Using the existing documents bucket
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true
+      });
+
+    if (error) throw error;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('documents')
+      .getPublicUrl(filePath);
+
+    return {
+      url: publicUrl,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+    };
+  } catch (error) {
+    console.error('Error uploading file:', error);
+    throw error;
+  }
+};

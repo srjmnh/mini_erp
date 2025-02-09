@@ -55,6 +55,7 @@ interface FileItem {
   created_at: string;
   updated_at: string;
   created_by?: string;
+  isFolder?: boolean;
 }
 
 const formatFileSize = (size: number) => {
@@ -109,41 +110,84 @@ export default function DocumentsPage() {
     }
   }, [currentPath]);
 
-  const fetchFiles = async () => {
-    if (currentPath.length === 0) return;
+  useEffect(() => {
+    if (currentPath.length === 0 && !currentSection) {
+      fetchFiles();
+    }
+  }, [currentPath, currentSection]);
 
+  const fetchFiles = async () => {
     try {
       setLoading(true);
-      const folderPath = currentPath.join('/');
+      let folderPath = '';
+
+      if (currentPath.length === 0) {
+        // Fetch from root/general directory
+        folderPath = 'general';
+      } else {
+        // Join the path parts correctly
+        folderPath = currentPath.join('/');
+      }
       
-      // First sync storage with database
-      await syncStorageWithDatabase(folderPath);
+      console.log('Fetching files from path:', folderPath);
+      console.log('Current path state:', { currentPath, currentSection });
 
-      // Get files from database
-      const { data: dbFiles, error: dbError } = await supabase
-        .from('files')
-        .select('*')
-        .eq('folder_path', folderPath);
+      // Get files from storage to identify folders
+      const { data: storageItems, error: storageError } = await supabase.storage
+        .from('documents')
+        .list(folderPath);
 
-      if (dbError) throw dbError;
+      if (storageError) {
+        console.error('Storage error:', storageError);
+        throw storageError;
+      }
 
-      console.log('Files from database:', dbFiles);
+      console.log('Raw storage items:', storageItems);
 
-      // Get storage URLs for each file
-      const filesWithUrls = await Promise.all(
-        (dbFiles || []).map(async (file) => {
-          const { data: { publicUrl } } = supabase.storage
-            .from('documents')
-            .getPublicUrl(file.storage_path);
-
-          return {
-            ...file,
-            url: publicUrl
-          };
-        })
+      // First, identify all folders by looking for .folder files
+      const folderNames = new Set(
+        (storageItems || [])
+          .filter(item => item.name.endsWith('.folder'))
+          .map(item => item.name.replace('.folder', ''))
       );
 
-      setFiles(filesWithUrls);
+      console.log('Identified folders:', folderNames);
+
+      // Then process all items, marking them as folders if their name matches a folder
+      const processedItems = (storageItems || [])
+        .filter(item => !item.name.endsWith('.folder')) // Filter out .folder files
+        .map(item => {
+          const isFolder = folderNames.has(item.name);
+          return {
+            id: item.id,
+            name: item.name,
+            type: isFolder ? 'folder' : (item.metadata?.mimetype || 'application/octet-stream'),
+            size: isFolder ? 0 : (item.metadata?.size || 0),
+            path: `${folderPath}/${item.name}`,
+            created_at: item.created_at,
+            updated_at: item.created_at,
+            isFolder
+          };
+        });
+
+      // Add folders that don't have any files yet
+      folderNames.forEach(folderName => {
+        if (!processedItems.some(item => item.name === folderName)) {
+          processedItems.push({
+            id: folderName,
+            name: folderName,
+            type: 'folder',
+            size: 0,
+            path: `${folderPath}/${folderName}`,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            isFolder: true
+          });
+        }
+      });
+
+      console.log('Final processed items:', processedItems);
+      setFiles(processedItems);
     } catch (error) {
       console.error('Error fetching files:', error);
       showSnackbar('Failed to fetch files', 'error');
@@ -152,21 +196,31 @@ export default function DocumentsPage() {
     }
   };
 
-  const handleFolderClick = async (sectionId: string, itemId: string) => {
-    setCurrentSection(sectionId);
-    const newPath = [...currentPath, `${sectionId}/${itemId}`];
-    setCurrentPath(newPath);
+  const handleFolderClick = async (sectionId: string | null, itemId: string) => {
+    console.log('Folder click:', { sectionId, itemId, currentPath });
+    
+    if (currentPath.length === 0) {
+      // Clicking folder in root directory
+      setCurrentSection('custom');
+      setCurrentPath(['general', itemId]);
+    } else {
+      setCurrentSection(sectionId);
+      setCurrentPath([...currentPath, itemId]);
+    }
+
+    console.log('New path:', [...currentPath, itemId]);
     await fetchFiles();
   };
 
-  const handleBack = () => {
+  const handleBack = async () => {
+    console.log('Going back from:', currentPath);
     if (currentPath.length > 0) {
       const newPath = currentPath.slice(0, -1);
       setCurrentPath(newPath);
       if (newPath.length === 0) {
         setCurrentSection(null);
       }
-      fetchFiles();
+      await fetchFiles();
     }
   };
 
@@ -303,9 +357,13 @@ export default function DocumentsPage() {
       );
     }
 
+    console.log('Rendering files:', files);
+
     return (
       <Grid container spacing={2}>
-        {files.map((file) => (
+        {files.map((file) => {
+          console.log('Rendering file:', file);
+          return (
           <Grid item xs={12} sm={6} md={4} key={file.id}>
             <Card
               variant="outlined"
@@ -326,43 +384,58 @@ export default function DocumentsPage() {
                       color: theme.palette.primary.main,
                     }}
                   >
-                    {getFileIcon(file.type)}
+                    {file.isFolder ? <FolderIcon /> : getFileIcon(file.type)}
                   </Avatar>
                   <Box sx={{ flex: 1 }}>
                     <Typography variant="subtitle1" noWrap>
                       {file.name}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {formatFileSize(file.size)}
+                      {file.isFolder ? 'Folder' : formatFileSize(file.size)}
                     </Typography>
                   </Box>
                   <Stack direction="row" spacing={1}>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleDownload(file)}
-                      sx={{
-                        bgcolor: alpha(theme.palette.primary.main, 0.1),
-                        color: theme.palette.primary.main,
-                      }}
-                    >
-                      <DownloadIcon />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleDelete(file)}
-                      sx={{
-                        bgcolor: alpha(theme.palette.error.main, 0.1),
-                        color: theme.palette.error.main,
-                      }}
-                    >
-                      <DeleteIcon />
-                    </IconButton>
+                    {file.isFolder ? (
+                      <IconButton
+                        size="small"
+                        onClick={() => handleFolderClick(currentSection || 'custom', file.name)}
+                        sx={{
+                          bgcolor: alpha(theme.palette.primary.main, 0.1),
+                          color: theme.palette.primary.main,
+                        }}
+                      >
+                        <ArrowForwardIcon />
+                      </IconButton>
+                    ) : (
+                      <>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDownload(file)}
+                          sx={{
+                            bgcolor: alpha(theme.palette.primary.main, 0.1),
+                            color: theme.palette.primary.main,
+                          }}
+                        >
+                          <DownloadIcon />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDelete(file)}
+                          sx={{
+                            bgcolor: alpha(theme.palette.error.main, 0.1),
+                            color: theme.palette.error.main,
+                          }}
+                        >
+                          <DeleteIcon />
+                        </IconButton>
+                      </>
+                    )}
                   </Stack>
                 </Stack>
               </CardContent>
             </Card>
           </Grid>
-        ))}
+        )})}
       </Grid>
     );
   };
@@ -399,6 +472,7 @@ export default function DocumentsPage() {
 
   const renderContent = () => {
     if (currentPath.length === 0) {
+      // Root view (sections)
       return (
         <Grid container spacing={3}>
           {sections.map((section) => (
@@ -425,9 +499,85 @@ export default function DocumentsPage() {
 
                     <Divider />
 
-                    {/* Section Items */}
+                    {/* Section Content */}
                     <Grid container spacing={2}>
-                      {section.items.map((item) => (
+                      {/* Show files and folders for General Files section */}
+                      {section.id === 'custom' && files.map((file) => (
+                        <Grid item xs={12} sm={6} md={4} key={file.id}>
+                          <Card
+                            variant="outlined"
+                            sx={{
+                              cursor: 'pointer',
+                              '&:hover': {
+                                borderColor: section.color,
+                                transform: 'translateY(-2px)',
+                                transition: 'all 0.2s',
+                              },
+                            }}
+                          >
+                            <CardContent>
+                              <Stack direction="row" spacing={2} alignItems="center">
+                                <Avatar
+                                  sx={{
+                                    bgcolor: alpha(section.color, 0.1),
+                                    color: section.color,
+                                  }}
+                                >
+                                  {file.isFolder ? <FolderIcon /> : getFileIcon(file.type)}
+                                </Avatar>
+                                <Box sx={{ flex: 1 }}>
+                                  <Typography variant="subtitle1" noWrap>
+                                    {file.name}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {file.isFolder ? 'Folder' : formatFileSize(file.size)}
+                                  </Typography>
+                                </Box>
+                                <Stack direction="row" spacing={1}>
+                                  {file.isFolder ? (
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => handleFolderClick('custom', file.name)}
+                                      sx={{
+                                        bgcolor: alpha(section.color, 0.1),
+                                        color: section.color,
+                                      }}
+                                    >
+                                      <ArrowForwardIcon />
+                                    </IconButton>
+                                  ) : (
+                                    <>
+                                      <IconButton
+                                        size="small"
+                                        onClick={() => handleDownload(file)}
+                                        sx={{
+                                          bgcolor: alpha(section.color, 0.1),
+                                          color: section.color,
+                                        }}
+                                      >
+                                        <DownloadIcon />
+                                      </IconButton>
+                                      <IconButton
+                                        size="small"
+                                        onClick={() => handleDelete(file)}
+                                        sx={{
+                                          bgcolor: alpha(theme.palette.error.main, 0.1),
+                                          color: theme.palette.error.main,
+                                        }}
+                                      >
+                                        <DeleteIcon />
+                                      </IconButton>
+                                    </>
+                                  )}
+                                </Stack>
+                              </Stack>
+                            </CardContent>
+                          </Card>
+                        </Grid>
+                      ))}
+
+                      {/* Show section items for other sections */}
+                      {section.id !== 'custom' && section.items.map((item) => (
                         <Grid item xs={12} sm={6} md={4} key={item.id}>
                           <Card
                             variant="outlined"
@@ -442,24 +592,22 @@ export default function DocumentsPage() {
                             onClick={() => handleFolderClick(section.id, item.id)}
                           >
                             <CardContent>
-                              <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2}>
-                                <Stack direction="row" spacing={2} alignItems="center">
+                              <Stack direction="row" spacing={2} alignItems="center">
+                                <Avatar sx={{ bgcolor: alpha(section.color, 0.1), color: section.color }}>
                                   {item.photoUrl ? (
-                                    <Avatar src={item.photoUrl} />
+                                    <img src={item.photoUrl} alt={item.name} style={{ width: '100%', height: '100%' }} />
                                   ) : (
-                                    <Avatar sx={{ bgcolor: alpha(section.color, 0.1), color: section.color }}>
-                                      <FolderIcon />
-                                    </Avatar>
+                                    <FolderIcon />
                                   )}
-                                  <Box>
-                                    <Typography variant="subtitle1" noWrap>
-                                      {item.name}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                      {item.documentCount ?? 0} document{(item.documentCount === 1 ? '' : 's')}
-                                    </Typography>
-                                  </Box>
-                                </Stack>
+                                </Avatar>
+                                <Box sx={{ flex: 1 }}>
+                                  <Typography variant="subtitle1" noWrap>
+                                    {item.name}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {item.documentCount} documents
+                                  </Typography>
+                                </Box>
                                 <IconButton
                                   size="small"
                                   sx={{
@@ -515,18 +663,26 @@ export default function DocumentsPage() {
           ))}
         </Grid>
       );
-    }
+    } else {
+      // Inside a folder view
+      return (
+        <>
+          {/* Back button and current path */}
+          <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
+            <Button
+              variant="outlined"
+              startIcon={<ArrowBackIcon />}
+              onClick={handleBack}
+            >
+              Back
+            </Button>
+            <Typography variant="subtitle1" color="text.secondary">
+              {currentPath.join(' / ')}
+            </Typography>
+          </Stack>
 
-    // Get current section and item
-    const [sectionId, itemId] = currentPath[currentPath.length - 1].split('/');
-    const section = sections.find(s => s.id === sectionId);
-    const item = section?.items.find(i => i.id === itemId);
-    
-    return (
-      <>
-        <Stack direction="row" spacing={2} sx={{ mb: 3 }}>
-          {/* Show New Folder button only in department and employee folders */}
-          {item?.allowNewFolders && (
+          {/* Action buttons */}
+          <Stack direction="row" spacing={2} sx={{ mb: 3 }}>
             <Button
               variant="outlined"
               startIcon={<NewFolderIcon />}
@@ -534,19 +690,20 @@ export default function DocumentsPage() {
             >
               New Folder
             </Button>
-          )}
-          <Button
-            variant="contained"
-            startIcon={<UploadIcon />}
-            onClick={() => setOpenUpload(true)}
-          >
-            Upload Files
-          </Button>
-        </Stack>
-        
-        {renderFileGrid()}
-      </>
-    );
+            <Button
+              variant="contained"
+              startIcon={<UploadIcon />}
+              onClick={() => setOpenUpload(true)}
+            >
+              Upload Files
+            </Button>
+          </Stack>
+
+          {/* Files and folders grid */}
+          {renderFileGrid()}
+        </>
+      );
+    }
   };
 
   const handleCreateFolder = async () => {
@@ -558,36 +715,55 @@ export default function DocumentsPage() {
     try {
       setLoading(true);
       let folderPath = '';
-      let tableName = '';
 
-      if (currentSection === 'custom') {
-        tableName = 'custom_folders';
+      if (currentPath.length === 0) {
+        // Create general folder if it doesn't exist
+        try {
+          const { error: generalError } = await supabase.storage
+            .from('documents')
+            .upload('general/.folder', new Blob([''], { type: 'text/plain' }), {
+              upsert: true
+            });
+          console.log('General folder creation result:', generalError || 'success');
+        } catch (error) {
+          // Ignore error if folder already exists
+          console.log('General folder might already exist:', error);
+        }
+
+        // Now create the new folder inside general
+        folderPath = `general/${newFolderName}.folder`;
+      } else if (currentSection === 'custom') {
         folderPath = currentPath.length > 0 
-          ? `${currentPath.join('/')}/${newFolderName}`
-          : newFolderName;
+          ? `${currentPath.join('/')}/${newFolderName}.folder`
+          : `${newFolderName}.folder`;
       } else if (currentSection === 'departments') {
-        tableName = 'department_folders';
-        folderPath = `departments/${currentPath[0]}/${newFolderName}`;
+        folderPath = `departments/${currentPath[0]}/${newFolderName}.folder`;
       } else if (currentSection === 'employees') {
-        tableName = 'employee_folders';
-        folderPath = `employees/${currentPath[0]}/${newFolderName}`;
+        folderPath = `employees/${currentPath[0]}/${newFolderName}.folder`;
       }
 
-      const { error } = await supabase
-        .from(tableName)
-        .insert({
-          name: newFolderName,
-          path: folderPath,
-          parent_id: currentPath.length > 0 ? currentPath[currentPath.length - 1] : null,
-          created_by: user?.id
+      console.log('Creating folder at path:', folderPath);
+
+      // Create an empty .folder file to mark this as a folder
+      const { error } = await supabase.storage
+        .from('documents')
+        .upload(folderPath, new Blob([''], { type: 'text/plain' }), {
+          cacheControl: '3600',
+          upsert: true
         });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Folder creation error:', error);
+        throw error;
+      }
 
+      console.log('Folder created successfully');
       showSnackbar('Folder created successfully', 'success');
       setNewFolderName('');
       setOpenNewFolder(false);
-      fetchCustomFolders();
+      
+      // Refresh the current view
+      await fetchFiles();
     } catch (error) {
       console.error('Error creating folder:', error);
       showSnackbar('Failed to create folder', 'error');
