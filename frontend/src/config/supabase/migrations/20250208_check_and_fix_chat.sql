@@ -36,12 +36,13 @@ CREATE TABLE chat_messages (
     receiver_id TEXT NOT NULL,
     group_id UUID REFERENCES chat_groups(id) ON DELETE CASCADE,
     message_type TEXT NOT NULL DEFAULT 'direct' CHECK (message_type IN ('direct', 'group')),
+    read BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Restore old messages
-INSERT INTO chat_messages (id, content, sender_id, receiver_id, created_at, updated_at, message_type)
+INSERT INTO chat_messages (id, content, sender_id, receiver_id, created_at, updated_at, message_type, read)
 SELECT 
     id, 
     content, 
@@ -49,7 +50,11 @@ SELECT
     receiver_id, 
     created_at, 
     updated_at,
-    'direct' as message_type
+    'direct' as message_type,
+    CASE 
+        WHEN created_at < NOW() - INTERVAL '1 day' THEN TRUE 
+        ELSE FALSE 
+    END as read
 FROM chat_messages_backup;
 
 -- Drop backup table

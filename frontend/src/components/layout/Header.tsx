@@ -26,7 +26,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSnackbar } from '@/contexts/SnackbarContext';
 import { motion } from 'framer-motion';
 import { MiniCalendar } from '@/components/calendar/MiniCalendar';
-import ChatPopover from '@/components/chat/ChatPopover';
 import { Chat as ChatIcon } from '@mui/icons-material';
 
 interface HeaderProps {
@@ -271,7 +270,6 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
         </Menu>
       </Toolbar>
     </AppBar>
-    <ChatPopover />
     </>
   );
 }

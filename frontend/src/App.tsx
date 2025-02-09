@@ -29,6 +29,7 @@ import { SupabaseProvider } from './contexts/SupabaseContext';
 import { SnackbarProvider } from './contexts/SnackbarContext';
 import { ChatProvider } from './contexts/ChatContext';
 import theme from './theme';
+import StreamChatPopover from '@/components/chat/StreamChatPopover';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -45,50 +46,53 @@ function App() {
       <LocalizationProvider dateAdapter={AdapterDateFns}>
         <QueryClientProvider client={queryClient}>
           <SnackbarProvider>
-            <AuthProvider>
-              <SupabaseProvider>
-                <FirestoreProvider>
-                  <ProjectProvider>
-                    <ChatProvider>
-                      <CssBaseline />
-                      <Router>
-                        <Routes>
-                          {/* Public Routes */}
-                          <Route path="/login" element={<LoginPage />} />
-                          
-                          {/* Protected Routes */}
-                          <Route path="/" element={<RequireAuth><DashboardLayout /></RequireAuth>}>
-                            <Route index element={<Navigate to="/dashboard" replace />} />
-                            <Route path="dashboard" element={<DashboardPage />} />
-                            <Route path="projects" element={<ProjectsPage />} />
-                            <Route path="projects/:id" element={<ProjectDashboard />} />
-                            <Route path="employees" element={<EmployeesPage />} />
-                            <Route path="employees/:id" element={<EmployeeProfile />} />
-                            <Route path="departments" element={<DepartmentsPage />} />
-                            <Route path="departments/:id" element={<DepartmentDetailsPage />} />
-                            <Route path="documents" element={<DocumentsPage />} />
-                            <Route path="calendar" element={<CalendarPage />} />
-                            <Route path="requests" element={<RequestsPage />} />
-                            <Route path="hr" element={<Outlet />}>
-                              <Route index element={<HRDashboard />} />
-                              <Route path="time-off" element={<TimeOff />} />
-                              <Route path="expenses" element={<ExpensePage />} />
-                              <Route path="payroll" element={<PayrollPage />} />
-                              <Route path="performance" element={<PerformancePage />} />
-                              <Route path="roles" element={<RoleConfigurationPage />} />
+            <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+              <AuthProvider>
+                <SupabaseProvider>
+                  <FirestoreProvider>
+                    <ProjectProvider>
+                      <ChatProvider>
+                        <CssBaseline />
+                        <Router>
+                          <Routes>
+                            {/* Public Routes */}
+                            <Route path="/login" element={<LoginPage />} />
+                            
+                            {/* Protected Routes */}
+                            <Route path="/" element={<RequireAuth><DashboardLayout /></RequireAuth>}>
+                              <Route index element={<Navigate to="/dashboard" replace />} />
+                              <Route path="dashboard" element={<DashboardPage />} />
+                              <Route path="projects" element={<ProjectsPage />} />
+                              <Route path="projects/:id" element={<ProjectDashboard />} />
+                              <Route path="employees" element={<EmployeesPage />} />
+                              <Route path="employees/:id" element={<EmployeeProfile />} />
+                              <Route path="departments" element={<DepartmentsPage />} />
+                              <Route path="departments/:id" element={<DepartmentDetailsPage />} />
+                              <Route path="documents" element={<DocumentsPage />} />
+                              <Route path="calendar" element={<CalendarPage />} />
+                              <Route path="requests" element={<RequestsPage />} />
+                              <Route path="hr" element={<Outlet />}>
+                                <Route index element={<HRDashboard />} />
+                                <Route path="time-off" element={<TimeOff />} />
+                                <Route path="expenses" element={<ExpensePage />} />
+                                <Route path="payroll" element={<PayrollPage />} />
+                                <Route path="performance" element={<PerformancePage />} />
+                                <Route path="roles" element={<RoleConfigurationPage />} />
+                              </Route>
+                              <Route path="settings" element={<SettingsPage />} />
                             </Route>
-                            <Route path="settings" element={<SettingsPage />} />
-                          </Route>
 
-                          {/* Redirect all other routes to dashboard */}
-                          <Route path="*" element={<Navigate to="/dashboard" replace />} />
-                        </Routes>
-                      </Router>
-                    </ChatProvider>
-                  </ProjectProvider>
-                </FirestoreProvider>
-              </SupabaseProvider>
-            </AuthProvider>
+                            {/* Redirect all other routes to dashboard */}
+                            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                          </Routes>
+                        </Router>
+                        <StreamChatPopover />
+                      </ChatProvider>
+                    </ProjectProvider>
+                  </FirestoreProvider>
+                </SupabaseProvider>
+              </AuthProvider>
+            </Box>
           </SnackbarProvider>
         </QueryClientProvider>
       </LocalizationProvider>

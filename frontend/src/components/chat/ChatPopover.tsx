@@ -1,29 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  Avatar,
+  Badge,
   Box,
-  Typography,
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
   IconButton,
-  Tabs,
-  Tab,
+  InputBase,
   List,
-  ListItemText,
   ListItemAvatar,
   ListItemButton,
-  Avatar,
-  Stack,
-  Divider,
-  Badge,
+  ListItemText,
   Paper,
-  InputBase,
   Popover,
-  useTheme,
-  alpha,
-  Autocomplete,
-  Button,
+  Stack,
   TextField,
-  CircularProgress,
-  Fade,
+  Typography,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
   Send as SendIcon,
   Search as SearchIcon,
@@ -32,6 +31,7 @@ import {
   Circle as CircleIcon,
   Chat as ChatIcon,
   Add as AddIcon,
+  Edit as EditIcon,
 } from '@mui/icons-material';
 import { motion, AnimatePresence } from 'framer-motion';
 import ChatNotification from './ChatNotification';
@@ -41,7 +41,6 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import CreateGroupDialog from './CreateGroupDialog';
 import NewMessageDialog from './NewMessageDialog';
-import EditIcon from '@mui/icons-material/Edit';
 
 interface Employee {
   id: string;
@@ -52,6 +51,7 @@ interface Employee {
   avatar_url?: string;
   department_id: string;
   role: string;
+  position?: string;
   online?: boolean;
 
   // Helper function to get display name
@@ -76,6 +76,7 @@ interface Message {
   created_at: string;
   group_id?: string;
   message_type: 'direct' | 'group';
+  read: boolean;
 }
 
 export default function ChatPopover() {
@@ -107,44 +108,67 @@ export default function ChatPopover() {
       if (!user?.email) return;
 
       try {
-        // Get latest messages for each chat
-        const { data: latestMessages } = await supabaseAdmin
+        // Get all messages to find unique chat participants
+        const { data: allMessages } = await supabaseAdmin
           .from('chat_messages')
           .select('*')
           .or(`sender_id.eq.${user.email},receiver_id.eq.${user.email}`)
           .order('created_at', { ascending: false });
 
-        // Process latest messages
-        const chatEmails = new Set<string>();
-        const lastMsgs: {[key: string]: { content: string; timestamp: string }} = {};
-        const unread: {[key: string]: number} = {};
+        if (!allMessages) return;
 
-        latestMessages?.forEach(msg => {
+        // Process messages to find unique chats and last messages
+        const chatParticipants = new Set<string>();
+        const lastMsgs: { [key: string]: { content: string; timestamp: string } } = {};
+        const unread: { [key: string]: number } = {};
+
+        allMessages.forEach(msg => {
           const otherParty = msg.sender_id === user.email ? msg.receiver_id : msg.sender_id;
-          const chatId = msg.group_id || otherParty;
+          
+          // Skip AI assistant messages for now
+          if (otherParty === 'ai-assistant') return;
 
-          // Track unique chat participants
-          if (!msg.group_id) {
-            chatEmails.add(otherParty);
-          }
+          // Add to unique participants
+          chatParticipants.add(otherParty);
 
-          // Track last message for each chat
-          if (!lastMsgs[chatId] || new Date(msg.created_at) > new Date(lastMsgs[chatId].timestamp)) {
-            lastMsgs[chatId] = {
+          // Track last message
+          if (!lastMsgs[otherParty] || new Date(msg.created_at) > new Date(lastMsgs[otherParty].timestamp)) {
+            lastMsgs[otherParty] = {
               content: msg.content,
               timestamp: msg.created_at
             };
           }
 
-          // Count unread messages
-          if (msg.sender_id !== user.email && !msg.read) {
-            unread[chatId] = (unread[chatId] || 0) + 1;
+          // Track unread messages (messages where user is receiver and haven't been read)
+          if (msg.receiver_id === user.email && !msg.read) {
+            unread[otherParty] = (unread[otherParty] || 0) + 1;
           }
         });
 
-        setLastMessages(lastMsgs);
-        setUnreadMessages(unread);
+        // Fetch employee details from Firebase
+        const employeesRef = collection(db, 'employees');
+        const employeesSnapshot = await getDocs(employeesRef);
+        const employeeData = employeesSnapshot.docs
+          .map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              ...data,
+              getDisplayName: () => {
+                if (data.first_name && data.last_name) {
+                  return `${data.first_name} ${data.last_name}`;
+                }
+                return data.email.split('@')[0];
+              }
+            };
+          })
+          .filter(emp => chatParticipants.has(emp.email));
 
+        if (employeeData) {
+          setEmployees(employeeData);
+        }
+
+        let groupData: Group[] = [];
         // Get all groups the user is a member of
         const { data: userGroups } = await supabaseAdmin
           .from('chat_group_members')
@@ -152,27 +176,54 @@ export default function ChatPopover() {
           .eq('user_id', user.email);
 
         if (userGroups?.length) {
-          const { data: groupData } = await supabaseAdmin
+          const { data: fetchedGroups } = await supabaseAdmin
             .from('chat_groups')
             .select('*')
             .in('id', userGroups.map(g => g.group_id));
-          
-          setGroups(groupData || []);
+
+          if (fetchedGroups) {
+            groupData = fetchedGroups;
+            setGroups(fetchedGroups);
+            
+            // Add group messages to last messages and unread counts
+            fetchedGroups.forEach(group => {
+              const groupMessages = allMessages.filter(msg => msg.group_id === group.id);
+              if (groupMessages.length > 0) {
+                const lastGroupMsg = groupMessages[0];
+                lastMsgs[group.id] = {
+                  content: lastGroupMsg.content,
+                  timestamp: lastGroupMsg.created_at
+                };
+
+                // Count unread group messages
+                const unreadGroupMsgs = groupMessages.filter(
+                  msg => msg.sender_id !== user.email && !msg.read
+                ).length;
+                if (unreadGroupMsgs > 0) {
+                  unread[group.id] = unreadGroupMsgs;
+                }
+              }
+            });
+          }
         }
 
-        // Combine active chats
-        const activeEmployees = employees.filter(emp => chatEmails.has(emp.email));
-        const allChats = [AI_ASSISTANT, ...activeEmployees, ...(groupData || [])];
-        
-        // Sort chats by last message and unread count
+        setLastMessages(lastMsgs);
+        setUnreadMessages(unread);
+
+        // Combine and sort active chats
+        const activeEmployees = employeeData || [];
+        const activeGroups = groupData || [];
+        const allChats = [...activeEmployees, ...activeGroups];
+
+        // Sort by last message time and unread count
         allChats.sort((a, b) => {
-          const aId = 'role' in a ? a.email : a.id;
-          const bId = 'role' in b ? b.email : b.id;
-          
+          const aId = 'email' in a ? a.email : a.id;
+          const bId = 'email' in b ? b.email : b.id;
+
           // Sort by unread first
           const unreadDiff = (unread[bId] || 0) - (unread[aId] || 0);
           if (unreadDiff !== 0) return unreadDiff;
-          
+
           // Then by last message time
           const aTime = lastMsgs[aId]?.timestamp;
           const bTime = lastMsgs[bId]?.timestamp;
@@ -231,7 +282,58 @@ export default function ChatPopover() {
     return () => {
       channel.unsubscribe();
     };
-  }, [user?.email, employees]);
+  }, [user?.email]);
+
+  // Fetch messages when a chat is selected
+  const fetchMessages = async (chatId: string, isGroup: boolean) => {
+    try {
+      const { data: messages } = await supabaseAdmin
+        .from('chat_messages')
+        .select('*')
+        .or(
+          isGroup 
+            ? `group_id.eq.${chatId}`
+            : `and(sender_id.eq.${user?.email},receiver_id.eq.${chatId}),and(sender_id.eq.${chatId},receiver_id.eq.${user?.email})`
+        )
+        .order('created_at', { ascending: true });
+
+      if (messages) {
+        setMessages(messages);
+        // Mark messages as read
+        const unreadMessages = messages.filter(
+          msg => msg.receiver_id === user?.email && !msg.read
+        );
+        if (unreadMessages.length > 0) {
+          await supabaseAdmin
+            .from('chat_messages')
+            .update({ read: true })
+            .in('id', unreadMessages.map(msg => msg.id));
+          
+          // Update unread count
+          setUnreadMessages(prev => ({
+            ...prev,
+            [chatId]: 0
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching messages:', error);
+    }
+  };
+
+  // Update chat selection handlers
+  const handleChatSelect = async (chat: Employee | Group) => {
+    const isEmployee = 'email' in chat;
+    if (isEmployee) {
+      setSelectedEmployee(chat);
+      setSelectedGroup(null);
+      await fetchMessages(chat.email, false);
+    } else {
+      setSelectedGroup(chat);
+      setSelectedEmployee(null);
+      await fetchMessages(chat.id, true);
+    }
+  };
 
   // Add AI Assistant to employees list
   const AI_ASSISTANT: Employee = {
@@ -420,306 +522,211 @@ export default function ChatPopover() {
     }
   }, [selectedEmployee, selectedGroup]);
 
-  // Fetch messages when employee or group is selected
-  useEffect(() => {
-    if ((!selectedEmployee && !selectedGroup) || !user?.email) return;
-
-    const fetchMessages = async () => {
-      setLoading(true);
-      try {
-        let query = supabaseAdmin
-          .from('chat_messages')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (selectedGroup) {
-          // Fetch group messages
-          query = query
-            .eq('group_id', selectedGroup.id)
-            .eq('message_type', 'group');
-        } else if (selectedEmployee) {
-          // Fetch direct messages
-          query = query
-            .eq('message_type', 'direct')
-            .or(
-              `and(sender_id.eq.${user.email},receiver_id.eq.${selectedEmployee.email}),` +
-              `and(sender_id.eq.${selectedEmployee.email},receiver_id.eq.${user.email})`
-            );
-        }
-
-        const { data: messages, error } = await query;
-
-        if (error) throw error;
-        setMessages(messages || []);
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      } catch (error) {
-        console.error('Error fetching messages:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchMessages();
-
-    // Subscribe to new messages and groups
-    const channel = supabase
-      .channel('chat')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'chat_messages'
-        },
-        (payload) => {
-          const newMessage = payload.new as Message;
-          console.log('New message received:', newMessage);
-          
-          // Check if message belongs to current conversation
-          let belongsToCurrentChat = false;
-          let chatId = '';
-          
-          if (selectedGroup) {
-            belongsToCurrentChat = newMessage.group_id === selectedGroup.id;
-            chatId = selectedGroup.id;
-          } else if (selectedEmployee) {
-            belongsToCurrentChat = (
-              (newMessage.sender_id === selectedEmployee.email && newMessage.receiver_id === user.email) ||
-              (newMessage.sender_id === user.email && newMessage.receiver_id === selectedEmployee.email) ||
-              newMessage.sender_id === 'ai-assistant' || 
-              newMessage.receiver_id === 'ai-assistant'
-            );
-            chatId = selectedEmployee.email;
+  // Update renderChatList to use handleChatSelect
+  const renderChatList = () => {
+    return activeChats.map((chat) => {
+      const isEmployee = 'email' in chat;
+      const chatId = isEmployee ? chat.email : chat.id;
+      const unreadCount = unreadMessages[chatId] || 0;
+      
+      return (
+        <ListItemButton
+          key={chatId}
+          selected={
+            isEmployee
+              ? selectedEmployee?.email === chat.email
+              : selectedGroup?.id === chat.id
           }
-
-          // Update last message and unread count
-          const messageChat = newMessage.group_id || (
-            newMessage.sender_id === user?.email ? newMessage.receiver_id : newMessage.sender_id
-          );
-          
-          // Update last message for the chat
-          setLastMessages(prev => ({
-            ...prev,
-            [messageChat]: {
-              content: newMessage.content,
-              timestamp: newMessage.created_at
-            }
-          }));
-
-          // Update unread count if message is not from current user
-          if (newMessage.sender_id !== user?.email && !belongsToCurrentChat) {
-            setUnreadMessages(prev => ({
-              ...prev,
-              [messageChat]: (prev[messageChat] || 0) + 1
-            }));
-          }
-
-          if (belongsToCurrentChat) {
-            console.log('Adding message to chat:', newMessage);
-            setMessages(prev => [newMessage, ...prev]);
-            if (newMessage.sender_id !== user.email) {
-              // Show notification
-              const sender = employees.find(e => e.email === newMessage.sender_id);
-              const group = newMessage.group_id ? groups.find(g => g.id === newMessage.group_id) : undefined;
-              setNotification({
-                open: true,
-                message: newMessage,
-              });
-            }
-            // Scroll to new message
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'chat_groups'
-        },
-        () => {
-          // Refresh groups when changes occur
-          if (user?.email) {
-            const fetchGroups = async () => {
-              const { data: userGroups } = await supabaseAdmin
-                .from('chat_group_members')
-                .select('group_id')
-                .eq('user_id', user.email);
-
-              if (userGroups?.length) {
-                const { data: groups } = await supabaseAdmin
-                  .from('chat_groups')
-                  .select('*')
-                  .in('id', userGroups.map(g => g.group_id));
-                
-                if (groups) {
-                  setGroups(groups);
-                  // If no group is selected, select the first one
-                  if (!selectedGroup) {
-                    setSelectedGroup(groups[0]);
-                  }
+          onClick={() => handleChatSelect(chat)}
+        >
+          <ListItemAvatar>
+            <Badge
+              overlap="circular"
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              variant="dot"
+              color={chat.online ? 'success' : 'default'}
+            >
+              <Avatar src={chat.avatar_url}>
+                {isEmployee 
+                  ? (chat.first_name?.[0] || chat.email[0]).toUpperCase()
+                  : chat.name[0].toUpperCase()
                 }
-              }
-            };
-            fetchGroups();
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      channel.unsubscribe();
-    };
-  }, [selectedEmployee, user?.uid]);
-
-  const handleSendMessage = async () => {
-    if (!newMessage.trim() || !user?.email || (!selectedEmployee && !selectedGroup)) return;
-
-    try {
-      if (selectedEmployee?.id === 'ai-assistant') {
-        // Handle AI Assistant chat
-        const aiResponse = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: newMessage })
-        }).then(res => res.json());
-
-        // Add user message
-        const { error: userMsgError } = await supabaseAdmin.from('chat_messages').insert([
-          {
-            content: newMessage,
-            sender_id: user.email,
-            receiver_id: 'ai-assistant',
-            message_type: 'direct'
-          }
-        ]);
-
-        if (userMsgError) throw userMsgError;
-
-        // Add AI response
-        const { error: aiMsgError } = await supabaseAdmin.from('chat_messages').insert([
-          {
-            content: aiResponse.message || 'I\'m processing your request...',
-            sender_id: 'ai-assistant',
-            receiver_id: user.email,
-            message_type: 'direct'
-          }
-        ]);
-
-        if (aiMsgError) throw aiMsgError;
-      } else if (selectedGroup) {
-        // Handle group chat
-        const { error } = await supabaseAdmin
-          .from('chat_messages')
-          .insert([
-            {
-              content: newMessage,
-              sender_id: user.email,
-              receiver_id: selectedGroup.id, // For group messages, set receiver_id to group ID
-              group_id: selectedGroup.id,
-              message_type: 'group',
-              created_at: new Date().toISOString()
+              </Avatar>
+            </Badge>
+          </ListItemAvatar>
+          <ListItemText
+            primary={
+              <Box display="flex" justifyContent="space-between" alignItems="center">
+                <Typography variant="subtitle2" noWrap>
+                  {isEmployee ? chat.getDisplayName?.() : chat.name}
+                </Typography>
+                {unreadCount > 0 && (
+                  <Chip
+                    size="small"
+                    label={unreadCount}
+                    color="primary"
+                    sx={{ ml: 1, height: 20, minWidth: 20 }}
+                  />
+                )}
+              </Box>
             }
-          ]);
-
-        if (error) {
-          console.error('Error sending group message:', error);
-          throw error;
-        }
-        
-        // Log for debugging
-        console.log('Sent group message:', {
-          content: newMessage,
-          group: selectedGroup.name,
-          sender: user.email
-        });
-      } else if (selectedEmployee) {
-        // Handle regular employee chat
-        const { error } = await supabaseAdmin
-          .from('chat_messages')
-          .insert([
-            {
-              content: newMessage,
-              sender_id: user.email,
-              receiver_id: selectedEmployee.email,
-              message_type: 'direct'
+            secondary={
+              <Typography variant="caption" color="text.secondary" noWrap>
+                {isEmployee && chat.position}
+                {lastMessages[chatId]?.content && (
+                  <>
+                    {isEmployee && chat.position && ' • '}
+                    {lastMessages[chatId].content}
+                  </>
+                )}
+              </Typography>
             }
-          ]);
-
-        if (error) {
-          console.error('Error sending direct message:', error);
-          throw error;
-        }
-      }
-      setNewMessage('');
-    } catch (error) {
-      console.error('Error sending message:', error);
-    }
+          />
+        </ListItemButton>
+      );
+    });
   };
 
-  const handleClick = (event: React.MouseEvent<HTMLElement>) => {
-    setAnchorEl(event.currentTarget);
-    // Load the last selected chat
-    if (!selectedEmployee && !selectedGroup && groups.length > 0) {
-      const departmentGroup = groups.find(g => g.type === 'department');
-      if (departmentGroup) {
-        console.log('Auto-selecting department group:', departmentGroup);
-        setSelectedGroup(departmentGroup);
-      }
-    }
+  const renderChatHeader = () => {
+    if (!selectedEmployee && !selectedGroup) return null;
+
+    const chat = selectedEmployee || selectedGroup;
+    const isEmployee = 'email' in chat;
+
+    return (
+      <Box
+        sx={{
+          p: 2,
+          display: 'flex',
+          alignItems: 'center',
+          borderBottom: 1,
+          borderColor: 'divider',
+        }}
+      >
+        <Badge
+          overlap="circular"
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          variant="dot"
+          color={chat.online ? 'success' : 'default'}
+        >
+          <Avatar src={chat.avatar_url}>
+            {isEmployee 
+              ? (chat.first_name?.[0] || chat.email[0]).toUpperCase()
+              : chat.name[0].toUpperCase()
+            }
+          </Avatar>
+        </Badge>
+        <Box ml={2}>
+          <Typography variant="subtitle1">
+            {isEmployee ? chat.getDisplayName?.() : chat.name}
+          </Typography>
+          {isEmployee && chat.position && (
+            <Typography variant="caption" color="text.secondary">
+              {chat.position}
+            </Typography>
+          )}
+        </Box>
+      </Box>
+    );
   };
 
-  const handleClose = () => {
-    setAnchorEl(null);
-    setSelectedEmployee(null);
-  };
-
-  const open = Boolean(anchorEl);
-
-  // Calculate total unread count
-  const totalUnreadCount = Object.values(unreadMessages).reduce((sum, count) => sum + count, 0);
-
-  const handleCreateGroup = () => {
-    setCreateGroupOpen(true);
-  };
-
-  const handleGroupCreated = (newGroup: Group) => {
-    setGroups(prev => [...prev, newGroup]);
-    setSelectedGroup(newGroup);
-    setCreateGroupOpen(false);
-    
-    // Refresh groups list
-    if (user?.email) {
-      const fetchGroups = async () => {
-        const { data } = await supabaseAdmin
-          .from('chat_groups')
-          .select('*')
-          .eq('created_by', user.email);
-        setGroups(data || []);
-      };
-      fetchGroups();
-    }
+  const styles = {
+    searchInput: {
+      backgroundColor: theme.palette.background.paper,
+      border: `1px solid ${theme.palette.divider}`,
+      borderRadius: 1,
+      p: 1,
+      display: 'flex',
+      alignItems: 'center',
+      mb: 2,
+      '& .MuiInputBase-root': {
+        ml: 1,
+        flex: 1,
+      },
+      '& .MuiInputBase-input': {
+        padding: '2px 0',
+      },
+    },
+    chatList: {
+      maxHeight: 400,
+      overflowY: 'auto',
+      '&::-webkit-scrollbar': {
+        width: 6,
+      },
+      '&::-webkit-scrollbar-track': {
+        backgroundColor: theme.palette.background.paper,
+      },
+      '&::-webkit-scrollbar-thumb': {
+        backgroundColor: theme.palette.divider,
+        borderRadius: 3,
+      },
+    },
+    messageArea: {
+      flex: 1,
+      overflowY: 'auto',
+      p: 2,
+      '&::-webkit-scrollbar': {
+        width: 6,
+      },
+      '&::-webkit-scrollbar-track': {
+        backgroundColor: theme.palette.background.paper,
+      },
+      '&::-webkit-scrollbar-thumb': {
+        backgroundColor: theme.palette.divider,
+        borderRadius: 3,
+      },
+    },
+    message: {
+      backgroundColor: theme.palette.background.paper,
+      borderRadius: 1,
+      p: 1,
+      mb: 1,
+      maxWidth: '75%',
+      wordBreak: 'break-word',
+    },
+    sentMessage: {
+      backgroundColor: theme.palette.primary.main,
+      color: theme.palette.primary.contrastText,
+      alignSelf: 'flex-end',
+    },
+    receivedMessage: {
+      backgroundColor: theme.palette.background.default,
+      alignSelf: 'flex-start',
+    },
+    messageInput: {
+      p: 2,
+      backgroundColor: theme.palette.background.paper,
+      borderTop: `1px solid ${theme.palette.divider}`,
+    },
+    unreadBadge: {
+      backgroundColor: theme.palette.error.main,
+      color: theme.palette.error.contrastText,
+      px: 1,
+      py: 0.5,
+      borderRadius: 1,
+      fontSize: '0.7rem',
+      flexShrink: 0,
+    },
   };
 
   return (
     <>
       <IconButton
-        onClick={handleClick}
+        onClick={() => setAnchorEl(document.body)}
         sx={{
           position: 'fixed',
           bottom: 20,
-          right: 90, // Moved to the left to avoid overlapping with other buttons
-          bgcolor: 'primary.main',
+          right: 90, 
+          bgcolor: theme.palette.primary.main,
           color: 'white',
           '&:hover': {
-            bgcolor: 'primary.dark',
+            bgcolor: theme.palette.primary.dark,
           },
           boxShadow: 4,
         }}
       >
         <Badge
-          badgeContent={totalUnreadCount}
+          badgeContent={Object.values(unreadMessages).reduce((sum, count) => sum + count, 0)}
           color="error"
           overlap="circular"
           sx={{ '& .MuiBadge-badge': { right: -3, top: 3 } }}
@@ -729,9 +736,9 @@ export default function ChatPopover() {
       </IconButton>
 
       <Popover
-        open={open}
+        open={Boolean(anchorEl)}
         anchorEl={anchorEl}
-        onClose={handleClose}
+        onClose={() => setAnchorEl(null)}
         anchorOrigin={{
           vertical: 'top',
           horizontal: 'left',
@@ -742,7 +749,7 @@ export default function ChatPopover() {
         }}
         sx={{
           '& .MuiPopover-paper': {
-            width: 800,  // Increased width
+            width: 800,  
             height: 600,
             overflow: 'hidden',
             borderRadius: 2,
@@ -769,17 +776,17 @@ export default function ChatPopover() {
               borderColor: 'divider',
             }}
           >
-            <TextField
-              placeholder="Search chats..."
-              variant="outlined"
-              size="small"
-              fullWidth
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              InputProps={{
-                startAdornment: <SearchIcon color="action" sx={{ mr: 1 }} />,
-              }}
-            />
+            <Box sx={styles.searchInput}>
+              <SearchIcon color="action" sx={{ mr: 1 }} />
+              <InputBase
+                placeholder="Search chats..."
+                variant="outlined"
+                size="small"
+                fullWidth
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </Box>
           </Paper>
 
           {/* Active Chats List */}
@@ -788,7 +795,7 @@ export default function ChatPopover() {
               flex: 1,
               overflow: 'auto',
               '& .MuiListItemButton-root.active': {
-                bgcolor: (theme) => alpha(theme.palette.primary.main, 0.1),
+                bgcolor: theme.palette.primary.main,
               },
             }}
           >
@@ -828,7 +835,7 @@ export default function ChatPopover() {
                 className={selectedGroup?.id === group.id ? 'active' : ''}
               >
                 <ListItemAvatar>
-                  <Avatar sx={{ bgcolor: 'primary.main' }}>
+                  <Avatar sx={{ bgcolor: theme.palette.primary.main }}>
                     {group.name[0]}
                   </Avatar>
                 </ListItemAvatar>
@@ -855,7 +862,7 @@ export default function ChatPopover() {
                 className={selectedGroup?.id === group.id ? 'active' : ''}
               >
                 <ListItemAvatar>
-                  <Avatar sx={{ bgcolor: 'secondary.main' }}>
+                  <Avatar sx={{ bgcolor: theme.palette.secondary.main }}>
                     {group.name[0]}
                   </Avatar>
                 </ListItemAvatar>
@@ -871,115 +878,7 @@ export default function ChatPopover() {
             ))}
 
             {/* All Chats */}
-            {activeChats.map((chat) => {
-              const isEmployee = 'role' in chat;
-              const chatId = isEmployee ? chat.email : chat.id;
-              const hasUnread = unreadMessages[chatId] > 0;
-              
-              return (
-                <ListItemButton
-                  key={chatId}
-                  onClick={() => {
-                    if (isEmployee) {
-                      setSelectedEmployee(chat as Employee);
-                      setSelectedGroup(null);
-                    } else {
-                      setSelectedGroup(chat as Group);
-                      setSelectedEmployee(null);
-                    }
-                    setMessages([]);
-                    // Clear unread count
-                    if (hasUnread) {
-                      setUnreadMessages(prev => ({ ...prev, [chatId]: 0 }));
-                    }
-                  }}
-                  className={
-                    (isEmployee && selectedEmployee?.email === chatId) ||
-                    (!isEmployee && selectedGroup?.id === chatId)
-                      ? 'active'
-                      : ''
-                  }
-                >
-                  <ListItemAvatar>
-                    <Avatar 
-                      src={isEmployee ? (chat as Employee).avatar_url : undefined}
-                      sx={!isEmployee ? { bgcolor: 'primary.main' } : undefined}
-                    >
-                      {isEmployee 
-                        ? (chat as Employee).getDisplayName?.()[0]
-                        : (chat as Group).name[0]}
-                    </Avatar>
-                  </ListItemAvatar>
-                  <ListItemText
-                    primary={
-                      <Typography
-                        variant="subtitle2"
-                        sx={{ 
-                          fontWeight: hasUnread ? 700 : 400
-                        }}
-                      >
-                        {isEmployee 
-                          ? (chat as Employee).getDisplayName?.()
-                          : (chat as Group).name}
-                      </Typography>
-                    }
-                    secondary={
-                      <Stack spacing={0.5}>
-                        <Typography 
-                          variant="body2" 
-                          color="text.secondary"
-                          sx={{ fontSize: '0.75rem' }}
-                        >
-                          {isEmployee 
-                            ? (chat as Employee).role
-                            : `${(chat as Group).type} group`}
-                        </Typography>
-                        {lastMessages[chatId] && (
-                          <Box sx={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            justifyContent: 'space-between',
-                            gap: 1 
-                          }}>
-                            <Typography 
-                              variant="body2" 
-                              color="text.secondary"
-                              sx={{ 
-                                fontSize: '0.8rem',
-                                fontWeight: hasUnread ? 600 : 400,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                maxWidth: '150px'
-                              }}
-                            >
-                              {lastMessages[chatId].content}
-                            </Typography>
-                            {hasUnread && (
-                              <Typography
-                                variant="caption"
-                                sx={{
-                                  bgcolor: 'error.main',
-                                  color: 'error.contrastText',
-                                  px: 1,
-                                  py: 0.5,
-                                  borderRadius: 1,
-                                  fontSize: '0.7rem',
-                                  flexShrink: 0
-                                }}
-                              >
-                                {unreadMessages[chatId]}
-                              </Typography>
-                            )}
-                          </Box>
-                        )}
-                      </Stack>
-                    }
-                  />
-                </ListItemButton>
-              );
-            })}
-
+            {renderChatList()}
           </List>
 
           {/* Action Buttons */}
@@ -1005,7 +904,7 @@ export default function ChatPopover() {
             <Button
               fullWidth
               startIcon={<AddIcon />}
-              onClick={handleCreateGroup}
+              onClick={() => setCreateGroupOpen(true)}
               variant="contained"
               size="small"
             >
@@ -1016,40 +915,7 @@ export default function ChatPopover() {
         {/* Main Chat Area */}
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Chat Header */}
-          {(selectedEmployee || selectedGroup) && (
-            <Paper
-              elevation={0}
-              sx={{
-                p: 2,
-                borderBottom: 1,
-                borderColor: 'divider',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 2,
-              }}
-            >
-              <Avatar
-                src={selectedEmployee?.avatar_url}
-                sx={{
-                  width: 40,
-                  height: 40,
-                  bgcolor: selectedGroup ? 'primary.main' : undefined,
-                }}
-              >
-                {selectedEmployee ? selectedEmployee.getDisplayName?.()[0] : selectedGroup?.name?.[0]}
-              </Avatar>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="h6" sx={{ fontSize: '1.1rem' }}>
-                  {selectedEmployee ? selectedEmployee.getDisplayName?.() : selectedGroup?.name}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {selectedGroup 
-                    ? selectedGroup.description || `${selectedGroup.type} group`
-                    : selectedEmployee?.role}
-                </Typography>
-              </Box>
-            </Paper>
-          )}
+          {renderChatHeader()}
 
           {/* Messages Area */}
           <Box
@@ -1057,9 +923,9 @@ export default function ChatPopover() {
               flex: 1,
               overflow: 'auto',
               p: 2,
-              bgcolor: (theme) => alpha(theme.palette.primary.main, 0.02),
+              bgcolor: theme.palette.background.paper,
               display: 'flex',
-              flexDirection: 'column-reverse', // Reverse to show new messages at bottom
+              flexDirection: 'column-reverse', 
             }}
           >
             <div ref={messagesEndRef} />
@@ -1118,11 +984,11 @@ export default function ChatPopover() {
                             p: 1.5,
                             maxWidth: '60%',
                             bgcolor: message.sender_id === user?.email
-                              ? 'primary.main'
-                              : 'background.paper',
+                              ? theme.palette.primary.main
+                              : theme.palette.background.paper,
                             color: message.sender_id === user?.email
-                              ? 'primary.contrastText'
-                              : 'text.primary',
+                              ? theme.palette.primary.contrastText
+                              : theme.palette.text.primary,
                             borderRadius: 2,
                             borderTopLeftRadius: message.sender_id !== user?.email ? 0 : undefined,
                             borderTopRightRadius: message.sender_id === user?.email ? 0 : undefined,
@@ -1170,7 +1036,7 @@ export default function ChatPopover() {
                 p: 2,
                 borderTop: 1,
                 borderColor: 'divider',
-                bgcolor: 'background.paper',
+                bgcolor: theme.palette.background.paper,
               }}
             >
               <Stack direction="row" spacing={1} alignItems="flex-end">
@@ -1195,7 +1061,7 @@ export default function ChatPopover() {
                   }}
                   sx={{
                     flex: 1,
-                    bgcolor: (theme) => alpha(theme.palette.primary.main, 0.04),
+                    bgcolor: theme.palette.background.paper,
                     borderRadius: 2,
                     p: 1.5,
                     px: 2,
@@ -1206,15 +1072,13 @@ export default function ChatPopover() {
                   disabled={!newMessage.trim()}
                   color="primary"
                   sx={{
-                    bgcolor: (theme) =>
-                      newMessage.trim()
-                        ? alpha(theme.palette.primary.main, 0.1)
-                        : 'transparent',
+                    bgcolor: newMessage.trim()
+                      ? theme.palette.primary.main
+                      : 'transparent',
                     '&:hover': {
-                      bgcolor: (theme) =>
-                        newMessage.trim()
-                          ? alpha(theme.palette.primary.main, 0.2)
-                          : 'transparent',
+                      bgcolor: newMessage.trim()
+                        ? theme.palette.primary.dark
+                        : 'transparent',
                     },
                   }}
                 >
@@ -1232,7 +1096,22 @@ export default function ChatPopover() {
         onClose={() => setCreateGroupOpen(false)}
         employees={employees}
         currentUser={user?.email || ''}
-        onGroupCreated={handleGroupCreated}
+        onGroupCreated={(newGroup) => {
+          setGroups(prev => [...prev, newGroup]);
+          setSelectedGroup(newGroup);
+          setCreateGroupOpen(false);
+          // Refresh groups list
+          if (user?.email) {
+            const fetchGroups = async () => {
+              const { data } = await supabaseAdmin
+                .from('chat_groups')
+                .select('*')
+                .eq('created_by', user.email);
+              setGroups(data || []);
+            };
+            fetchGroups();
+          }
+        }}
       />
 
       {/* New Message Dialog */}
