@@ -9,10 +9,11 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@types/dotenv": "^6.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.1",
     "express": "^4.18.2",
-    "stream-chat": "^8.14.5"
+    "stream-chat": "^8.55.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

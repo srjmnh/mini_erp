@@ -28,15 +28,13 @@ interface Employee {
 interface NewChatDialogProps {
   open: boolean;
   onClose: () => void;
-  onSelectEmployee: (employee: Employee) => void;
-  currentUserEmail: string;
+  onSelect: (employee: Employee) => void;
 }
 
 export default function NewChatDialog({
   open,
   onClose,
-  onSelectEmployee,
-  currentUserEmail,
+  onSelect,
 }: NewChatDialogProps) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -58,7 +56,6 @@ export default function NewChatDialog({
   }, [open]);
 
   const filteredEmployees = employees.filter(emp => 
-    emp.email !== currentUserEmail && 
     (emp.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
      emp.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
      emp.position?.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -95,10 +92,7 @@ export default function NewChatDialog({
             <ListItem
               key={emp.id}
               button
-              onClick={() => {
-                onSelectEmployee(emp);
-                onClose();
-              }}
+              onClick={() => onSelect(emp)}
             >
               <ListItemAvatar>
                 <Avatar src={emp.photoURL}>

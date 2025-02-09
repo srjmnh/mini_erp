@@ -1,4 +1,13 @@
 # Environment variables
+# Temporarily allowing .env files
+# .env
+# .env.*
+!.env.example
+apis.txt
+**/credentials.*
+**/firebase-adminsdk*.json
+.firebase/
+firebase-debug.log
 
 # Python
 __pycache__/
@@ -60,16 +69,6 @@ dist/
 build/
 .DS_Store
 *.log
-
-# Environment variables and sensitive files
-.env
-.env.*
-!.env.example
-apis.txt
-**/credentials.*
-**/firebase-adminsdk*.json
-.firebase/
-firebase-debug.log
 
 # OS files
 .DS_Store

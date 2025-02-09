@@ -1,8 +1,12 @@
 import { StreamChat } from 'stream-chat';
 
+if (!process.env.STREAM_API_KEY || !process.env.STREAM_API_SECRET) {
+  throw new Error('Stream Chat API key and secret are required');
+}
+
 const streamChat = new StreamChat(
-  'dvgdy83wzzx2',
-  'qch5rx5kvqnxc4rqffb7mm66v62uhz7p4qtgucbeja7t3y4wyn6c3mrpd29mprq3'
+  process.env.STREAM_API_KEY,
+  process.env.STREAM_API_SECRET
 );
 
 export const generateStreamToken = (userId: string) => {
@@ -19,10 +23,10 @@ export const createStreamUser = async (
   try {
     await streamChat.upsertUser({
       id: userId,
-      name: name,
-      email: email,
-      image: image,
-      position: position,
+      name,
+      email,
+      image,
+      role: position || 'user',
     });
   } catch (error) {
     console.error('Error creating Stream user:', error);
