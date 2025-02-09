@@ -1,41 +1,69 @@
 import { StreamChat } from 'stream-chat';
-import axios from 'axios';
 
 // Initialize Stream Chat client
-export const chatClient = StreamChat.getInstance(import.meta.env.VITE_STREAM_API_KEY);
+const chatClient = StreamChat.getInstance(
+  import.meta.env.VITE_STREAM_API_KEY as string
+);
 
-export const initializeStreamUser = async (user: { email: string; name?: string }) => {
+export const initializeStreamUser = async (
+  userId: string,
+  email: string,
+  name?: string | null,
+  image?: string | null
+) => {
   try {
+    // Disconnect any existing user first
+    if (chatClient.userID) {
+      await chatClient.disconnectUser();
+    }
+
     // Get token from backend
-    const response = await axios.post('http://localhost:3000/api/stream/token', {
-      userId: user.email.replace('@', '_').replace('.', '_'), // Stream doesn't allow @ in IDs
-      name: user.name,
-      email: user.email,
+    const response = await fetch('http://localhost:3000/api/stream/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userId,
+        email,
+        name: name || email.split('@')[0],
+        image,
+      }),
     });
 
-    const { token } = response.data;
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to get token');
+    }
 
-    // Connect the user
+    const { token } = await response.json();
+
+    // Connect user to Stream
     await chatClient.connectUser(
       {
-        id: user.email.replace('@', '_').replace('.', '_'),
-        name: user.name || user.email.split('@')[0],
-        email: user.email,
+        id: userId,
+        email,
+        name: name || email.split('@')[0],
+        image,
       },
       token
     );
 
     return chatClient;
   } catch (error) {
-    console.error('Error connecting to Stream:', error);
+    console.error('Error initializing Stream user:', error);
     throw error;
   }
 };
 
 export const disconnectUser = async () => {
   try {
-    await chatClient.disconnectUser();
+    if (chatClient?.userID) {
+      await chatClient.disconnectUser();
+    }
   } catch (error) {
-    console.error('Error disconnecting from Stream:', error);
+    console.error('Error disconnecting user:', error);
   }
 };
+
+export { chatClient };

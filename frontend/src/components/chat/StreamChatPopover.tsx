@@ -3,24 +3,28 @@ import {
   Avatar,
   Badge,
   Box,
+  Button,
+  Chip,
+  CircularProgress,
+  Divider,
   IconButton,
-  Popover,
-  Typography,
-  useTheme,
   List,
   ListItem,
   ListItemAvatar,
+  ListItemIcon,
   ListItemText,
-  Divider,
+  Menu,
+  MenuItem,
+  Popover,
   TextField,
-  Button,
-  CircularProgress,
+  Typography,
+  useTheme,
 } from '@mui/material';
 import {
-  Chat as ChatIcon,
-  Add as AddIcon,
-  Send as SendIcon,
-  AttachFile as AttachFileIcon,
+  AccountCircle,
+  AttachFile,
+  FiberManualRecord,
+  Send,
 } from '@mui/icons-material';
 import { chatClient, initializeStreamUser } from '@/config/stream';
 import { useAuth } from '@/contexts/AuthContext';
@@ -51,34 +55,173 @@ export default function StreamChatPopover() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const theme = useTheme();
+  const [userStatus, setUserStatus] = useState<'online' | 'away' | 'busy'>('online');
+  const [isConnected, setIsConnected] = useState(false);
+  const [statusAnchorEl, setStatusAnchorEl] = useState<null | HTMLElement>(null);
   const { messages } = useStreamMessages(channel);
 
+  // Initialize chat client
   useEffect(() => {
     if (user?.email) {
       const initChat = async () => {
         try {
-          await initializeStreamUser({
-            email: user.email,
-            name: user.displayName,
-          });
-          // Fetch channels after initialization
-          const filter = { 
-            type: 'messaging',
-            members: { $in: [user.email.replace(/[.@]/g, '_')] }
-          };
-          const sort = { last_message_at: -1 };
-          const response = await chatClient.queryChannels(filter, sort, {
-            watch: true,
-            state: true,
-          });
-          setChannels(response);
+          setLoading(true);
+          const userId = user.email.replace(/[.@]/g, '_');
+          const client = await initializeStreamUser(userId, user.email, user.displayName, user.photoURL);
+          
+          // Set initial status after successful connection
+          if (client.userID) {
+            await client.partialUpdateUser({
+              id: userId,
+              set: {
+                status: userStatus,
+              },
+            });
+            setIsConnected(true);
+          }
+          setLoading(false);
         } catch (error) {
           console.error('Error initializing chat:', error);
+          setLoading(false);
         }
       };
       initChat();
+
+      // Cleanup function
+      return () => {
+        const cleanup = async () => {
+          if (chatClient?.userID) {
+            await chatClient.disconnectUser();
+            setIsConnected(false);
+          }
+        };
+        cleanup();
+      };
     }
   }, [user]);
+
+  // Fetch channels only after successful connection
+  useEffect(() => {
+    if (isConnected && chatClient?.userID) {
+      const fetchChannels = async () => {
+        try {
+          const filter = { 
+            type: 'messaging',
+            members: { $in: [chatClient.userID] }
+          };
+          const sort = { last_message_at: -1 };
+          
+          const channels = await chatClient.queryChannels(filter, sort, {
+            watch: true,
+            state: true,
+            presence: true,
+          });
+
+          setChannels(channels);
+        } catch (error) {
+          console.error('Error fetching channels:', error);
+        }
+      };
+      fetchChannels();
+    }
+  }, [isConnected, chatClient]);
+
+  // Update user status in Stream - only when client is connected
+  useEffect(() => {
+    if (isConnected && chatClient?.userID && userStatus) {
+      const updateStatus = async () => {
+        try {
+          await chatClient.partialUpdateUser({
+            id: chatClient.userID,
+            set: {
+              status: userStatus,
+            },
+          });
+        } catch (error) {
+          console.error('Error updating status:', error);
+        }
+      };
+      updateStatus();
+    }
+  }, [userStatus, chatClient, isConnected]);
+
+  // Listen for user presence changes
+  useEffect(() => {
+    if (isConnected && chatClient) {
+      chatClient.on('user.presence.changed', event => {
+        setChannels(prev => prev.map(ch => {
+          const members = ch.state.members;
+          if (!members) return ch;
+          
+          const updatedMembers = { ...members };
+          if (updatedMembers[event.user.id]) {
+            updatedMembers[event.user.id] = {
+              ...updatedMembers[event.user.id],
+              user: event.user,
+            };
+          }
+          
+          return {
+            ...ch,
+            state: {
+              ...ch.state,
+              members: updatedMembers,
+            },
+          };
+        }));
+      });
+
+      return () => {
+        chatClient.off('user.presence.changed');
+      };
+    }
+  }, [chatClient, isConnected]);
+
+  const handleStatusClick = (event: React.MouseEvent<HTMLElement>) => {
+    setStatusAnchorEl(event.currentTarget);
+  };
+
+  const handleStatusClose = () => {
+    setStatusAnchorEl(null);
+  };
+
+  const handleStatusChange = async (newStatus: 'online' | 'away' | 'busy') => {
+    setUserStatus(newStatus);
+    handleStatusClose();
+  };
+
+  const getStatusColor = (status: string | undefined) => {
+    switch (status) {
+      case 'online':
+        return theme.palette.success.main;
+      case 'away':
+        return theme.palette.warning.main;
+      case 'busy':
+        return theme.palette.error.main;
+      default:
+        return theme.palette.grey[500];
+    }
+  };
+
+  // Track unread messages
+  useEffect(() => {
+    if (channel) {
+      channel.on('message.new', (event) => {
+        if (event.message.user?.id !== chatClient?.userID) {
+          // Update unread count for this channel
+          setChannels(prev => prev.map(ch => 
+            ch.id === channel.id 
+              ? { ...ch, unreadCount: (ch.countUnread() || 0) + 1 }
+              : ch
+          ));
+        }
+      });
+
+      return () => {
+        channel.off('message.new');
+      };
+    }
+  }, [channel, chatClient]);
 
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -91,17 +234,22 @@ export default function StreamChatPopover() {
   const createChannel = async (employee: Employee) => {
     setLoading(true);
     try {
-      const currentUserId = user?.email?.replace(/[.@]/g, '_') || '';
+      if (!user?.email || !employee.email) {
+        console.error('Missing user or employee email');
+        return;
+      }
+
+      const currentUserId = user.email.replace(/[.@]/g, '_');
       const employeeId = employee.email.replace(/[.@]/g, '_');
 
       // Create users via backend
       await axios.post('http://localhost:3000/api/stream/create-chat', {
         currentUser: {
           id: currentUserId,
-          name: user?.displayName || user?.email?.split('@')[0] || '',
-          email: user?.email,
-          image: user?.photoURL,
-          position: user?.role || 'Employee',
+          name: user.displayName || user.email.split('@')[0],
+          email: user.email,
+          image: user.photoURL,
+          position: user.role || 'Employee',
         },
         otherUser: {
           id: employeeId,
@@ -112,18 +260,31 @@ export default function StreamChatPopover() {
         },
       });
 
-      // Create the channel
-      const channelId = [currentUserId, employeeId].sort().join('_');
+      // Create unique channel ID using sorted IDs
+      const sortedIds = [currentUserId, employeeId].sort();
+      const channelId = `chat_${sortedIds[0]}_${sortedIds[1]}`;
+
+      // Check if channel exists
+      const existingChannel = channels.find(ch => ch.id === channelId);
+      if (existingChannel) {
+        setChannel(existingChannel);
+        setSelectedEmployee(employee);
+        setLoading(false);
+        return;
+      }
+
+      // Create new channel
       const newChannel = chatClient.channel('messaging', channelId, {
         members: [currentUserId, employeeId],
-        name: employee.name,
+        created_by: currentUserId,
+        receiver: employeeId,
       });
 
       await newChannel.create();
+      await newChannel.watch();
+      
       setChannel(newChannel);
       setSelectedEmployee(employee);
-      
-      // Update channels list
       setChannels(prev => [newChannel, ...prev]);
     } catch (error) {
       console.error('Error creating channel:', error);
@@ -135,13 +296,16 @@ export default function StreamChatPopover() {
     if (!channel || !message.trim()) return;
 
     try {
-      await channel.sendMessage({
+      const messageData = {
         text: message,
         user: {
           id: user?.email?.replace(/[.@]/g, '_') || '',
           name: user?.displayName || user?.email?.split('@')[0] || '',
+          image: user?.photoURL,
         },
-      });
+      };
+
+      await channel.sendMessage(messageData);
       setMessage('');
     } catch (error) {
       console.error('Error sending message:', error);
@@ -174,136 +338,164 @@ export default function StreamChatPopover() {
   return (
     <>
       <IconButton
-        color="inherit"
         onClick={handleClick}
+        size="small"
         sx={{
-          position: 'fixed',
-          bottom: 80,
-          right: 20,
-          backgroundColor: theme.palette.primary.main,
-          color: 'white',
-          '&:hover': {
-            backgroundColor: theme.palette.primary.dark,
-          },
-          zIndex: 1000,
-          boxShadow: 2,
+          ml: 2,
+          position: 'relative',
         }}
       >
-        <Badge color="error" variant="dot">
-          <ChatIcon />
+        <Badge 
+          color={userStatus === 'online' ? 'success' : userStatus === 'away' ? 'warning' : 'error'} 
+          variant="dot"
+        >
+          <AccountCircle />
         </Badge>
       </IconButton>
 
       <Popover
-        open={open}
+        open={Boolean(anchorEl)}
         anchorEl={anchorEl}
         onClose={handleClose}
         anchorOrigin={{
-          vertical: 'top',
-          horizontal: 'right',
-        }}
-        transformOrigin={{
           vertical: 'bottom',
           horizontal: 'right',
         }}
-        sx={{
-          '& .MuiPopover-paper': {
-            width: 800,
-            height: 600,
-            overflow: 'hidden',
-            mt: 2,
-          },
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'right',
         }}
       >
-        <Box sx={{ display: 'flex', height: '100%' }}>
-          {/* Left sidebar - Recent chats */}
-          <Box
-            sx={{
-              width: 300,
-              borderRight: 1,
-              borderColor: 'divider',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
-            <Box sx={{ p: 2 }}>
+        <Box sx={{ width: 800, height: 600, display: 'flex' }}>
+          {/* Left side - Chat list */}
+          <Box sx={{ width: 300, borderRight: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column' }}>
+            {/* User status selector */}
+            <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
               <Button
                 fullWidth
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => setNewChatOpen(true)}
-              >
-                New Chat
-              </Button>
-            </Box>
-            <Divider />
-            <List sx={{ flex: 1, overflow: 'auto' }}>
-              {channels.map((ch) => {
-                const members = Object.values(ch.state.members);
-                const otherMember = members.find(
-                  member => member.user_id !== chatClient.userID
-                );
-                const messages = ch.state.messages || [];
-                const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-                const lastMessageTime = lastMessage?.created_at 
-                  ? new Date(lastMessage.created_at)
-                  : null;
-                
-                const getTimeString = (date: Date | null) => {
-                  if (!date) return '';
-                  if (isToday(date)) {
-                    return format(date, 'HH:mm');
-                  }
-                  if (isYesterday(date)) {
-                    return 'Yesterday';
-                  }
-                  return format(date, 'dd/MM/yyyy');
-                };
-
-                return (
-                  <ListItem
-                    key={ch.cid}
-                    button
-                    selected={channel?.cid === ch.cid}
-                    onClick={() => handleChannelSelect(ch)}
+                onClick={handleStatusClick}
+                startIcon={
+                  <Badge
+                    variant="dot"
                     sx={{
-                      '&:hover': {
-                        backgroundColor: 'action.hover',
+                      '& .MuiBadge-badge': {
+                        backgroundColor: getStatusColor(userStatus),
                       },
                     }}
                   >
+                    <AccountCircle />
+                  </Badge>
+                }
+              >
+                {userStatus.charAt(0).toUpperCase() + userStatus.slice(1)}
+              </Button>
+              <Menu
+                anchorEl={statusAnchorEl}
+                open={Boolean(statusAnchorEl)}
+                onClose={handleStatusClose}
+              >
+                <MenuItem onClick={() => handleStatusChange('online')}>
+                  <ListItemIcon>
+                    <FiberManualRecord sx={{ color: getStatusColor('online') }} fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Online</ListItemText>
+                </MenuItem>
+                <MenuItem onClick={() => handleStatusChange('away')}>
+                  <ListItemIcon>
+                    <FiberManualRecord sx={{ color: getStatusColor('away') }} fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Away</ListItemText>
+                </MenuItem>
+                <MenuItem onClick={() => handleStatusChange('busy')}>
+                  <ListItemIcon>
+                    <FiberManualRecord sx={{ color: getStatusColor('busy') }} fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Busy</ListItemText>
+                </MenuItem>
+              </Menu>
+            </Box>
+
+            {/* Chat list */}
+            <List sx={{ flex: 1, overflow: 'auto' }}>
+              {channels.map((ch) => {
+                const otherUser = ch.state.members
+                  ? Object.values(ch.state.members).find(
+                      (m) => m.user?.id !== chatClient?.userID
+                    )?.user
+                  : null;
+
+                // Safely get last message
+                const messages = ch.state?.messages || [];
+                const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+                const unreadCount = ch.countUnread?.() || 0;
+
+                return (
+                  <ListItem
+                    key={ch.id}
+                    button
+                    selected={channel?.id === ch.id}
+                    onClick={() => {
+                      setChannel(ch);
+                      ch.markRead?.();
+                      if (otherUser) {
+                        setSelectedEmployee({
+                          id: otherUser.id,
+                          name: otherUser.name || '',
+                          email: otherUser.email || '',
+                          position: otherUser.position || '',
+                          photoURL: otherUser.image || '',
+                        });
+                      }
+                    }}
+                  >
                     <ListItemAvatar>
-                      <Avatar src={otherMember?.user?.image}>
-                        {otherMember?.user?.name?.[0]?.toUpperCase()}
-                      </Avatar>
+                      <Badge
+                        variant="dot"
+                        sx={{
+                          '& .MuiBadge-badge': {
+                            backgroundColor: getStatusColor(otherUser?.status),
+                          },
+                        }}
+                      >
+                        <Avatar src={otherUser?.image}>
+                          {otherUser?.name?.[0]?.toUpperCase() || '?'}
+                        </Avatar>
+                      </Badge>
                     </ListItemAvatar>
                     <ListItemText
                       primary={
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Typography variant="subtitle2" noWrap>
-                            {otherMember?.user?.name || 'Unknown'}
+                          <Typography
+                            sx={{
+                              fontWeight: unreadCount > 0 ? 700 : 400,
+                            }}
+                          >
+                            {otherUser?.name || 'Unknown'}
                           </Typography>
-                          {lastMessageTime && (
-                            <Typography variant="caption" color="text.secondary">
-                              {getTimeString(lastMessageTime)}
-                            </Typography>
+                          {unreadCount > 0 && (
+                            <Chip
+                              size="small"
+                              label={unreadCount}
+                              color="primary"
+                              sx={{ height: 20, minWidth: 20 }}
+                            />
                           )}
                         </Box>
                       }
                       secondary={
                         <Typography
                           variant="body2"
-                          color="text.secondary"
                           sx={{
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
                             maxWidth: '200px',
+                            fontWeight: unreadCount > 0 ? 700 : 400,
                           }}
                         >
                           {lastMessage ? (
                             <>
-                              {lastMessage.user?.id === chatClient.userID ? 'You: ' : ''}
+                              {lastMessage.user?.id === chatClient?.userID ? 'You: ' : ''}
                               {lastMessage.text}
                             </>
                           ) : (
@@ -316,6 +508,18 @@ export default function StreamChatPopover() {
                 );
               })}
             </List>
+
+            {/* New chat button */}
+            <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
+              <Button
+                fullWidth
+                variant="contained"
+                startIcon={<AccountCircle />}
+                onClick={() => setNewChatOpen(true)}
+              >
+                New Chat
+              </Button>
+            </Box>
           </Box>
 
           {/* Right side - Chat area */}
@@ -448,7 +652,7 @@ export default function StreamChatPopover() {
                       onClick={() => document.getElementById('chat-file-input')?.click()}
                       disabled={loading}
                     >
-                      <AttachFileIcon />
+                      <AttachFile />
                     </IconButton>
                     <TextField
                       fullWidth
@@ -468,7 +672,7 @@ export default function StreamChatPopover() {
                       onClick={handleSendMessage}
                       disabled={!message.trim() || loading}
                     >
-                      <SendIcon />
+                      <Send />
                     </IconButton>
                   </Box>
                 </Box>
@@ -485,7 +689,7 @@ export default function StreamChatPopover() {
                   textAlign: 'center',
                 }}
               >
-                <ChatIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                <AccountCircle sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
                 <Typography variant="h6" color="text.secondary">
                   Select a chat or start a new one
                 </Typography>
