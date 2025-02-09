@@ -19,6 +19,13 @@ import {
   DialogContent,
   DialogActions,
   TextField,
+  Tabs,
+  Tab,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import {
   Person as PersonIcon,
@@ -27,7 +34,17 @@ import {
   MoreVert as MoreIcon,
   AccessTime as TimeIcon,
 } from '@mui/icons-material';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy, onSnapshot } from 'firebase/firestore';
+import {
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  doc, 
+  getDoc, 
+  updateDoc, 
+  orderBy, 
+  onSnapshot 
+} from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import { format } from 'date-fns';
@@ -37,12 +54,28 @@ import { useRequests } from '@/hooks/useRequests';
 
 // Team Member Card
 const TeamMemberCard = ({ member }) => (
-  <Card>
+  <Card elevation={0} sx={{ 
+    p: 1, 
+    '&:hover': { 
+      bgcolor: 'action.hover',
+      transform: 'translateY(-2px)',
+    },
+    transition: 'all 0.2s ease-in-out'
+  }}>
     <CardContent>
       <Stack direction="row" spacing={2} alignItems="center">
-        <Avatar src={member.photoUrl}>{member.firstName[0]}</Avatar>
+        <Avatar 
+          src={member.photoUrl}
+          sx={{ 
+            width: 48, 
+            height: 48,
+            bgcolor: 'primary.main' 
+          }}
+        >
+          {member.firstName[0]}
+        </Avatar>
         <Box>
-          <Typography variant="subtitle1">
+          <Typography variant="subtitle1" fontWeight="medium">
             {member.firstName} {member.lastName}
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -59,16 +92,36 @@ const ProjectCard = ({ project }) => {
   const [anchorEl, setAnchorEl] = useState(null);
 
   return (
-    <Card>
-      <CardContent>
+    <Card 
+      sx={{ 
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        '&:hover': {
+          boxShadow: (theme) => theme.shadows[4],
+          transform: 'translateY(-2px)',
+        },
+        transition: 'all 0.2s ease-in-out'
+      }}
+    >
+      <CardContent sx={{ flex: 1 }}>
         <Stack spacing={2}>
           <Box display="flex" justifyContent="space-between" alignItems="center">
-            <Typography variant="h6">{project.name}</Typography>
-            <IconButton onClick={(e) => setAnchorEl(e.currentTarget)}>
+            <Typography variant="h6" fontWeight="medium">
+              {project.name}
+            </Typography>
+            <IconButton 
+              onClick={(e) => setAnchorEl(e.currentTarget)}
+              sx={{ 
+                '&:hover': { 
+                  bgcolor: 'action.hover' 
+                } 
+              }}
+            >
               <MoreIcon />
             </IconButton>
           </Box>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             {project.description}
           </Typography>
           <Box display="flex" justifyContent="space-between" alignItems="center">
@@ -82,8 +135,21 @@ const ProjectCard = ({ project }) => {
                   : 'default'
               }
               size="small"
+              sx={{ 
+                textTransform: 'capitalize',
+                fontWeight: 'medium' 
+              }}
             />
-            <Typography variant="caption" color="text.secondary">
+            <Typography 
+              variant="caption" 
+              color="text.secondary"
+              sx={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 0.5 
+              }}
+            >
+              <TimeIcon fontSize="small" />
               Due: {format(project.endDate instanceof Date ? project.endDate : new Date(project.endDate), 'MMM d, yyyy')}
             </Typography>
           </Box>
@@ -93,6 +159,20 @@ const ProjectCard = ({ project }) => {
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
         onClose={() => setAnchorEl(null)}
+        PaperProps={{
+          elevation: 0,
+          sx: {
+            overflow: 'visible',
+            filter: 'drop-shadow(0px 2px 8px rgba(0,0,0,0.32))',
+            mt: 1.5,
+            '& .MuiAvatar-root': {
+              width: 32,
+              height: 32,
+              ml: -0.5,
+              mr: 1,
+            },
+          },
+        }}
       >
         <MenuItem onClick={() => window.location.href = `/projects/${project.id}`}>
           View Details
@@ -123,16 +203,36 @@ const TaskCard = ({ task, onStatusChange }) => {
   };
 
   return (
-    <Card>
-      <CardContent>
+    <Card 
+      sx={{ 
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        '&:hover': {
+          boxShadow: (theme) => theme.shadows[4],
+          transform: 'translateY(-2px)',
+        },
+        transition: 'all 0.2s ease-in-out'
+      }}
+    >
+      <CardContent sx={{ flex: 1 }}>
         <Stack spacing={2}>
           <Box display="flex" justifyContent="space-between" alignItems="center">
-            <Typography variant="subtitle1">{task.title}</Typography>
-            <IconButton onClick={(e) => setAnchorEl(e.currentTarget)}>
+            <Typography variant="subtitle1" fontWeight="medium">
+              {task.title}
+            </Typography>
+            <IconButton 
+              onClick={(e) => setAnchorEl(e.currentTarget)}
+              sx={{ 
+                '&:hover': { 
+                  bgcolor: 'action.hover' 
+                } 
+              }}
+            >
               <MoreIcon />
             </IconButton>
           </Box>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             {task.description}
           </Typography>
           <Box display="flex" justifyContent="space-between" alignItems="center">
@@ -140,13 +240,23 @@ const TaskCard = ({ task, onStatusChange }) => {
               label={task.status.toUpperCase().replace('_', ' ')}
               color={statusColors[task.status]}
               size="small"
+              sx={{ 
+                textTransform: 'capitalize',
+                fontWeight: 'medium' 
+              }}
             />
-            <Stack direction="row" spacing={1} alignItems="center">
-              <TimeIcon fontSize="small" color="action" />
-              <Typography variant="caption" color="text.secondary">
-                Due: {format(task.dueDate.toDate(), 'MMM d')}
-              </Typography>
-            </Stack>
+            <Typography 
+              variant="caption" 
+              color="text.secondary"
+              sx={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 0.5 
+              }}
+            >
+              <TimeIcon fontSize="small" />
+              Due: {format(task.dueDate.toDate(), 'MMM d')}
+            </Typography>
           </Box>
         </Stack>
       </CardContent>
@@ -154,6 +264,14 @@ const TaskCard = ({ task, onStatusChange }) => {
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
         onClose={() => setAnchorEl(null)}
+        PaperProps={{
+          elevation: 0,
+          sx: {
+            overflow: 'visible',
+            filter: 'drop-shadow(0px 2px 8px rgba(0,0,0,0.32))',
+            mt: 1.5,
+          },
+        }}
       >
         {task.status !== 'done' && (
           <MenuItem
@@ -337,10 +455,17 @@ const TimeOffCard = () => {
   };
 
   return (
-    <Card>
+    <Card sx={{ 
+      p: 2, 
+      '&:hover': { 
+        bgcolor: 'action.hover',
+        transform: 'translateY(-2px)',
+      },
+      transition: 'all 0.2s ease-in-out'
+    }}>
       <CardContent>
         <Stack spacing={2}>
-          <Typography variant="h6" gutterBottom>
+          <Typography variant="h6" gutterBottom sx={{ fontWeight: 'medium' }}>
             Time Off
           </Typography>
           <Stack spacing={2} sx={{ mb: 3 }}>
@@ -562,6 +687,7 @@ export const EmployeeDashboard = () => {
   const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -610,8 +736,6 @@ export const EmployeeDashboard = () => {
             teamSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
           );
         }
-
-
 
         // Get projects
         let projectsSnapshot;
@@ -683,17 +807,242 @@ export const EmployeeDashboard = () => {
     );
   }
 
-  return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Grid container spacing={3}>
-        {/* Time Off Section */}
-        <Grid item xs={12} md={6}>
-          <TimeOffCard />
-        </Grid>
-        {/* Team Members Section */}
-        <Grid item xs={12}>
-          <Typography variant="h5" gutterBottom>
-            Your Team
+  const activeProjects = projects.filter(p => p.status === 'active').length;
+  const completedTasks = tasks.filter(t => t.status === 'done').length;
+  const pendingTasks = tasks.filter(t => t.status !== 'done').length;
+
+  const tabs = [
+    {
+      label: 'Overview',
+      content: (
+        <Box sx={{ py: 3 }}>
+          {/* Summary Cards */}
+          <Grid container spacing={3} sx={{ mb: 4 }}>
+            <Grid item xs={12} md={4}>
+              <Card sx={{ 
+                height: '100%',
+                bgcolor: 'primary.light',
+                color: 'primary.contrastText',
+                '&:hover': {
+                  transform: 'translateY(-4px)',
+                  boxShadow: 4
+                },
+                transition: 'all 0.3s'
+              }}>
+                <CardContent>
+                  <Box display="flex" alignItems="center" gap={2}>
+                    <Avatar sx={{ bgcolor: 'primary.main' }}>
+                      <ProjectIcon />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="h4" fontWeight="bold">
+                        {activeProjects}
+                      </Typography>
+                      <Typography variant="subtitle2">
+                        Active Projects
+                      </Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Card sx={{ 
+                height: '100%',
+                bgcolor: 'success.light',
+                color: 'success.contrastText',
+                '&:hover': {
+                  transform: 'translateY(-4px)',
+                  boxShadow: 4
+                },
+                transition: 'all 0.3s'
+              }}>
+                <CardContent>
+                  <Box display="flex" alignItems="center" gap={2}>
+                    <Avatar sx={{ bgcolor: 'success.main' }}>
+                      <TaskIcon />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="h4" fontWeight="bold">
+                        {completedTasks}
+                      </Typography>
+                      <Typography variant="subtitle2">
+                        Completed Tasks
+                      </Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Card sx={{ 
+                height: '100%',
+                bgcolor: 'warning.light',
+                color: 'warning.contrastText',
+                '&:hover': {
+                  transform: 'translateY(-4px)',
+                  boxShadow: 4
+                },
+                transition: 'all 0.3s'
+              }}>
+                <CardContent>
+                  <Box display="flex" alignItems="center" gap={2}>
+                    <Avatar sx={{ bgcolor: 'warning.main' }}>
+                      <TimeIcon />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="h4" fontWeight="bold">
+                        {pendingTasks}
+                      </Typography>
+                      <Typography variant="subtitle2">
+                        Pending Tasks
+                      </Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+
+          {/* Recent Activity */}
+          <Box sx={{ mt: 4 }}>
+            <Typography variant="h6" gutterBottom>
+              Recent Activity
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="subtitle1" gutterBottom>
+                      Latest Tasks
+                    </Typography>
+                    <List>
+                      {tasks.slice(0, 3).map((task) => (
+                        <ListItem key={task.id} disablePadding>
+                          <ListItemButton>
+                            <ListItemIcon>
+                              <TaskIcon color={task.status === 'done' ? 'success' : 'action'} />
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary={task.title}
+                              secondary={`Due: ${format(task.dueDate.toDate(), 'MMM d')}`}
+                            />
+                            <Chip 
+                              label={task.status.replace('_', ' ')} 
+                              size="small"
+                              color={task.status === 'done' ? 'success' : 'default'}
+                            />
+                          </ListItemButton>
+                        </ListItem>
+                      ))}
+                    </List>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="subtitle1" gutterBottom>
+                      Active Projects
+                    </Typography>
+                    <List>
+                      {projects.filter(p => p.status === 'active').slice(0, 3).map((project) => (
+                        <ListItem key={project.id} disablePadding>
+                          <ListItemButton>
+                            <ListItemIcon>
+                              <ProjectIcon color="primary" />
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary={project.name}
+                              secondary={`Due: ${format(project.endDate instanceof Date ? project.endDate : new Date(project.endDate), 'MMM d, yyyy')}`}
+                            />
+                          </ListItemButton>
+                        </ListItem>
+                      ))}
+                    </List>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </Box>
+        </Box>
+      )
+    },
+    {
+      label: 'Projects & Tasks',
+      content: (
+        <Box sx={{ py: 3 }}>
+          {/* Projects Section */}
+          <Box sx={{ mb: 4 }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="h6">
+                Projects
+              </Typography>
+              <Button
+                variant="contained"
+                href="/projects"
+                sx={{
+                  bgcolor: 'primary.light',
+                  color: 'primary.main',
+                  '&:hover': {
+                    bgcolor: 'primary.main',
+                    color: 'primary.contrastText',
+                  },
+                }}
+              >
+                View All Projects
+              </Button>
+            </Box>
+            <Grid container spacing={2}>
+              {projects.map((project) => (
+                <Grid item xs={12} md={6} key={project.id}>
+                  <ProjectCard project={project} />
+                </Grid>
+              ))}
+            </Grid>
+          </Box>
+
+          {/* Tasks Section */}
+          <Box>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="h6">
+                Your Tasks
+              </Typography>
+              <Button
+                variant="contained"
+                color="primary"
+                sx={{
+                  bgcolor: 'primary.light',
+                  color: 'primary.main',
+                  '&:hover': {
+                    bgcolor: 'primary.main',
+                    color: 'primary.contrastText',
+                  },
+                }}
+              >
+                View All Tasks
+              </Button>
+            </Box>
+            <Grid container spacing={2}>
+              {tasks.map((task) => (
+                <Grid item xs={12} md={6} key={task.id}>
+                  <TaskCard
+                    task={task}
+                    onStatusChange={handleTaskStatusChange}
+                  />
+                </Grid>
+              ))}
+            </Grid>
+          </Box>
+        </Box>
+      )
+    },
+    {
+      label: 'Team',
+      content: (
+        <Box sx={{ py: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Your Team Members
           </Typography>
           <Grid container spacing={2}>
             {teamMembers.map((member) => (
@@ -702,42 +1051,71 @@ export const EmployeeDashboard = () => {
               </Grid>
             ))}
           </Grid>
-        </Grid>
+        </Box>
+      )
+    },
+    {
+      label: 'Time Off',
+      content: (
+        <Box sx={{ py: 3 }}>
+          <TimeOffCard />
+        </Box>
+      )
+    }
+  ];
 
-        {/* Projects Section */}
-        <Grid item xs={12}>
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-            <Typography variant="h5">Projects</Typography>
-            <Button variant="outlined" href="/projects">
-              View All Projects
-            </Button>
-          </Box>
-          <Grid container spacing={2}>
-            {projects.map((project) => (
-              <Grid item xs={12} md={6} key={project.id}>
-                <ProjectCard project={project} />
-              </Grid>
-            ))}
-          </Grid>
-        </Grid>
-
-        {/* Tasks Section */}
-        <Grid item xs={12}>
-          <Typography variant="h5" gutterBottom>
-            Your Tasks
+  return (
+    <Container maxWidth="lg">
+      <Box sx={{ width: '100%', py: 3 }}>
+        {/* Page Title */}
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="h4" gutterBottom fontWeight="medium">
+            Dashboard
           </Typography>
-          <Grid container spacing={2}>
-            {tasks.map((task) => (
-              <Grid item xs={12} md={6} key={task.id}>
-                <TaskCard
-                  task={task}
-                  onStatusChange={handleTaskStatusChange}
-                />
-              </Grid>
+          <Typography variant="body1" color="text.secondary">
+            Welcome back! Here's what's happening with your projects.
+          </Typography>
+        </Box>
+
+        {/* Tabs */}
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+          <Tabs
+            value={activeTab}
+            onChange={(_, newValue) => setActiveTab(newValue)}
+            aria-label="dashboard tabs"
+            sx={{
+              '& .MuiTab-root': {
+                textTransform: 'none',
+                fontSize: '1rem',
+                fontWeight: 'medium',
+                minWidth: 100,
+              }
+            }}
+          >
+            {tabs.map((tab, index) => (
+              <Tab
+                key={index}
+                label={tab.label}
+                id={`dashboard-tab-${index}`}
+                aria-controls={`dashboard-tabpanel-${index}`}
+              />
             ))}
-          </Grid>
-        </Grid>
-      </Grid>
+          </Tabs>
+        </Box>
+
+        {/* Tab Panels */}
+        {tabs.map((tab, index) => (
+          <div
+            key={index}
+            role="tabpanel"
+            hidden={activeTab !== index}
+            id={`dashboard-tabpanel-${index}`}
+            aria-labelledby={`dashboard-tab-${index}`}
+          >
+            {activeTab === index && tab.content}
+          </div>
+        ))}
+      </Box>
     </Container>
   );
 };
