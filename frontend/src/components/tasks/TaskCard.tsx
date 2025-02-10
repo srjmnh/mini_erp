@@ -17,7 +17,10 @@ import {
   TextField,
   Stack,
   Avatar,
-  Slider
+  Slider,
+  Checkbox,
+  ListItemIcon,
+  ListItemText
 } from '@mui/material';
 import { MoreVert as MoreVertIcon } from '@mui/icons-material';
 import { format } from 'date-fns';
@@ -51,331 +54,256 @@ interface TaskCardProps {
       timestamp: Date;
     };
   };
-  onStatusChange: (taskId: string, newStatus: string) => void;
-  onProgressUpdate?: (taskId: string, progress: number) => void;
-  onEdit?: (task: any) => void;
-  onUpdate?: () => void;
+  onUpdate: (taskId: string, progress: number, comment: string, completed: boolean) => void;
+  onDelete: (taskId: string) => void;
+  onEdit: (task: any) => void;
 }
 
 const STATUS_VALUES = ['todo', 'in_progress', 'done'];
 
-export const TaskCard: React.FC<TaskCardProps> = ({ task, onStatusChange, onProgressUpdate, onEdit, onUpdate }) => {
+export const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, onEdit }) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [showProgressDialog, setShowProgressDialog] = useState(false);
   const [progress, setProgress] = useState(task.progress || 0);
   const [comment, setComment] = useState('');
-  const [comments, setComments] = useState<Comment[]>([]);
-  const { user } = useAuth();
 
-  useEffect(() => {
-    loadComments();
-  }, [task.id]);
-
-  const loadComments = async () => {
-    try {
-      const commentsRef = collection(db, 'tasks', task.id, 'comments');
-      const q = query(commentsRef, orderBy('timestamp', 'desc'));
-      const snapshot = await getDocs(q);
-      const loadedComments = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Comment[];
-      setComments(loadedComments);
-    } catch (error) {
-      console.error('Error loading comments:', error);
-    }
-  };
-
-  const fetchUserName = async (userId: string): Promise<string> => {
-    try {
-      const userDoc = await getDoc(doc(db, 'users', userId));
-      const userData = userDoc.data();
-      return userData?.name || userData?.email || 'Unknown User';
-    } catch (error) {
-      console.error('Error fetching user name:', error);
-      return 'Unknown User';
-    }
-  };
-
-  const handleUpdateProgress = async () => {
-    try {
-      if (!comment.trim()) {
-        return;
-      }
-
-      // Get current user's name
-      let userName = user?.displayName;
-      if (!userName) {
-        userName = await fetchUserName(user?.uid || '');
-      }
-
-      // Create new comment
-      const newComment = {
-        text: comment,
-        progress: progress,
-        timestamp: new Date(),
-        userId: user?.uid || '',
-        userName: userName
-      };
-
-      // Update task with new comment
-      const taskRef = doc(db, 'tasks', task.id);
-      const taskDoc = await getDoc(taskRef);
-      const existingComments = taskDoc.data()?.comments || [];
-
-      await updateDoc(taskRef, {
-        progress: progress,
-        lastUpdated: new Date(),
-        comments: [newComment, ...existingComments],
-        latestComment: {
-          text: comment,
-          userName: userName,
-          timestamp: new Date()
-        }
-      });
-
-      if (onProgressUpdate) {
-        onProgressUpdate(task.id, progress);
-      }
-
-      setShowProgressDialog(false);
-      setComment('');
-      loadComments();
-    } catch (error) {
-      console.error('Error updating progress:', error);
-    }
-  };
-
-  const handleMenuClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleMenuClose = () => {
-    setAnchorEl(null);
-  };
-
-  const handleStatusChange = (newStatus: string) => {
-    if (!STATUS_VALUES.includes(newStatus)) {
-      throw new Error(`Invalid status value: ${newStatus}`);
-    }
-    onStatusChange(task.id, newStatus);
-    handleMenuClose();
+  const handleProgressUpdate = () => {
+    onUpdate(task.id, progress, comment, false);
+    setShowProgressDialog(false);
+    setComment('');
   };
 
   return (
-    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <CardContent sx={{ flex: 1, pb: 1 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-          <Typography variant="h6" component="div" sx={{ fontSize: '1rem', fontWeight: 500 }}>
-            {task.title}
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            {task.priority && (
-              <Chip
-                size="small"
-                label={task.priority}
-                color={
-                  task.priority === 'high' ? 'error' :
-                  task.priority === 'medium' ? 'warning' : 'success'
-                }
-                sx={{ textTransform: 'lowercase' }}
-              />
-            )}
-            <IconButton size="small" onClick={handleMenuClick}>
-              <MoreVertIcon />
-            </IconButton>
-            <IconButton 
-              size="small" 
-              onClick={() => onEdit?.(task)}
-              sx={{ mr: 1 }}
-            >
-              <EditIcon fontSize="small" />
-            </IconButton>
-            <IconButton
-              size="small"
-              onClick={() => {
-                setProgress(task.progress || 0);
-                setShowProgressDialog(true);
-              }}
-            >
-              <AddIcon fontSize="small" />
-            </IconButton>
-          </Box>
-        </Box>
-
-        {task.description && (
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            {task.description}
-          </Typography>
-        )}
-
-        <Stack spacing={1}>
-          {task.assignedTo && (
-            <Typography variant="body2" color="text.secondary">
-              Assigned to: {task.assignedTo}
-            </Typography>
-          )}
-          
-          {task.dueDate && (
-            <Typography variant="body2" color="text.secondary">
-              Due: {format(new Date(task.dueDate), 'MMM d, yyyy')}
-            </Typography>
-          )}
-
-          <Box sx={{ width: '100%' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-              <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
-                Progress:
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {progress}%
-              </Typography>
-            </Box>
-            <LinearProgress
-              variant="determinate"
-              value={progress}
-              sx={{
-                height: 6,
-                borderRadius: 3,
-                bgcolor: 'action.hover',
-                '& .MuiLinearProgress-bar': {
-                  bgcolor: task.status === 'done' ? 'success.main' : 'primary.main'
+    <Card 
+      elevation={0}
+      sx={{
+        mb: 2,
+        border: '1px solid',
+        borderColor: 'divider',
+        borderRadius: 2,
+        '&:hover': {
+          borderColor: 'primary.main',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+        }
+      }}
+    >
+      <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+        {/* Header Section */}
+        <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+            <Checkbox 
+              checked={task.completed}
+              onChange={() => onUpdate(task.id, task.progress || 0, '', !task.completed)}
+              sx={{ 
+                ml: -1,
+                '&.Mui-checked': {
+                  color: 'success.main'
                 }
               }}
             />
-          </Box>
-
-          {task.latestComment && (
-            <Box sx={{ mb: 2 }}>
-              <Typography variant="body2" color="text.secondary">
-                Latest Update
+            <Box>
+              <Typography 
+                variant="subtitle1" 
+                sx={{ 
+                  fontWeight: 500,
+                  textDecoration: task.completed ? 'line-through' : 'none',
+                  color: task.completed ? 'text.secondary' : 'text.primary'
+                }}
+              >
+                {task.title}
               </Typography>
-              <Box sx={{ mt: 0.5, bgcolor: 'grey.50', p: 1, borderRadius: 1 }}>
-                <Typography variant="body2">
-                  {task.latestComment.text}
-                </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    by {task.latestComment.userName} • {format(task.latestComment.timestamp.toDate(), 'MMM d, yyyy HH:mm')}
-                  </Typography>
-                </Box>
-              </Box>
-            </Box>
-          )}
-
-          {/* Comments Section */}
-          {comments && comments.length > 0 && (
-            <Box sx={{ mb: 1 }}>
-              <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5, color: 'text.secondary' }}>
-                Updates:
-              </Typography>
-              <Box sx={{ maxHeight: '150px', overflowY: 'auto' }}>
-                {comments.map((comment: any, index: number) => (
-                  <Box 
-                    key={index}
-                    sx={{ 
-                      mb: 1,
-                      p: 1,
-                      bgcolor: 'grey.50',
-                      borderRadius: 1,
-                      '&:last-child': { mb: 0 }
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                {task.assignee && (
+                  <Chip
+                    avatar={
                       <Avatar 
-                        sx={{ 
-                          width: 20, 
-                          height: 20, 
-                          fontSize: '0.75rem',
-                          bgcolor: 'primary.main',
-                          mr: 1
-                        }}
+                        src={task.assignee.photoURL} 
+                        sx={{ width: 20, height: 20 }}
                       >
-                        {comment.userName?.charAt(0) || 'U'}
+                        {task.assignee.name.charAt(0)}
                       </Avatar>
-                      <Typography variant="caption" sx={{ fontWeight: 500 }}>
-                        {comment.userName}
-                      </Typography>
-                      <Typography 
-                        variant="caption" 
-                        color="text.secondary"
-                        sx={{ ml: 'auto' }}
-                      >
-                        {format(comment.timestamp.toDate(), 'MMM d, HH:mm')}
-                      </Typography>
-                    </Box>
-                    <Typography variant="body2" sx={{ ml: 3.5 }}>
-                      {comment.text}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ ml: 3.5 }}>
-                      Progress updated to {comment.progress}%
-                    </Typography>
-                  </Box>
-                ))}
+                    }
+                    label={task.assignee.name}
+                    size="small"
+                    variant="outlined"
+                    sx={{ height: 24 }}
+                  />
+                )}
+                <Chip
+                  label={task.priority}
+                  size="small"
+                  sx={{
+                    height: 24,
+                    bgcolor: 
+                      task.priority === 'high' ? 'error.main' :
+                      task.priority === 'medium' ? 'warning.main' : 'success.main',
+                    color: '#fff'
+                  }}
+                />
+                {task.dueDate && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
+                    <AccessTimeIcon sx={{ fontSize: 14, mr: 0.5 }} />
+                    {format(task.dueDate, 'MMM d')}
+                  </Typography>
+                )}
               </Box>
             </Box>
-          )}
-
-          <Chip
+          </Box>
+          <IconButton
             size="small"
-            label={task.status || 'todo'}
-            color={
-              task.status === 'done' ? 'success' :
-              task.status === 'in_progress' ? 'warning' : 'default'
-            }
+            onClick={(e) => setAnchorEl(e.currentTarget)}
+            sx={{ ml: 1 }}
+          >
+            <MoreVertIcon />
+          </IconButton>
+        </Box>
+
+        {/* Progress Section */}
+        <Box sx={{ mb: task.latestComment ? 2 : 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Progress: {task.progress || 0}%
+            </Typography>
+            <Button
+              size="small"
+              onClick={() => setShowProgressDialog(true)}
+              sx={{ 
+                ml: 'auto',
+                minWidth: 'auto',
+                color: 'primary.main',
+                '&:hover': { bgcolor: 'primary.50' }
+              }}
+            >
+              Update
+            </Button>
+          </Box>
+          <LinearProgress
+            variant="determinate"
+            value={task.progress || 0}
+            sx={{
+              height: 6,
+              borderRadius: 3,
+              bgcolor: 'grey.100',
+              '& .MuiLinearProgress-bar': {
+                bgcolor: task.completed ? 'success.main' : 'primary.main',
+                borderRadius: 3
+              }
+            }}
           />
-        </Stack>
+        </Box>
+
+        {/* Latest Comment Section */}
+        {task.latestComment && (
+          <Box 
+            sx={{ 
+              mt: 2,
+              p: 1.5,
+              bgcolor: 'grey.50',
+              borderRadius: 1,
+              border: '1px solid',
+              borderColor: 'grey.100'
+            }}
+          >
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              {task.latestComment.text}
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Avatar 
+                sx={{ 
+                  width: 24, 
+                  height: 24,
+                  fontSize: '0.875rem',
+                  bgcolor: 'primary.main'
+                }}
+              >
+                {task.latestComment.userName.charAt(0)}
+              </Avatar>
+              <Typography variant="caption" color="text.secondary">
+                {task.latestComment.userName} • {format(task.latestComment.timestamp.toDate(), 'MMM d, HH:mm')}
+              </Typography>
+            </Box>
+          </Box>
+        )}
       </CardContent>
 
+      {/* Menu */}
       <Menu
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
-        onClose={handleMenuClose}
+        onClose={() => setAnchorEl(null)}
+        transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+        anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
       >
-        <MenuItem onClick={() => setShowProgressDialog(true)}>Update Progress</MenuItem>
-        {STATUS_VALUES.map((status) => (
-          <MenuItem key={status} onClick={() => handleStatusChange(status)}>
-            {status === 'done' ? 'Mark Complete' : status === 'in_progress' ? 'Mark In Progress' : 'Mark Pending'}
-          </MenuItem>
-        ))}
+        <MenuItem onClick={() => {
+          onEdit(task);
+          setAnchorEl(null);
+        }}>
+          <ListItemIcon>
+            <EditIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Edit</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => {
+          onDelete(task.id);
+          setAnchorEl(null);
+        }}>
+          <ListItemIcon>
+            <DeleteIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Delete</ListItemText>
+        </MenuItem>
       </Menu>
 
-      <Dialog open={showProgressDialog} onClose={() => setShowProgressDialog(false)} maxWidth="sm" fullWidth>
+      {/* Progress Dialog */}
+      <Dialog 
+        open={showProgressDialog} 
+        onClose={() => setShowProgressDialog(false)}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>Update Progress</DialogTitle>
         <DialogContent>
-          <Box sx={{ width: '100%', mt: 2 }}>
-            <Typography gutterBottom>Current Progress: {task.progress || 0}%</Typography>
-            <Typography gutterBottom>New Progress: {progress}%</Typography>
+          <Box sx={{ mt: 2 }}>
+            <Typography gutterBottom>Progress: {progress}%</Typography>
             <Slider
               value={progress}
               onChange={(_, value) => setProgress(value as number)}
-              sx={{ mb: 2 }}
+              sx={{ 
+                mt: 2,
+                '& .MuiSlider-thumb': {
+                  width: 28,
+                  height: 28,
+                  '&:hover, &.Mui-focusVisible': {
+                    boxShadow: '0 0 0 8px rgba(25, 118, 210, 0.16)'
+                  }
+                }
+              }}
             />
             <TextField
-              label="Add Comment"
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
+              fullWidth
               multiline
               rows={3}
-              fullWidth
-              required
-              placeholder="Describe your progress update..."
+              variant="outlined"
+              placeholder="Add a comment..."
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              sx={{ mt: 3 }}
             />
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowProgressDialog(false)}>
-            Cancel
-          </Button>
+          <Button onClick={() => setShowProgressDialog(false)}>Cancel</Button>
           <Button 
-            onClick={handleUpdateProgress}
-            variant="contained"
+            variant="contained" 
+            onClick={handleProgressUpdate}
             disabled={!comment.trim()}
           >
-            Update Progress
+            Update
           </Button>
         </DialogActions>
       </Dialog>
     </Card>
   );
 };
+
+export default TaskCard;

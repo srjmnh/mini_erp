@@ -47,7 +47,8 @@ import {
   Star as StarIcon,
   StarBorder as StarBorderIcon,
   Flag as FlagIcon,
-  AccessTime as TimeIcon,
+  AccessTime as AccessTimeIcon,
+  MoreVert as MoreVertIcon,
   List as ListIcon
 } from '@mui/icons-material';
 import FullCalendar from '@fullcalendar/react';
@@ -87,6 +88,11 @@ interface Task {
     userName: string;
     progress?: number;
   }>;
+  latestComment?: {
+    text: string;
+    userName: string;
+    timestamp: Date;
+  };
 }
 
 interface Event {
@@ -832,28 +838,41 @@ const CalendarPage: React.FC = () => {
     try {
       const { taskId, progress, comment } = selectedTaskProgress;
       const task = tasks.find(t => t.id === taskId);
-      if (!task) return;
+      if (!task || !user) return;
+
+      // Get current user's name
+      let userName = user.displayName;
+      if (!userName) {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        userName = userDoc.data()?.name || userDoc.data()?.email || 'Unknown User';
+      }
 
       const taskRef = task.projectId 
         ? doc(db, `projects/${task.projectId}/tasks/${taskId}`)
         : doc(db, 'tasks', taskId);
 
+      // Create new comment
+      const newComment = {
+        text: comment,
+        timestamp: new Date(),
+        userId: user.uid,
+        userName: userName,
+        progress
+      };
+
       const update = {
         progress,
         lastUpdated: new Date(),
-        comments: [
-          ...(task.comments || []),
-          {
-            text: comment,
-            timestamp: new Date(),
-            userId: user?.uid,
-            userName: user?.displayName || user?.email,
-            progress
-          }
-        ]
+        comments: [newComment, ...(task.comments || [])],
+        latestComment: {
+          text: comment,
+          userName: userName,
+          timestamp: new Date()
+        }
       };
 
       await updateDoc(taskRef, update);
+      await loadTasks(); // Reload tasks to get updated comments
       showSnackbar('Task progress updated', 'success');
       setShowProgressDialog(false);
       setSelectedTaskProgress({ taskId: '', progress: 0, comment: '' });
@@ -883,257 +902,268 @@ const CalendarPage: React.FC = () => {
         Calendar
       </Typography>
       
-      <Grid container spacing={3}>
+      <Grid container spacing={3} sx={{ height: 'calc(100vh - 180px)' }}>
         {/* Left Panel - Tasks */}
-        <Grid item xs={12} md={5}>
-          <Paper sx={{ 
-            p: 3, 
-            height: '700px',
-            borderRadius: 2,
-            display: 'flex',
-            flexDirection: 'column'
-          }}>
-            <Box sx={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center',
-              mb: 2
-            }}>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>Tasks</Typography>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={handleAddTask}
-              >
-                Add Task
-              </Button>
+        <Grid item xs={12} md={5} sx={{ height: '100%' }}>
+          <Paper 
+            sx={{ 
+              p: 2,
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            {/* Tasks Header */}
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="h6" sx={{ mb: 2 }}>Tasks</Typography>
+              <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                <Button
+                  variant={taskFilter === 'all' ? 'contained' : 'outlined'}
+                  size="small"
+                  onClick={() => setTaskFilter('all')}
+                  startIcon={<ListIcon />}
+                >
+                  All
+                </Button>
+                <Button
+                  variant={taskFilter === 'today' ? 'contained' : 'outlined'}
+                  size="small"
+                  onClick={() => setTaskFilter('today')}
+                  startIcon={<TodayIcon />}
+                >
+                  Today
+                </Button>
+                <Button
+                  variant={taskFilter === 'starred' ? 'contained' : 'outlined'}
+                  size="small"
+                  onClick={() => setTaskFilter('starred')}
+                  startIcon={<StarIcon />}
+                >
+                  Starred
+                </Button>
+              </Box>
             </Box>
 
-            {/* Task Filters */}
-            <Box sx={{ 
-              display: 'flex', 
-              gap: 2, 
-              mb: 2,
-              borderBottom: 1,
-              borderColor: 'divider',
-              pb: 2
-            }}>
-              <Button
-                variant={taskFilter === 'all' ? 'contained' : 'outlined'}
-                onClick={() => setTaskFilter('all')}
-                startIcon={<ListIcon />}
-                sx={{ flex: 1 }}
-              >
-                All
-              </Button>
-              <Button
-                variant={taskFilter === 'today' ? 'contained' : 'outlined'}
-                onClick={() => setTaskFilter('today')}
-                startIcon={<TodayIcon />}
-                sx={{ flex: 1 }}
-              >
-                Today
-              </Button>
-              <Button
-                variant={taskFilter === 'starred' ? 'contained' : 'outlined'}
-                onClick={() => setTaskFilter('starred')}
-                startIcon={<StarIcon />}
-                sx={{ flex: 1 }}
-              >
-                Starred
-              </Button>
-            </Box>
-
-            {/* Tasks List */}
-            <List sx={{ 
-              flexGrow: 1, 
-              overflowY: 'auto',
-              mx: -3,  // Negative margin to extend full width
-              px: 2,   // Add padding back
-              '& .MuiListItem-root': {
-                px: 2,
-                py: 2,
-                borderBottom: '1px solid',
-                borderColor: 'divider',
-                '&:last-child': {
-                  borderBottom: 'none'
+            {/* Tasks List - Scrollable */}
+            <Box 
+              sx={{ 
+                flex: 1,
+                overflowY: 'auto',
+                minHeight: 0,
+                maxHeight: 'calc(100vh - 340px)',
+                mr: -2,
+                pr: 2,
+                '&::-webkit-scrollbar': {
+                  width: '8px',
+                },
+                '&::-webkit-scrollbar-track': {
+                  background: 'transparent',
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  background: '#bdbdbd',
+                  borderRadius: '4px',
+                  '&:hover': {
+                    background: '#9e9e9e'
+                  }
                 }
-              }
-            }}>
+              }}
+            >
               {filteredTasks.map((task) => (
-                <ListItem
+                <Box
                   key={task.id}
                   sx={{
-                    backgroundColor: task.completed ? 'action.hover' : 'transparent',
-                    transition: 'background-color 0.2s',
+                    mb: 2,
+                    p: 2,
+                    bgcolor: 'background.paper',
+                    borderRadius: 2,
+                    border: '1px solid',
+                    borderColor: 'divider',
                     '&:hover': {
-                      backgroundColor: 'action.hover'
+                      borderColor: 'primary.main',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
                     }
                   }}
                 >
-                  <ListItemIcon sx={{ minWidth: 42 }}>
-                    <Checkbox
-                      edge="start"
-                      checked={task.completed}
-                      onChange={() => handleToggleTask(task)}
-                    />
-                  </ListItemIcon>
-                  
-                  <ListItemText
-                    primary={
-                      <Box sx={{ mb: 1 }}>
-                        <Typography
-                          variant="subtitle1"
-                          sx={{
-                            textDecoration: task.completed ? 'line-through' : 'none',
-                            color: task.completed ? 'text.secondary' : 'text.primary',
+                  {/* Header Section */}
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                      <Checkbox 
+                        checked={task.completed}
+                        onChange={() => handleToggleTask(task)}
+                        sx={{ 
+                          ml: -1,
+                          '&.Mui-checked': {
+                            color: 'success.main'
+                          }
+                        }}
+                      />
+                      <Box>
+                        <Typography 
+                          variant="subtitle1" 
+                          sx={{ 
                             fontWeight: 500,
-                            mb: 0.5
+                            textDecoration: task.completed ? 'line-through' : 'none',
+                            color: task.completed ? 'text.secondary' : 'text.primary'
                           }}
                         >
                           {task.title}
                         </Typography>
-                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
                           {task.assignee && (
                             <Chip
-                              avatar={task.assignee.photoURL ? (
-                                <Avatar src={task.assignee.photoURL} alt={task.assignee.name} />
-                              ) : (
-                                <Avatar>{task.assignee.name[0]}</Avatar>
-                              )}
+                              avatar={
+                                <Avatar 
+                                  src={task.assignee.photoURL} 
+                                  sx={{ width: 20, height: 20 }}
+                                >
+                                  {task.assignee.name.charAt(0)}
+                                </Avatar>
+                              }
                               label={task.assignee.name}
                               size="small"
-                              sx={{ 
-                                backgroundColor: 'grey.100',
-                                '& .MuiChip-avatar': {
-                                  width: 20,
-                                  height: 20
-                                }
-                              }}
+                              variant="outlined"
+                              sx={{ height: 24 }}
                             />
                           )}
-                          {task.projectName && (
-                            <Chip
-                              label={task.projectName}
-                              size="small"
-                              sx={{ 
-                                backgroundColor: 'primary.main',
-                                color: 'primary.contrastText'
-                              }}
-                            />
-                          )}
-                          {task.priority && (
-                            <Chip
-                              label={task.priority}
-                              size="small"
-                              sx={{
-                                backgroundColor: getPriorityColor(task.priority),
-                                color: '#fff'
-                              }}
-                            />
+                          <Chip
+                            label={task.priority}
+                            size="small"
+                            sx={{
+                              height: 24,
+                              bgcolor: 
+                                task.priority === 'high' ? 'error.main' :
+                                task.priority === 'medium' ? 'warning.main' : 'success.main',
+                              color: '#fff'
+                            }}
+                          />
+                          {task.dueDate && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
+                              <AccessTimeIcon sx={{ fontSize: 14, mr: 0.5 }} />
+                              {format(new Date(task.dueDate), 'MMM d')}
+                            </Typography>
                           )}
                         </Box>
                       </Box>
-                    }
-                    secondary={
-                      <Stack spacing={1}>
-                        <Typography variant="body2" color="text.secondary">
-                          {task.description}
-                        </Typography>
-                        
-                        {/* Progress Bar */}
-                        <Box>
-                          <Box display="flex" justifyContent="space-between" alignItems="center" mb={0.5}>
-                            <Typography variant="caption" color="text.secondary">
-                              Progress: {task.progress || 0}%
-                            </Typography>
-                            <Button
-                              size="small"
-                              onClick={() => {
-                                setSelectedTaskProgress({
-                                  taskId: task.id,
-                                  progress: task.progress || 0,
-                                  comment: ''
-                                });
-                                setShowProgressDialog(true);
-                              }}
-                            >
-                              Update
-                            </Button>
-                          </Box>
-                          <LinearProgress
-                            variant="determinate"
-                            value={task.progress || 0}
-                            sx={{ height: 6, borderRadius: 1 }}
-                          />
-                        </Box>
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleToggleStarred(task)}
+                        sx={{ color: task.starred ? 'warning.main' : 'action.disabled' }}
+                      >
+                        {task.starred ? <StarIcon /> : <StarBorderIcon />}
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setSelectedTask(task);
+                          setIsNewTask(false);
+                          setIsTaskDialogOpen(true);
+                        }}
+                      >
+                        <EditIcon />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteTask(task.id, task.projectId)}
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </Box>
+                  </Box>
 
-                        {/* Latest Comment */}
-                        {task.comments?.length > 0 && (
-                          <Box bgcolor="action.hover" p={1} borderRadius={1}>
-                            <Typography variant="caption" color="text.secondary">
-                              Latest Update:
-                            </Typography>
-                            <Typography variant="body2">
-                              {task.comments[task.comments.length - 1].text}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {formatTaskDate(task.comments[task.comments.length - 1].timestamp)}
-                            </Typography>
-                          </Box>
-                        )}
+                  {/* Progress Section */}
+                  <Box sx={{ mb: task.comments?.length ? 2 : 0 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Progress: {task.progress || 0}%
+                      </Typography>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setSelectedTaskProgress({
+                            taskId: task.id,
+                            progress: task.progress || 0,
+                            comment: ''
+                          });
+                          setShowProgressDialog(true);
+                        }}
+                        sx={{ 
+                          ml: 'auto',
+                          minWidth: 'auto',
+                          color: 'primary.main',
+                          '&:hover': { bgcolor: 'primary.50' }
+                        }}
+                      >
+                        Update
+                      </Button>
+                    </Box>
+                    <LinearProgress
+                      variant="determinate"
+                      value={task.progress || 0}
+                      sx={{
+                        height: 6,
+                        borderRadius: 3,
+                        bgcolor: 'grey.100',
+                        '& .MuiLinearProgress-bar': {
+                          bgcolor: task.completed ? 'success.main' : 'primary.main',
+                          borderRadius: 3
+                        }
+                      }}
+                    />
+                  </Box>
 
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Chip
-                            size="small"
-                            label={task.priority}
-                            color={task.priority === 'high' ? 'error' : task.priority === 'medium' ? 'warning' : 'default'}
-                          />
-                          {task.dueDate && (
-                            <Typography variant="caption" color="text.secondary">
-                              Due: {formatTaskDate(task.dueDate)}
-                            </Typography>
-                          )}
-                          {task.assignee && (
-                            <Tooltip title={task.assignee.name}>
-                              <Avatar
-                                src={task.assignee.photoURL}
-                                sx={{ width: 24, height: 24 }}
-                              >
-                                {task.assignee.name[0]}
-                              </Avatar>
-                            </Tooltip>
-                          )}
-                        </Stack>
-                      </Stack>
-                    }
-                  />
-                  
-                  <Box sx={{ 
-                    display: 'flex', 
-                    gap: 1,
-                    ml: 2
-                  }}>
-                    <IconButton 
-                      size="small"
-                      onClick={() => {
-                        setSelectedTask(task);
-                        setIsNewTask(false);
-                        setIsTaskDialogOpen(true);
+                  {/* Latest Comment Section */}
+                  {task.comments && task.comments.length > 0 && (
+                    <Box 
+                      sx={{ 
+                        mt: 2,
+                        p: 1.5,
+                        bgcolor: 'grey.50',
+                        borderRadius: 1,
+                        border: '1px solid',
+                        borderColor: 'grey.100'
                       }}
                     >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton 
-                      size="small"
-                      onClick={() => handleDeleteTask(task.id, task.projectId)}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </Box>
-                </ListItem>
+                      <Typography variant="body2" sx={{ mb: 1 }}>
+                        {task.comments[0].text}
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Avatar 
+                          sx={{ 
+                            width: 24, 
+                            height: 24,
+                            fontSize: '0.875rem',
+                            bgcolor: 'primary.main'
+                          }}
+                        >
+                          {task.comments[0].userName.charAt(0)}
+                        </Avatar>
+                        <Typography variant="caption" color="text.secondary">
+                          {task.comments[0].userName} • {format(task.comments[0].timestamp.toDate(), 'MMM d, HH:mm')}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+                </Box>
               ))}
-            </List>
+            </Box>
+
+            {/* Add Task Button - Fixed at bottom */}
+            <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+              <Button
+                fullWidth
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => {
+                  setSelectedTask(null);
+                  setIsNewTask(true);
+                  setIsTaskDialogOpen(true);
+                }}
+              >
+                Add Task
+              </Button>
+            </Box>
           </Paper>
         </Grid>
 

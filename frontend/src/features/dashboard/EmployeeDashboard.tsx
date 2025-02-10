@@ -40,6 +40,8 @@ import {
   AccessTime as TimeIcon,
   Add as AddIcon,
   Receipt as ExpenseIcon,
+  AccessTime as AccessTimeIcon,
+  Edit as EditIcon,
 } from '@mui/icons-material';
 import {
   collection,
@@ -520,85 +522,6 @@ const TimeOffCard = () => {
   const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
 
   // Listen to leave requests
-  useEffect(() => {
-    if (!employeeData?.id) return;
-
-    // Get user's own leave requests
-    const userRequestsQuery = query(
-      collection(db, 'leaveRequests'),
-      where('employeeId', '==', employeeData.id),
-      orderBy('createdAt', 'desc')
-    );
-
-    const userRequestsUnsubscribe = onSnapshot(userRequestsQuery, (snapshot) => {
-      const requests = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate(),
-        startDate: doc.data().startDate?.toDate(),
-        endDate: doc.data().endDate?.toDate(),
-      }));
-      setLeaveRequests(requests);
-    });
-
-    // For HR, get all pending requests
-    // For managers, get their department's requests
-    let approvalsQuery;
-    console.log('Debug - User Role:', userRole);
-    console.log('Debug - Employee Data:', employeeData);
-    console.log('Debug - Is Manager:', employeeData?.isManager);
-    console.log('Debug - Department ID:', employeeData?.departmentId);
-
-    if (userRole === 'HR0' || userRole === 'hr') {
-      console.log('Debug - Setting HR query');
-      approvalsQuery = query(
-        collection(db, 'leaveRequests'),
-        where('status', '==', 'pending'),
-        orderBy('createdAt', 'desc')
-      );
-    } else if (employeeData?.departmentId) {
-      console.log('Debug - Setting manager query');
-      approvalsQuery = query(
-        collection(db, 'leaveRequests'),
-        where('departmentId', '==', employeeData.departmentId),
-        where('status', '==', 'pending'),
-        orderBy('createdAt', 'desc')
-      );
-    }
-
-    let approvalsUnsubscribe = () => {};
-    if (approvalsQuery) {
-      console.log('Debug - Setting up snapshot listener');
-      approvalsUnsubscribe = onSnapshot(approvalsQuery, async (snapshot) => {
-        console.log('Debug - Snapshot received:', snapshot.docs.length, 'documents');
-        const requests = await Promise.all(snapshot.docs.map(async (doc) => {
-          const data = doc.data();
-          // Get employee details
-          // Get employee details from Firestore
-          const employeeRef = doc(db, 'users', data.employeeId);
-          const employeeDoc = await getDoc(employeeRef);
-          const employeeData = employeeDoc.exists() ? employeeDoc.data() : null;
-          
-          return {
-            id: doc.id,
-            ...data,
-            createdAt: data.createdAt?.toDate(),
-            startDate: data.startDate?.toDate(),
-            endDate: data.endDate?.toDate(),
-            employeeName: employeeData ? `${employeeData.firstName} ${employeeData.lastName}` : 'Unknown',
-            department: employeeData?.department || 'Unknown'
-          };
-        }));
-        setPendingApprovals(requests);
-      });
-    }
-
-    return () => {
-      userRequestsUnsubscribe();
-      approvalsUnsubscribe();
-    };
-  }, [employeeData?.id, userRole, employeeData?.isManager, employeeData?.departmentId]);
-
   useEffect(() => {
     const fetchEmployeeAndManager = async () => {
       if (!user?.email) return;
@@ -1265,7 +1188,15 @@ export const EmployeeDashboard = () => {
                                     task.dueDate && (
                                       <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                         <TimeIcon fontSize="small" />
-                                        Due: {format(safeConvertToDate(task.dueDate) || new Date(), 'MMM d, yyyy')}
+                                        Due: {
+                                          task.dueDate instanceof Date 
+                                            ? format(task.dueDate, 'MMM d, yyyy')
+                                            : task.dueDate?.toDate 
+                                              ? format(task.dueDate.toDate(), 'MMM d, yyyy')
+                                              : task.dueDate 
+                                                ? format(new Date(task.dueDate), 'MMM d, yyyy')
+                                                : 'No due date'
+                                        }
                                       </Typography>
                                     )
                                   }
@@ -1331,48 +1262,177 @@ export const EmployeeDashboard = () => {
           </Box>
 
           {/* Tasks Section */}
-          <Box>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">
-                Your Tasks
-              </Typography>
-              <Button
-                variant="contained"
-                color="primary"
-                sx={{
-                  bgcolor: 'primary.light',
-                  color: 'primary.main',
+          <Box sx={{ mt: 3 }}>
+            <Typography variant="h6" sx={{ mb: 2 }}>Your Tasks</Typography>
+            <Box 
+              sx={{ 
+                maxHeight: 400,
+                overflowY: 'auto',
+                '&::-webkit-scrollbar': {
+                  width: '8px',
+                },
+                '&::-webkit-scrollbar-track': {
+                  background: 'transparent',
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  background: '#bdbdbd',
+                  borderRadius: '4px',
                   '&:hover': {
-                    bgcolor: 'primary.main',
-                    color: 'primary.contrastText',
-                  },
-                }}
-              >
-                View All Tasks
-              </Button>
-            </Box>
-            <Grid container spacing={2}>
-              {loading ? (
-                <Box sx={{ p: 2, textAlign: 'center', width: '100%' }}>
-                  <CircularProgress size={24} />
-                </Box>
-              ) : tasks.length === 0 ? (
-                <Box sx={{ p: 2, textAlign: 'center', width: '100%' }}>
-                  <Typography color="text.secondary">
-                    No tasks assigned to you
-                  </Typography>
-                </Box>
-              ) : (
-                tasks.map((task) => (
-                  <Grid item xs={12} md={6} lg={4} key={task.id}>
-                    <TaskCard 
-                      task={task} 
-                      onStatusChange={handleTaskStatusChange}
+                    background: '#9e9e9e'
+                  }
+                }
+              }}
+            >
+              {tasks.map((task) => (
+                <Box
+                  key={task.id}
+                  sx={{
+                    mb: 2,
+                    p: 2,
+                    bgcolor: 'background.paper',
+                    borderRadius: 2,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    '&:hover': {
+                      borderColor: 'primary.main',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+                    }
+                  }}
+                >
+                  {/* Header Section */}
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                      <Checkbox 
+                        checked={task.completed}
+                        onChange={() => handleToggleTaskStatus(task)}
+                        sx={{ 
+                          ml: -1,
+                          '&.Mui-checked': {
+                            color: 'success.main'
+                          }
+                        }}
+                      />
+                      <Box>
+                        <Typography 
+                          variant="subtitle1" 
+                          sx={{ 
+                            fontWeight: 500,
+                            textDecoration: task.completed ? 'line-through' : 'none',
+                            color: task.completed ? 'text.secondary' : 'text.primary'
+                          }}
+                        >
+                          {task.title}
+                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                          <Chip
+                            label={task.priority}
+                            size="small"
+                            sx={{
+                              height: 24,
+                              bgcolor: 
+                                task.priority === 'high' ? 'error.main' :
+                                task.priority === 'medium' ? 'warning.main' : 'success.main',
+                              color: '#fff'
+                            }}
+                          />
+                          {task.dueDate && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
+                              <AccessTimeIcon sx={{ fontSize: 14, mr: 0.5 }} />
+                              {
+                                task.dueDate instanceof Date 
+                                  ? format(task.dueDate, 'MMM d, yyyy')
+                                  : task.dueDate?.toDate 
+                                    ? format(task.dueDate.toDate(), 'MMM d, yyyy')
+                                    : task.dueDate 
+                                      ? format(new Date(task.dueDate), 'MMM d, yyyy')
+                                      : 'No due date'
+                              }
+                            </Typography>
+                          )}
+                        </Box>
+                      </Box>
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleEditTask(task)}
+                      >
+                        <EditIcon />
+                      </IconButton>
+                    </Box>
+                  </Box>
+
+                  {/* Progress Section */}
+                  <Box sx={{ mb: task.comments?.length ? 2 : 0 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Progress: {task.progress || 0}%
+                      </Typography>
+                      <Button
+                        size="small"
+                        onClick={() => handleUpdateProgress(task)}
+                        sx={{ 
+                          ml: 'auto',
+                          minWidth: 'auto',
+                          color: 'primary.main',
+                          '&:hover': { bgcolor: 'primary.50' }
+                        }}
+                      >
+                        Update
+                      </Button>
+                    </Box>
+                    <LinearProgress
+                      variant="determinate"
+                      value={task.progress || 0}
+                      sx={{
+                        height: 6,
+                        borderRadius: 3,
+                        bgcolor: 'grey.100',
+                        '& .MuiLinearProgress-bar': {
+                          bgcolor: task.completed ? 'success.main' : 'primary.main',
+                          borderRadius: 3
+                        }
+                      }}
                     />
-                  </Grid>
-                ))
-              )}
-            </Grid>
+                  </Box>
+
+                  {/* Latest Comment Section */}
+                  {task.comments && task.comments.length > 0 && task.comments[0].timestamp && (
+                    <Box 
+                      sx={{ 
+                        mt: 2,
+                        p: 1.5,
+                        bgcolor: 'grey.50',
+                        borderRadius: 1,
+                        border: '1px solid',
+                        borderColor: 'grey.100'
+                      }}
+                    >
+                      <Typography variant="body2">
+                        {task.comments[0].text}
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Avatar 
+                          sx={{ 
+                            width: 24, 
+                            height: 24,
+                            fontSize: '0.875rem',
+                            bgcolor: 'primary.main'
+                          }}
+                        >
+                          {task.comments[0].userName?.charAt(0) || '?'}
+                        </Avatar>
+                        <Typography variant="caption" color="text.secondary">
+                          {task.comments[0].userName || 'Unknown'} • {task.comments[0].timestamp?.toDate ? 
+                            format(task.comments[0].timestamp.toDate(), 'MMM d, HH:mm') : 
+                            format(new Date(task.comments[0].timestamp), 'MMM d, HH:mm')}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+                </Box>
+              ))}
+            </Box>
           </Box>
 
           {/* Expenses Section */}
