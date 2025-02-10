@@ -29,6 +29,8 @@ import {
   Checkbox,
   CircularProgress,
   Paper,
+  LinearProgress,
+  Slider,
 } from '@mui/material';
 import {
   Person as PersonIcon,
@@ -59,6 +61,7 @@ import { useRequests } from '@/hooks/useRequests';
 import { MiniCalendar } from '@/components/calendar/MiniCalendar';
 import ExpenseForm from '../expenses/ExpenseForm';
 import ExpenseCard from './components/ExpenseCard';
+import { useManagerData } from '@/hooks/useManagerData';
 
 // Helper function to check if a date is overdue
 const isOverdue = (date: Date) => {
@@ -117,6 +120,35 @@ const formatProjectDate = (date: any) => {
   } catch (error) {
     console.error('Error formatting date:', error);
     return 'Invalid date';
+  }
+};
+
+// Safe date formatting
+const formatTaskDate = (date: any): string => {
+  if (!date) return '';
+  try {
+    // If it's a Firebase Timestamp
+    if (date?.toDate) {
+      return format(date.toDate(), 'MMM d, yyyy HH:mm');
+    }
+    
+    // If it's already a Date
+    if (date instanceof Date) {
+      return format(date, 'MMM d, yyyy HH:mm');
+    }
+    
+    // If it's an ISO string
+    if (typeof date === 'string') {
+      const parsed = new Date(date);
+      if (!isNaN(parsed.getTime())) {
+        return format(parsed, 'MMM d, yyyy HH:mm');
+      }
+    }
+    
+    return '';
+  } catch (error) {
+    console.error('Error formatting date:', error, date);
+    return '';
   }
 };
 
@@ -256,18 +288,42 @@ const ProjectCard = ({ project }) => {
 // Task Card
 const TaskCard = ({ task, onStatusChange }) => {
   const [anchorEl, setAnchorEl] = useState(null);
+  const [showProgressDialog, setShowProgressDialog] = useState(false);
+  const [progress, setProgress] = useState(task.progress || 0);
+  const [comment, setComment] = useState('');
+  const { user } = useAuth();
 
-  const statusColors = {
-    todo: 'default',
-    in_progress: 'primary',
-    review: 'warning',
-    done: 'success',
-  };
+  const handleUpdateProgress = async () => {
+    try {
+      if (!comment.trim()) {
+        return;
+      }
 
-  const nextStatus = {
-    todo: 'in_progress',
-    in_progress: 'review',
-    review: 'done',
+      const taskRef = task.projectId 
+        ? doc(db, `projects/${task.projectId}/tasks/${task.id}`)
+        : doc(db, 'tasks', task.id);
+
+      const update = {
+        progress,
+        lastUpdated: new Date(),
+        comments: [...(task.comments || []), {
+          text: comment,
+          timestamp: new Date(),
+          userId: user?.uid,
+          userName: user?.displayName || user?.email,
+          progress
+        }]
+      };
+      
+      await updateDoc(taskRef, update);
+      setShowProgressDialog(false);
+      setComment('');
+      if (onStatusChange) {
+        onStatusChange(task.id, task.status || 'todo');
+      }
+    } catch (error) {
+      console.error('Error updating task progress:', error);
+    }
   };
 
   return (
@@ -303,10 +359,47 @@ const TaskCard = ({ task, onStatusChange }) => {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             {task.description}
           </Typography>
+          
+          {/* Progress Bar */}
+          <Box>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+              <Typography variant="body2" color="text.secondary">
+                Progress
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {task.progress || 0}%
+              </Typography>
+            </Box>
+            <LinearProgress 
+              variant="determinate" 
+              value={task.progress || 0}
+              sx={{ height: 6, borderRadius: 1 }}
+            />
+          </Box>
+
+          {/* Latest Comment */}
+          {task.comments?.length > 0 && (
+            <Box bgcolor="action.hover" p={1} borderRadius={1}>
+              <Typography variant="caption" color="text.secondary">
+                Latest Update
+              </Typography>
+              <Typography variant="body2">
+                {task.comments[task.comments.length - 1].text}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {formatTaskDate(task.comments[task.comments.length - 1].timestamp)}
+              </Typography>
+            </Box>
+          )}
+
           <Box display="flex" justifyContent="space-between" alignItems="center">
             <Chip
-              label={task.status.toUpperCase().replace('_', ' ')}
-              color={statusColors[task.status]}
+              label={task.status?.toUpperCase().replace('_', ' ') || 'TODO'}
+              color={
+                (task.status || 'todo') === 'done' ? 'success' :
+                (task.status || 'todo') === 'in_progress' ? 'primary' :
+                (task.status || 'todo') === 'review' ? 'warning' : 'default'
+              }
               size="small"
               sx={{ 
                 textTransform: 'capitalize',
@@ -323,11 +416,12 @@ const TaskCard = ({ task, onStatusChange }) => {
               }}
             >
               <TimeIcon fontSize="small" />
-              Due: {format(safeConvertToDate(task.dueDate) || new Date(), 'MMM d, yyyy')}
+              Due: {formatTaskDate(task.dueDate)}
             </Typography>
           </Box>
         </Stack>
       </CardContent>
+
       <Menu
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
@@ -341,20 +435,68 @@ const TaskCard = ({ task, onStatusChange }) => {
           },
         }}
       >
-        {task.status !== 'done' && (
+        <MenuItem onClick={() => {
+          setShowProgressDialog(true);
+          setAnchorEl(null);
+        }}>
+          Update Progress
+        </MenuItem>
+        {(task.status || 'todo') !== 'done' && (
           <MenuItem
             onClick={() => {
-              onStatusChange(task.id, nextStatus[task.status]);
+              onStatusChange(task.id, 'done');
               setAnchorEl(null);
             }}
           >
-            Move to {nextStatus[task.status].replace('_', ' ').toUpperCase()}
+            Mark as Complete
           </MenuItem>
         )}
-        <MenuItem onClick={() => window.location.href = `/tasks/${task.id}`}>
-          View Details
-        </MenuItem>
       </Menu>
+
+      {/* Progress Update Dialog */}
+      <Dialog 
+        open={showProgressDialog} 
+        onClose={() => setShowProgressDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Update Task Progress</DialogTitle>
+        <DialogContent>
+          <Stack spacing={3} sx={{ mt: 2 }}>
+            <Box>
+              <Typography gutterBottom>Progress: {progress}%</Typography>
+              <Slider
+                value={progress}
+                onChange={(_, value) => setProgress(value as number)}
+                valueLabelDisplay="auto"
+                step={5}
+                marks
+                min={0}
+                max={100}
+              />
+            </Box>
+            <TextField
+              label="Comment"
+              multiline
+              rows={3}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Add a comment about your progress..."
+              fullWidth
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowProgressDialog(false)}>Cancel</Button>
+          <Button
+            onClick={handleUpdateProgress}
+            variant="contained"
+            disabled={!comment.trim()}
+          >
+            Update
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Card>
   );
 };
@@ -751,16 +893,58 @@ const TimeOffCard = () => {
 
 export const EmployeeDashboard = () => {
   const { user, userRole } = useAuth();
+  const { department, departmentProjects = [], loading: projectsLoading } = useManagerData();
   const [teamMembers, setTeamMembers] = useState([]);
-  const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(0);
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [currentTab, setCurrentTab] = useState(0);
   const [recentExpenses, setRecentExpenses] = useState([]);
   const [showExpenseDialog, setShowExpenseDialog] = useState(false);
 
-  // Load tasks for user
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      if (!user) return;
+      setLoading(true);
+      try {
+        // Get employee details for non-HR users
+        const employeeSnapshot = await getDocs(
+          query(collection(db, 'employees'), where('email', '==', user.email))
+        );
+        
+        if (employeeSnapshot.empty) {
+          console.error('No employee record found for the current user');
+          setLoading(false);
+          return;
+        }
+
+        const employeeData = employeeSnapshot.docs[0].data();
+        const departmentId = employeeData.departmentId;
+
+        // Load recent expenses
+        const expensesRef = collection(db, 'expenses');
+        const expensesQuery = query(
+          expensesRef, 
+          where('employeeId', '==', user.uid), 
+          orderBy('createdAt', 'desc')
+        );
+        const expensesSnapshot = await getDocs(expensesQuery);
+        const expensesData = expensesSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setRecentExpenses(expensesData);
+
+        setLoading(false);
+      } catch (error) {
+        console.error('Error loading dashboard data:', error);
+        setLoading(false);
+      }
+    };
+
+    loadDashboardData();
+  }, [user]);
+
   const loadTasks = useCallback(async () => {
     if (!user) return;
 
@@ -781,7 +965,12 @@ export const EmployeeDashboard = () => {
           projectId: projectDoc.id,
           projectName: projectDoc.data().name,
           ...doc.data(),
-          dueDate: doc.data().dueDate // Keep as Timestamp
+          // Set default values for required fields
+          status: doc.data().status || 'todo',
+          progress: doc.data().progress || 0,
+          comments: doc.data().comments || [],
+          priority: doc.data().priority || 'medium',
+          dueDate: doc.data().dueDate || null
         }));
 
         allTasks = [...allTasks, ...projectTasks];
@@ -795,22 +984,26 @@ export const EmployeeDashboard = () => {
       const rootTasks = rootTasksSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        dueDate: doc.data().dueDate // Keep as Timestamp
+        // Set default values for required fields
+        status: doc.data().status || 'todo',
+        progress: doc.data().progress || 0,
+        comments: doc.data().comments || [],
+        priority: doc.data().priority || 'medium',
+        dueDate: doc.data().dueDate || null
       }));
 
       allTasks = [...allTasks, ...rootTasks];
 
       // Sort tasks by due date and completion status
       const sortedTasks = allTasks.sort((a, b) => {
-        if (a.completed === b.completed) {
-          const aDate = safeConvertToDate(a.dueDate);
-          const bDate = safeConvertToDate(b.dueDate);
-          return (aDate?.getTime() || 0) - (bDate?.getTime() || 0);
-        }
-        return a.completed ? 1 : -1;
+        if (a.status === 'done' && b.status !== 'done') return 1;
+        if (a.status !== 'done' && b.status === 'done') return -1;
+        
+        const aDate = safeConvertToDate(a.dueDate);
+        const bDate = safeConvertToDate(b.dueDate);
+        return (aDate?.getTime() || 0) - (bDate?.getTime() || 0);
       });
 
-      console.log('Loaded tasks for mini calendar:', sortedTasks);
       setTasks(sortedTasks);
     } catch (error) {
       console.error('Error loading tasks:', error);
@@ -818,83 +1011,12 @@ export const EmployeeDashboard = () => {
   }, [user]);
 
   useEffect(() => {
-    const loadDashboardData = async () => {
-      if (!user) return;
-      setLoading(true);
-      try {
-        await loadTasks();
-        let departmentId: string | null = null;
-        let employeeId: string | null = null;
-
-        // For HR users, we'll show all departments
-        if (userRole === 'HR0') {
-          // Get all employees from all departments
-          const employeesSnapshot = await getDocs(collection(db, 'employees'));
-          setTeamMembers(
-            employeesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-          );
-        } else {
-          // Get employee details for non-HR users
-          const employeeSnapshot = await getDocs(
-            query(collection(db, 'employees'), where('email', '==', user.email))
-          );
-          
-          if (employeeSnapshot.empty) {
-            console.error('No employee record found for the current user');
-            setLoading(false);
-            return;
-          }
-
-          const employeeData = employeeSnapshot.docs[0].data();
-          departmentId = employeeData.departmentId;
-          employeeId = employeeSnapshot.docs[0].id;
-
-          if (!departmentId) {
-            console.error('Employee has no department assigned');
-            setLoading(false);
-            return;
-          }
-
-          // Get team members for the employee's department
-          const teamQuery = query(
-            collection(db, 'employees'),
-            where('departmentId', '==', departmentId)
-          );
-          const teamSnapshot = await getDocs(teamQuery);
-          setTeamMembers(
-            teamSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-          );
-        }
-
-        // Load projects
-        const projectsRef = collection(db, 'projects');
-        const projectsSnapshot = await getDocs(projectsRef);
-        const projectsData = projectsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setProjects(projectsData);
-
-        // Load recent expenses
-        const expensesRef = collection(db, 'expenses');
-        const expensesQuery = query(expensesRef, where('employeeId', '==', user.uid), orderBy('createdAt', 'desc'));
-        const expensesSnapshot = await getDocs(expensesQuery);
-        const recentExpensesData = expensesSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          createdAt: doc.data().createdAt?.toDate(),
-          submittedAt: doc.data().submittedAt?.toDate(),
-        }));
-        setRecentExpenses(recentExpensesData);
-      } catch (error) {
-        console.error('Error loading dashboard data:', error);
-      } finally {
-        setLoading(false);
-      }
+    const loadTasksData = async () => {
+      await loadTasks();
     };
 
-    loadDashboardData();
-  }, [user]);
+    loadTasksData();
+  }, [loadTasks]);
 
   const handleTaskStatusChange = async (taskId: string, newStatus: TaskStatus) => {
     // Find the task and its project
@@ -902,14 +1024,23 @@ export const EmployeeDashboard = () => {
     if (!task) return;
 
     try {
-      await updateDoc(doc(db, 'tasks', taskId), {
+      const updates = {
         status: newStatus,
+        completed: newStatus === 'done',
         updatedAt: new Date()
-      });
+      };
+
+      // If task has projectId, it's in a project subcollection
+      if (task.projectId) {
+        await updateDoc(doc(db, `projects/${task.projectId}/tasks`, taskId), updates);
+      } else {
+        // Otherwise it's in the root tasks collection
+        await updateDoc(doc(db, 'tasks', taskId), updates);
+      }
 
       // Update local state
       setTasks(tasks.map(t =>
-        t.id === taskId ? { ...t, status: newStatus } : t
+        t.id === taskId ? { ...t, ...updates } : t
       ));
     } catch (error) {
       console.error('Error updating task status:', error);
@@ -927,7 +1058,7 @@ export const EmployeeDashboard = () => {
         status: 'todo',
         assigneeId: user.uid,
         createdAt: new Date(),
-        dueDate: selectedDate,
+        dueDate: new Date(),
         priority: 'medium'
       };
 
@@ -1010,7 +1141,7 @@ export const EmployeeDashboard = () => {
     );
   }
 
-  const activeProjects = projects.filter(p => p.status === 'active').length;
+  const activeProjects = departmentProjects.length;
   const completedTasks = tasks.filter(t => t.status === 'done').length;
   const pendingTasks = tasks.filter(t => t.status !== 'done').length;
 
@@ -1026,8 +1157,8 @@ export const EmployeeDashboard = () => {
                 <Grid item xs={12} md={4}>
                   <Card sx={{ 
                     height: '100%',
-                    bgcolor: 'primary.light',
-                    color: 'primary.contrastText',
+                    background: 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)',
+                    color: '#FFFFFF',
                     '&:hover': {
                       transform: 'translateY(-4px)',
                       boxShadow: 4
@@ -1036,15 +1167,15 @@ export const EmployeeDashboard = () => {
                   }}>
                     <CardContent>
                       <Box display="flex" alignItems="center" gap={2}>
-                        <Avatar sx={{ bgcolor: 'primary.main' }}>
+                        <Avatar sx={{ bgcolor: 'rgba(255, 255, 255, 0.2)' }}>
                           <ProjectIcon />
                         </Avatar>
                         <Box>
                           <Typography variant="h4" fontWeight="bold">
                             {activeProjects}
                           </Typography>
-                          <Typography variant="subtitle2">
-                            Active Projects
+                          <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>
+                            My Active Projects
                           </Typography>
                         </Box>
                       </Box>
@@ -1054,8 +1185,8 @@ export const EmployeeDashboard = () => {
                 <Grid item xs={12} md={4}>
                   <Card sx={{ 
                     height: '100%',
-                    bgcolor: 'success.light',
-                    color: 'success.contrastText',
+                    background: 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)',
+                    color: '#FFFFFF',
                     '&:hover': {
                       transform: 'translateY(-4px)',
                       boxShadow: 4
@@ -1064,14 +1195,14 @@ export const EmployeeDashboard = () => {
                   }}>
                     <CardContent>
                       <Box display="flex" alignItems="center" gap={2}>
-                        <Avatar sx={{ bgcolor: 'success.main' }}>
+                        <Avatar sx={{ bgcolor: 'rgba(255, 255, 255, 0.2)' }}>
                           <TaskIcon />
                         </Avatar>
                         <Box>
                           <Typography variant="h4" fontWeight="bold">
                             {completedTasks}
                           </Typography>
-                          <Typography variant="subtitle2">
+                          <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>
                             Completed Tasks
                           </Typography>
                         </Box>
@@ -1082,8 +1213,8 @@ export const EmployeeDashboard = () => {
                 <Grid item xs={12} md={4}>
                   <Card sx={{ 
                     height: '100%',
-                    bgcolor: 'warning.light',
-                    color: 'warning.contrastText',
+                    background: 'linear-gradient(135deg, #FF9800 0%, #F57C00 100%)',
+                    color: '#FFFFFF',
                     '&:hover': {
                       transform: 'translateY(-4px)',
                       boxShadow: 4
@@ -1092,14 +1223,14 @@ export const EmployeeDashboard = () => {
                   }}>
                     <CardContent>
                       <Box display="flex" alignItems="center" gap={2}>
-                        <Avatar sx={{ bgcolor: 'warning.main' }}>
+                        <Avatar sx={{ bgcolor: 'rgba(255, 255, 255, 0.2)' }}>
                           <TimeIcon />
                         </Avatar>
                         <Box>
                           <Typography variant="h4" fontWeight="bold">
                             {pendingTasks}
                           </Typography>
-                          <Typography variant="subtitle2">
+                          <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>
                             Pending Tasks
                           </Typography>
                         </Box>
@@ -1129,37 +1260,14 @@ export const EmployeeDashboard = () => {
                                   <TaskIcon color={task.status === 'done' ? 'success' : 'action'} />
                                 </ListItemIcon>
                                 <ListItemText 
-                                  primary={
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                      <Typography variant="body1">{task.title}</Typography>
-                                      {task.priority && (
-                                        <Chip 
-                                          size="small" 
-                                          label={task.priority}
-                                          color={
-                                            task.priority === 'high' ? 'error' :
-                                            task.priority === 'medium' ? 'warning' : 'default'
-                                          }
-                                          sx={{ height: 20 }}
-                                        />
-                                      )}
-                                    </Box>
-                                  }
+                                  primary={task.title}
                                   secondary={
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                                      {task.dueDate && (
-                                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                          <TimeIcon fontSize="small" />
-                                          Due: {format(safeConvertToDate(task.dueDate) || new Date(), 'MMM d, yyyy')}
-                                        </Typography>
-                                      )}
-                                      <Chip 
-                                        size="small"
-                                        label={task.status}
-                                        color={task.status === 'done' ? 'success' : 'default'}
-                                        sx={{ height: 20 }}
-                                      />
-                                    </Box>
+                                    task.dueDate && (
+                                      <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                        <TimeIcon fontSize="small" />
+                                        Due: {format(safeConvertToDate(task.dueDate) || new Date(), 'MMM d, yyyy')}
+                                      </Typography>
+                                    )
                                   }
                                 />
                               </ListItemButton>
@@ -1178,8 +1286,8 @@ export const EmployeeDashboard = () => {
               <MiniCalendar
                 userId={user?.uid || ''}
                 events={calendarEvents}
-                selectedDate={selectedDate}
-                onDateChange={setSelectedDate}
+                selectedDate={new Date()}
+                onDateChange={() => {}}
                 onAddTask={handleAddQuickTask}
                 renderEventContent={renderEventContent}
               />
@@ -1196,7 +1304,7 @@ export const EmployeeDashboard = () => {
           <Box sx={{ mb: 4 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
               <Typography variant="h6">
-                Projects
+                My Projects
               </Typography>
               <Button
                 variant="contained"
@@ -1214,7 +1322,7 @@ export const EmployeeDashboard = () => {
               </Button>
             </Box>
             <Grid container spacing={2}>
-              {projects.map((project) => (
+              {departmentProjects.map((project) => (
                 <Grid item xs={12} md={6} key={project.id}>
                   <ProjectCard project={project} />
                 </Grid>
@@ -1243,104 +1351,28 @@ export const EmployeeDashboard = () => {
                 View All Tasks
               </Button>
             </Box>
-            <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider' }}>
-              <Typography variant="h6" gutterBottom>
-                My Tasks
-              </Typography>
+            <Grid container spacing={2}>
               {loading ? (
-                <Box sx={{ p: 2, textAlign: 'center' }}>
+                <Box sx={{ p: 2, textAlign: 'center', width: '100%' }}>
                   <CircularProgress size={24} />
                 </Box>
               ) : tasks.length === 0 ? (
-                <Box sx={{ p: 2, textAlign: 'center' }}>
+                <Box sx={{ p: 2, textAlign: 'center', width: '100%' }}>
                   <Typography color="text.secondary">
                     No tasks assigned to you
                   </Typography>
                 </Box>
               ) : (
-                <List>
-                  {tasks.map((task) => (
-                    <ListItem 
-                      key={task.id} 
-                      disablePadding 
-                      sx={{ 
-                        mb: 1,
-                        '&:hover': {
-                          bgcolor: 'action.hover',
-                          borderRadius: 1
-                        }
-                      }}
-                    >
-                      <ListItemButton sx={{ borderRadius: 1 }}>
-                        <ListItemIcon>
-                          <Checkbox
-                            edge="start"
-                            checked={task.status === 'done'}
-                            onChange={() => handleToggleTaskStatus(task)}
-                            sx={{ 
-                              color: task.status === 'done' ? 'success.main' : 'action.active',
-                              '&.Mui-checked': {
-                                color: 'success.main',
-                              },
-                            }}
-                          />
-                        </ListItemIcon>
-                        <ListItemText 
-                          primary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Typography 
-                                variant="body1"
-                                sx={{ 
-                                  textDecoration: task.status === 'done' ? 'line-through' : 'none',
-                                  color: task.status === 'done' ? 'text.secondary' : 'text.primary'
-                                }}
-                              >
-                                {task.title}
-                              </Typography>
-                              {task.priority && (
-                                <Chip 
-                                  size="small" 
-                                  label={task.priority}
-                                  color={
-                                    task.priority === 'high' ? 'error' :
-                                    task.priority === 'medium' ? 'warning' : 'default'
-                                  }
-                                  sx={{ height: 20 }}
-                                />
-                              )}
-                            </Box>
-                          }
-                          secondary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                              {task.dueDate && (
-                                <Typography 
-                                  variant="caption" 
-                                  sx={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    gap: 0.5,
-                                    color: isOverdue(safeConvertToDate(task.dueDate) || new Date()) ? 'error.main' : 'text.secondary'
-                                  }}
-                                >
-                                  <TimeIcon fontSize="small" />
-                                  Due: {format(safeConvertToDate(task.dueDate) || new Date(), 'MMM d, yyyy')}
-                                </Typography>
-                              )}
-                              <Chip 
-                                size="small"
-                                label={task.status}
-                                color={task.status === 'done' ? 'success' : 'default'}
-                                sx={{ height: 20 }}
-                              />
-                            </Box>
-                          }
-                        />
-                      </ListItemButton>
-                    </ListItem>
-                  ))}
-                </List>
+                tasks.map((task) => (
+                  <Grid item xs={12} md={6} lg={4} key={task.id}>
+                    <TaskCard 
+                      task={task} 
+                      onStatusChange={handleTaskStatusChange}
+                    />
+                  </Grid>
+                ))
               )}
-            </Box>
+            </Grid>
           </Box>
 
           {/* Expenses Section */}
@@ -1507,7 +1539,6 @@ export const EmployeeDashboard = () => {
         <DialogContent>
           <ExpenseForm onSubmit={() => {
             setShowExpenseDialog(false);
-            loadRecentExpenses();
           }} />
         </DialogContent>
       </Dialog>

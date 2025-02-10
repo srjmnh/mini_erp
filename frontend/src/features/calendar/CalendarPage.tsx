@@ -30,7 +30,9 @@ import {
   Card,
   CardContent,
   Badge,
-  Stack
+  Stack,
+  LinearProgress,
+  Slider
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -77,6 +79,14 @@ interface Task {
   };
   projectId: string;
   projectName: string;
+  progress: number;
+  comments?: Array<{
+    text: string;
+    timestamp: Date;
+    userId: string;
+    userName: string;
+    progress?: number;
+  }>;
 }
 
 interface Event {
@@ -779,6 +789,80 @@ const CalendarPage: React.FC = () => {
     return isAfter(new Date(), dueDate);
   };
 
+  const formatTaskDate = (date: any): string => {
+    if (!date) return '';
+    try {
+      // If it's a Firebase Timestamp
+      if (date?.toDate) {
+        return format(date.toDate(), 'MMM d, yyyy HH:mm');
+      }
+      
+      // If it's already a Date
+      if (date instanceof Date) {
+        return format(date, 'MMM d, yyyy HH:mm');
+      }
+      
+      // If it's an ISO string
+      if (typeof date === 'string') {
+        const parsed = new Date(date);
+        if (!isNaN(parsed.getTime())) {
+          return format(parsed, 'MMM d, yyyy HH:mm');
+        }
+      }
+      
+      return '';
+    } catch (error) {
+      console.error('Error formatting date:', error, date);
+      return '';
+    }
+  };
+
+  const [showProgressDialog, setShowProgressDialog] = useState(false);
+  const [selectedTaskProgress, setSelectedTaskProgress] = useState<{
+    taskId: string;
+    progress: number;
+    comment: string;
+  }>({
+    taskId: '',
+    progress: 0,
+    comment: ''
+  });
+
+  const handleUpdateProgress = async () => {
+    try {
+      const { taskId, progress, comment } = selectedTaskProgress;
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return;
+
+      const taskRef = task.projectId 
+        ? doc(db, `projects/${task.projectId}/tasks/${taskId}`)
+        : doc(db, 'tasks', taskId);
+
+      const update = {
+        progress,
+        lastUpdated: new Date(),
+        comments: [
+          ...(task.comments || []),
+          {
+            text: comment,
+            timestamp: new Date(),
+            userId: user?.uid,
+            userName: user?.displayName || user?.email,
+            progress
+          }
+        ]
+      };
+
+      await updateDoc(taskRef, update);
+      showSnackbar('Task progress updated', 'success');
+      setShowProgressDialog(false);
+      setSelectedTaskProgress({ taskId: '', progress: 0, comment: '' });
+    } catch (error) {
+      console.error('Error updating task progress:', error);
+      showSnackbar('Failed to update task progress', 'error');
+    }
+  };
+
   if (!user) {
     return <Box>Please log in to access the calendar.</Box>;
   }
@@ -952,41 +1036,76 @@ const CalendarPage: React.FC = () => {
                       </Box>
                     }
                     secondary={
-                      <Box sx={{ 
-                        display: 'flex', 
-                        alignItems: 'center',
-                        gap: 2,
-                        mt: 1
-                      }}>
-                        {task.dueDate && (
-                          <Typography 
-                            variant="body2" 
-                            sx={{ 
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 0.5,
-                              color: isOverdue(task.dueDate) ? 'error.main' : 'text.secondary'
-                            }}
-                          >
-                            <EventIcon fontSize="small" />
-                            {format(task.dueDate, 'MMM d, yyyy')}
-                          </Typography>
+                      <Stack spacing={1}>
+                        <Typography variant="body2" color="text.secondary">
+                          {task.description}
+                        </Typography>
+                        
+                        {/* Progress Bar */}
+                        <Box>
+                          <Box display="flex" justifyContent="space-between" alignItems="center" mb={0.5}>
+                            <Typography variant="caption" color="text.secondary">
+                              Progress: {task.progress || 0}%
+                            </Typography>
+                            <Button
+                              size="small"
+                              onClick={() => {
+                                setSelectedTaskProgress({
+                                  taskId: task.id,
+                                  progress: task.progress || 0,
+                                  comment: ''
+                                });
+                                setShowProgressDialog(true);
+                              }}
+                            >
+                              Update
+                            </Button>
+                          </Box>
+                          <LinearProgress
+                            variant="determinate"
+                            value={task.progress || 0}
+                            sx={{ height: 6, borderRadius: 1 }}
+                          />
+                        </Box>
+
+                        {/* Latest Comment */}
+                        {task.comments?.length > 0 && (
+                          <Box bgcolor="action.hover" p={1} borderRadius={1}>
+                            <Typography variant="caption" color="text.secondary">
+                              Latest Update:
+                            </Typography>
+                            <Typography variant="body2">
+                              {task.comments[task.comments.length - 1].text}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {formatTaskDate(task.comments[task.comments.length - 1].timestamp)}
+                            </Typography>
+                          </Box>
                         )}
-                        {task.description && (
-                          <Typography 
-                            variant="body2" 
-                            color="text.secondary"
-                            sx={{
-                              display: '-webkit-box',
-                              WebkitLineClamp: 1,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden'
-                            }}
-                          >
-                            {task.description}
-                          </Typography>
-                        )}
-                      </Box>
+
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Chip
+                            size="small"
+                            label={task.priority}
+                            color={task.priority === 'high' ? 'error' : task.priority === 'medium' ? 'warning' : 'default'}
+                          />
+                          {task.dueDate && (
+                            <Typography variant="caption" color="text.secondary">
+                              Due: {formatTaskDate(task.dueDate)}
+                            </Typography>
+                          )}
+                          {task.assignee && (
+                            <Tooltip title={task.assignee.name}>
+                              <Avatar
+                                src={task.assignee.photoURL}
+                                sx={{ width: 24, height: 24 }}
+                              >
+                                {task.assignee.name[0]}
+                              </Avatar>
+                            </Tooltip>
+                          )}
+                        </Stack>
+                      </Stack>
                     }
                   />
                   
@@ -1250,6 +1369,59 @@ const CalendarPage: React.FC = () => {
           <Button onClick={() => setIsEventDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleSaveEvent} variant="contained" color="primary">
             Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Progress Update Dialog */}
+      <Dialog
+        open={showProgressDialog}
+        onClose={() => setShowProgressDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Update Task Progress</DialogTitle>
+        <DialogContent>
+          <Stack spacing={3} sx={{ mt: 2 }}>
+            <Box>
+              <Typography gutterBottom>
+                Progress: {selectedTaskProgress.progress}%
+              </Typography>
+              <Slider
+                value={selectedTaskProgress.progress}
+                onChange={(_, value) => setSelectedTaskProgress(prev => ({
+                  ...prev,
+                  progress: value as number
+                }))}
+                valueLabelDisplay="auto"
+                step={5}
+                marks
+                min={0}
+                max={100}
+              />
+            </Box>
+            <TextField
+              label="Comment"
+              multiline
+              rows={3}
+              value={selectedTaskProgress.comment}
+              onChange={(e) => setSelectedTaskProgress(prev => ({
+                ...prev,
+                comment: e.target.value
+              }))}
+              placeholder="Add a comment about your progress..."
+              fullWidth
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowProgressDialog(false)}>Cancel</Button>
+          <Button
+            onClick={handleUpdateProgress}
+            variant="contained"
+            disabled={!selectedTaskProgress.comment.trim()}
+          >
+            Update
           </Button>
         </DialogActions>
       </Dialog>

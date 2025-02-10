@@ -38,6 +38,9 @@ import {
   Description as DocumentIcon,
   CloudUpload as UploadIcon,
   Download as DownloadIcon,
+  Add as AddIcon,
+  Check as CheckIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
 import { useManagerData } from '@/hooks/useManagerData';
 import { collection, query, where, getDocs, doc as firestoreDoc, getDoc, updateDoc, orderBy, onSnapshot, limit, addDoc } from 'firebase/firestore';
@@ -52,6 +55,8 @@ import ManagerLeaveForm from '../leave/ManagerLeaveForm';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { MiniCalendar } from '@/components/calendar/MiniCalendar';
+import { TaskView } from '@/features/calendar/components/TaskView';
 
 export default function ManagerDashboard() {
   const theme = useTheme();
@@ -81,6 +86,16 @@ export default function ManagerDashboard() {
   const [myLeaves, setMyLeaves] = useState<any[]>([]);
   const [historicalExpenses, setHistoricalExpenses] = useState<any[]>([]);
   const [historicalLeaves, setHistoricalLeaves] = useState<any[]>([]);
+  const [myTasks, setMyTasks] = useState<any[]>([]);
+  const [departmentTasks, setDepartmentTasks] = useState<any[]>([]);
+  const [showTaskDialog, setShowTaskDialog] = useState(false);
+  const [newTask, setNewTask] = useState({
+    title: '',
+    description: '',
+    dueDate: null as Date | null,
+    priority: 'medium',
+    assigneeId: '',
+  });
 
   // Listen to leave requests
   // Fetch department documents
@@ -303,6 +318,91 @@ export default function ManagerDashboard() {
       });
     };
 
+    const fetchMyTasks = async () => {
+      if (!user?.uid) return;
+
+      try {
+        const tasksQuery = query(
+          collection(db, 'tasks'),
+          where('userId', '==', user.uid),
+          orderBy('dueDate', 'asc')
+        );
+
+        return onSnapshot(tasksQuery, (snapshot) => {
+          const tasks = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            dueDate: doc.data().dueDate?.toDate() || null
+          }));
+          setMyTasks(tasks);
+        });
+      } catch (error) {
+        console.error('Error fetching tasks:', error);
+      }
+    };
+
+    const fetchDepartmentTasks = async () => {
+      if (!user?.uid) return;
+
+      try {
+        const tasksQuery = query(
+          collection(db, 'tasks'),
+          where('userId', '==', user.uid),
+          orderBy('dueDate', 'asc')
+        );
+
+        return onSnapshot(tasksQuery, async (snapshot) => {
+          const taskDocs = snapshot.docs.map(async (doc) => {
+            const data = doc.data();
+            const dueDate = data.dueDate?.toDate ? data.dueDate.toDate() : null;
+            
+            // Get assignee details
+            let assignedTo = 'Unassigned';
+            if (data.assigneeId) {
+              const assigneeDoc = await getDoc(doc(db, 'employees', data.assigneeId));
+              if (assigneeDoc.exists()) {
+                const assigneeData = assigneeDoc.data();
+                assignedTo = assigneeData.firstName && assigneeData.lastName ? 
+                  `${assigneeData.firstName} ${assigneeData.lastName}` : 
+                  assigneeData.name || 'Unknown';
+              }
+            }
+
+            // Get comments
+            const commentsQuery = query(
+              collection(db, `tasks/${doc.id}/comments`),
+              orderBy('timestamp', 'desc')
+            );
+            const commentsSnapshot = await getDocs(commentsQuery);
+            const comments = commentsSnapshot.docs.map(commentDoc => {
+              const commentData = commentDoc.data();
+              return {
+                text: commentData.text,
+                progress: commentData.progress,
+                timestamp: commentData.timestamp?.toDate(),
+                userId: commentData.userId,
+                userName: commentData.userName
+              };
+            });
+
+            return {
+              id: doc.id,
+              ...data,
+              dueDate,
+              assignedTo,
+              comments,
+              completed: data.completed === true || data.status === 'done',
+              latestComment: comments.length > 0 ? comments[0] : null
+            };
+          });
+
+          setDepartmentTasks(await Promise.all(taskDocs));
+        });
+      } catch (error) {
+        console.error('Error fetching department tasks:', error);
+      }
+    };
+
     // Set up all listeners
     let unsubscribers: Array<() => void> = [];
 
@@ -310,7 +410,9 @@ export default function ManagerDashboard() {
       fetchMyExpenses(),
       fetchMyLeaves(),
       fetchHistoricalExpenses(),
-      fetchHistoricalLeaves()
+      fetchHistoricalLeaves(),
+      fetchMyTasks(),
+      fetchDepartmentTasks()
     ]).then(unsubs => {
       unsubscribers = unsubs.filter(Boolean) as Array<() => void>;
     });
@@ -459,6 +561,62 @@ export default function ManagerDashboard() {
     }
   };
 
+  // Update task status
+  const handleTaskStatusChange = async (taskId: string, newStatus: string, progress?: number, comment?: string) => {
+    try {
+      const updates: any = {
+        status: newStatus,
+        completed: newStatus === 'done',
+        updatedAt: new Date()
+      };
+
+      if (typeof progress !== 'undefined') {
+        updates.progress = progress;
+      }
+
+      // Add a comment for the update
+      const commentRef = collection(db, `tasks/${taskId}/comments`);
+      await addDoc(commentRef, {
+        text: comment || `Task marked as ${newStatus}`,
+        createdAt: new Date(),
+        createdBy: user?.uid,
+        type: progress !== undefined ? 'progress_update' : 'status_update',
+        progress: progress
+      });
+
+      await updateDoc(doc(db, 'tasks', taskId), updates);
+    } catch (error) {
+      console.error('Error updating task:', error);
+    }
+  };
+
+  // Add new task
+  const handleAddTask = async () => {
+    if (!department?.id || !newTask.title || !newTask.dueDate || !newTask.assigneeId) return;
+
+    try {
+      const taskData = {
+        ...newTask,
+        userId: user?.uid,
+        createdAt: new Date(),
+        status: 'pending',
+        progress: 0
+      };
+
+      await addDoc(collection(db, 'tasks'), taskData);
+      setShowTaskDialog(false);
+      setNewTask({
+        title: '',
+        description: '',
+        dueDate: null,
+        priority: 'medium',
+        assigneeId: '',
+      });
+    } catch (error) {
+      console.error('Error adding task:', error);
+    }
+  };
+
   if (loading) {
     return (
       <Box sx={{ width: '100%', mt: 2 }}>
@@ -556,7 +714,7 @@ export default function ManagerDashboard() {
                       <Typography variant="subtitle1" sx={{ color: 'primary.main' }}>
                         {employee.firstName || ''} {employee.lastName || ''}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary">
+                      <Typography variant="body2" color="textSecondary">
                         {employee.role}
                       </Typography>
                     </Box>
@@ -592,6 +750,7 @@ export default function ManagerDashboard() {
               <Tab label="History" value="history" />
               <Tab label="Projects" value="projects" />
               <Tab label="Documents" value="documents" />
+              <Tab label="Tasks" value="tasks" />
             </Tabs>
             <Box sx={{ p: 3, flex: 1, overflowY: 'auto' }}>
               {activeTab === 'expenses' && (
@@ -649,11 +808,11 @@ export default function ManagerDashboard() {
                                   sx={{ height: '24px' }}
                                 />
                               </Stack>
-                              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
+                              <Typography variant="body2" color="textSecondary" sx={{ fontSize: '0.875rem' }}>
                                 {request.startDate && format(request.startDate, 'MMM d')} - {request.endDate && format(request.endDate, 'MMM d, yyyy')}
                               </Typography>
                               {request.reason && (
-                                <Typography variant="body2" color="text.secondary" sx={{ 
+                                <Typography variant="body2" color="textSecondary" sx={{ 
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
                                   display: '-webkit-box',
@@ -730,10 +889,10 @@ export default function ManagerDashboard() {
                                   sx={{ height: '24px' }}
                                 />
                               </Stack>
-                              <Typography variant="body2" color="text.secondary">
+                              <Typography variant="body2" color="textSecondary">
                                 {expense.description}
                               </Typography>
-                              <Typography variant="caption" color="text.secondary">
+                              <Typography variant="caption" color="textSecondary">
                                 Submitted on {expense.submittedAt ? format(expense.submittedAt, 'MMM d, yyyy') : 'Unknown date'}
                               </Typography>
                             </Stack>
@@ -761,10 +920,10 @@ export default function ManagerDashboard() {
                               <Typography variant="body2">
                                 {leave.startDate ? format(leave.startDate, 'MMM d') : 'Unknown'} - {leave.endDate ? format(leave.endDate, 'MMM d, yyyy') : 'Unknown'}
                               </Typography>
-                              <Typography variant="body2" color="text.secondary">
+                              <Typography variant="body2" color="textSecondary">
                                 {leave.reason}
                               </Typography>
-                              <Typography variant="caption" color="text.secondary">
+                              <Typography variant="caption" color="textSecondary">
                                 Submitted on {leave.submittedAt ? format(leave.submittedAt, 'MMM d, yyyy') : 'Unknown date'}
                               </Typography>
                             </Stack>
@@ -805,10 +964,10 @@ export default function ManagerDashboard() {
                                     sx={{ height: '24px' }}
                                   />
                                 </Stack>
-                                <Typography variant="body2" color="text.secondary">
+                                <Typography variant="body2" color="textSecondary">
                                   {expense.description}
                                 </Typography>
-                                <Typography variant="caption" color="text.secondary">
+                                <Typography variant="caption" color="textSecondary">
                                   {expense.status} on {expense.lastUpdatedAt ? format(expense.lastUpdatedAt, 'MMM d, yyyy') : 'Unknown date'}
                                 </Typography>
                               </Stack>
@@ -842,10 +1001,10 @@ export default function ManagerDashboard() {
                                 <Typography variant="body2">
                                   {leave.startDate ? format(leave.startDate, 'MMM d') : 'Unknown'} - {leave.endDate ? format(leave.endDate, 'MMM d, yyyy') : 'Unknown'}
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary">
+                                <Typography variant="body2" color="textSecondary">
                                   {leave.reason}
                                 </Typography>
-                                <Typography variant="caption" color="text.secondary">
+                                <Typography variant="caption" color="textSecondary">
                                   {leave.status} on {leave.lastUpdatedAt ? format(leave.lastUpdatedAt, 'MMM d, yyyy') : 'Unknown date'}
                                 </Typography>
                               </Stack>
@@ -956,6 +1115,22 @@ export default function ManagerDashboard() {
                   ))}
                 </Grid>
               )}
+              {activeTab === 'tasks' && (
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="h6">Department Tasks</Typography>
+                    </Box>
+                    {loading ? (
+                      <LinearProgress />
+                    ) : error ? (
+                      <Typography color="error">{error}</Typography>
+                    ) : (
+                      <TaskView userId={user?.uid || ''} isDepartmentView={true} />
+                    )}
+                  </Paper>
+                </Grid>
+              )}
             </Box>
           </Paper>
         </Grid>
@@ -1061,6 +1236,126 @@ export default function ManagerDashboard() {
           <Button onClick={() => setUploadOpen(false)}>Cancel</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Add Task Dialog */}
+      <Dialog open={showTaskDialog} onClose={() => setShowTaskDialog(false)}>
+        <DialogTitle>Add New Task</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 2 }}>
+            <TextField
+              label="Title"
+              fullWidth
+              value={newTask.title}
+              onChange={(e) => setNewTask(prev => ({ ...prev, title: e.target.value }))}
+            />
+            <TextField
+              label="Description"
+              fullWidth
+              multiline
+              rows={3}
+              value={newTask.description}
+              onChange={(e) => setNewTask(prev => ({ ...prev, description: e.target.value }))}
+            />
+            <LocalizationProvider dateAdapter={AdapterDateFns}>
+              <DatePicker
+                label="Due Date"
+                value={newTask.dueDate}
+                onChange={(date) => setNewTask(prev => ({ ...prev, dueDate: date }))}
+              />
+            </LocalizationProvider>
+            <TextField
+              select
+              label="Priority"
+              fullWidth
+              value={newTask.priority}
+              onChange={(e) => setNewTask(prev => ({ ...prev, priority: e.target.value }))}
+            >
+              <MenuItem value="low">Low</MenuItem>
+              <MenuItem value="medium">Medium</MenuItem>
+              <MenuItem value="high">High</MenuItem>
+            </TextField>
+            <TextField
+              select
+              label="Assign To"
+              fullWidth
+              value={newTask.assigneeId}
+              onChange={(e) => setNewTask(prev => ({ ...prev, assigneeId: e.target.value }))}
+            >
+              {departmentEmployees.map((employee) => (
+                <MenuItem key={employee.id} value={employee.id}>
+                  {employee.firstName} {employee.lastName}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowTaskDialog(false)}>Cancel</Button>
+          <Button onClick={handleAddTask} variant="contained">Add Task</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
+
+const fetchDepartmentTasks = async () => {
+  if (!user?.uid) return;
+
+  try {
+    const tasksQuery = query(
+      collection(db, 'tasks'),
+      where('userId', '==', user.uid),
+      orderBy('dueDate', 'asc')
+    );
+
+    return onSnapshot(tasksQuery, async (snapshot) => {
+      const taskDocs = snapshot.docs.map(async (doc) => {
+        const data = doc.data();
+        const dueDate = data.dueDate?.toDate ? data.dueDate.toDate() : null;
+        
+        // Get assignee details
+        let assignedTo = 'Unassigned';
+        if (data.assigneeId) {
+          const assigneeDoc = await getDoc(doc(db, 'employees', data.assigneeId));
+          if (assigneeDoc.exists()) {
+            const assigneeData = assigneeDoc.data();
+            assignedTo = assigneeData.firstName && assigneeData.lastName ? 
+              `${assigneeData.firstName} ${assigneeData.lastName}` : 
+              assigneeData.name || 'Unknown';
+          }
+        }
+
+        // Get comments
+        const commentsQuery = query(
+          collection(db, `tasks/${doc.id}/comments`),
+          orderBy('timestamp', 'desc')
+        );
+        const commentsSnapshot = await getDocs(commentsQuery);
+        const comments = commentsSnapshot.docs.map(commentDoc => {
+          const commentData = commentDoc.data();
+          return {
+            text: commentData.text,
+            progress: commentData.progress,
+            timestamp: commentData.timestamp?.toDate(),
+            userId: commentData.userId,
+            userName: commentData.userName
+          };
+        });
+
+        return {
+          id: doc.id,
+          ...data,
+          dueDate,
+          assignedTo,
+          comments,
+          completed: data.completed === true || data.status === 'done',
+          latestComment: comments.length > 0 ? comments[0] : null
+        };
+      });
+
+      setDepartmentTasks(await Promise.all(taskDocs));
+    });
+  } catch (error) {
+    console.error('Error fetching department tasks:', error);
+  }
+};
