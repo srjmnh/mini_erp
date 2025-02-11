@@ -33,9 +33,13 @@ export const getLeaveBalance = async (employeeId: string): Promise<LeaveBalance>
   if (balanceDoc.exists()) {
     const data = balanceDoc.data();
     return {
-      casual: data.casual,
-      sick: data.sick,
-      year: currentYear
+      casual: data.casual || 25, // Default to 25 if not set
+      sick: data.sick || 999, // Default to unlimited if not set
+      year: currentYear,
+      used: {
+        casual: data.used?.casual || 0,
+        sick: data.used?.sick || 0
+      }
     };
   }
 
@@ -45,6 +49,10 @@ export const getLeaveBalance = async (employeeId: string): Promise<LeaveBalance>
     year: currentYear,
     casual: 25, // Default 25 days
     sick: 999, // Unlimited sick leave
+    used: {
+      casual: 0,
+      sick: 0
+    },
     createdAt: new Date(),
     updatedAt: new Date()
   };
@@ -54,7 +62,8 @@ export const getLeaveBalance = async (employeeId: string): Promise<LeaveBalance>
   return {
     casual: defaultBalance.casual,
     sick: defaultBalance.sick,
-    year: currentYear
+    year: currentYear,
+    used: defaultBalance.used
   };
 };
 
@@ -67,18 +76,50 @@ export const updateLeaveBalance = async (
   const balanceId = `${employeeId}-${currentYear}`;
   const balanceRef = doc(db, 'leaveBalances', balanceId);
   
+  // Get or create leave balance
+  let data: any;
   const balanceDoc = await getDoc(balanceRef);
-  if (!balanceDoc.exists()) throw new Error('Leave balance not found');
   
-  const currentBalance = balanceDoc.data()[leaveType];
-  const newBalance = currentBalance - daysRequested;
+  if (!balanceDoc.exists()) {
+    // Create new balance with default values
+    data = {
+      employeeId,
+      year: currentYear,
+      casual: 25, // Default 25 days
+      sick: 999, // Unlimited sick leave
+      used: {
+        casual: 0,
+        sick: 0
+      },
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    await setDoc(balanceRef, data);
+  } else {
+    data = balanceDoc.data();
+  }
   
-  if (newBalance < 0) throw new Error('Insufficient leave balance');
+  const currentBalance = data[leaveType];
+  const currentUsed = data.used?.[leaveType] || 0;
   
-  await updateDoc(balanceRef, {
-    [leaveType]: newBalance,
-    updatedAt: new Date()
-  });
+  // For sick leave, we don't need to check balance since it's unlimited
+  if (leaveType === 'casual') {
+    // Check if we have enough balance
+    const remainingBalance = currentBalance - currentUsed - daysRequested;
+    if (remainingBalance < 0) throw new Error('Insufficient leave balance');
+    
+    // Only update the used days, keep total balance at 25
+    await updateDoc(balanceRef, {
+      'used.casual': currentUsed + daysRequested,
+      updatedAt: new Date()
+    });
+  } else {
+    // For sick leave, just track usage
+    await updateDoc(balanceRef, {
+      'used.sick': currentUsed + daysRequested,
+      updatedAt: new Date()
+    });
+  }
 };
 
 export const calculateLeaveDuration = (startDate: Date, endDate: Date) => {

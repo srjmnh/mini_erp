@@ -39,6 +39,8 @@ const storage = getStorage(app);
 // Get Analytics instance
 const analytics = getAnalytics(app);
 
+
+
 // Auth functions
 export const signInWithGoogle = async () => {
   const provider = new GoogleAuthProvider();

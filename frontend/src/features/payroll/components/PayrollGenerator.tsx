@@ -36,17 +36,14 @@ interface PayrollEntry {
   totalSalary: number;
 }
 
-interface PayrollGeneratorProps {
-  departmentId: string;
-}
-
-export const PayrollGenerator: React.FC<PayrollGeneratorProps> = ({ departmentId }) => {
+export const PayrollGenerator: React.FC = () => {
   const [month, setMonth] = useState(new Date().getMonth());
   const [year, setYear] = useState(new Date().getFullYear());
   const [showPreview, setShowPreview] = useState(false);
   const [generatedPayroll, setGeneratedPayroll] = useState<PayrollEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [calculationMode, setCalculationMode] = useState<'actual' | 'daily'>('actual');
   const [payrollHistory, setPayrollHistory] = useState<Array<{
     id: string;
     month: number;
@@ -62,7 +59,6 @@ export const PayrollGenerator: React.FC<PayrollGeneratorProps> = ({ departmentId
         const payrollRef = collection(db, 'payroll');
         const q = query(
           payrollRef,
-          where('departmentId', '==', departmentId),
           where('year', '==', year)
         );
         const snapshot = await getDocs(q);
@@ -78,7 +74,7 @@ export const PayrollGenerator: React.FC<PayrollGeneratorProps> = ({ departmentId
     };
 
     fetchPayrollHistory();
-  }, [departmentId, year]);
+  }, [year]);
 
   const calculateHours = (timeIn: Date, timeOut: Date) => {
     const hours = (timeOut.getTime() - timeIn.getTime()) / (1000 * 60 * 60);
@@ -94,10 +90,9 @@ export const PayrollGenerator: React.FC<PayrollGeneratorProps> = ({ departmentId
       const startDate = new Date(year, month, 1);
       const endDate = new Date(year, month + 1, 0);
 
-      // Get all employees in the department
+      // Get all employees
       const employeesRef = collection(db, 'employees');
-      const employeesQuery = query(employeesRef, where('departmentId', '==', departmentId));
-      const employeesSnapshot = await getDocs(employeesQuery);
+      const employeesSnapshot = await getDocs(employeesRef);
 
       // Get attendance records for the month
       const attendanceRef = collection(db, 'attendance');
@@ -128,27 +123,60 @@ export const PayrollGenerator: React.FC<PayrollGeneratorProps> = ({ departmentId
           let totalOvertimeHours = 0;
 
           employeeAttendance.forEach(record => {
-            if (record.timeOut) {
-              const dailyHours = calculateHours(record.timeIn, record.timeOut);
-              if (dailyHours <= 8) {
-                totalRegularHours += dailyHours;
-              } else {
+            if (calculationMode === 'daily') {
+              // If present, count full 8 hours
+              if (record.timeOut) {
                 totalRegularHours += 8;
-                totalOvertimeHours += dailyHours - 8;
+              }
+            } else {
+              // Calculate based on actual hours worked
+              if (record.timeOut) {
+                const dailyHours = calculateHours(record.timeIn, record.timeOut);
+                if (dailyHours <= 8) {
+                  totalRegularHours += dailyHours;
+                } else {
+                  totalRegularHours += 8;
+                  totalOvertimeHours += dailyHours - 8;
+                }
               }
             }
           });
 
-          // Calculate salary
-          const hourlyRate = empData.salary / (8 * 22); // Assuming 22 working days
+          // Calculate salary from annual to hourly
+          const annualSalary = empData.salary || 0;
+          const monthlyBaseSalary = annualSalary / 12;
+          const workingDaysPerMonth = 22; // Standard working days per month
+          const workingHoursPerDay = 8;
+          const hourlyRate = monthlyBaseSalary / (workingDaysPerMonth * workingHoursPerDay);
+          
+          // Calculate overtime rate (usually 1.5x or from role)
           const overtimeRate = empData.overtimeRate || 1.5;
+          
+          // Calculate regular and overtime pay
           const regularPay = hourlyRate * totalRegularHours;
           const overtimePay = hourlyRate * overtimeRate * totalOvertimeHours;
+          
+          console.log('Salary calculation:', {
+            employeeName: `${empData.firstName} ${empData.lastName}`,
+            annualSalary,
+            monthlyBaseSalary,
+            hourlyRate,
+            totalRegularHours,
+            totalOvertimeHours,
+            regularPay,
+            overtimePay
+          });
+
+          // Get employee name with priority: name > fullName > firstName+lastName > Unknown
+          const employeeName = empData.name || empData.fullName || 
+            ((empData.firstName || empData.lastName) ? 
+              `${empData.firstName || ''} ${empData.lastName || ''}`.trim() : 
+              'Unknown Employee');
 
           return {
             employeeId: empDoc.id,
-            employeeName: `${empData.firstName} ${empData.lastName}`,
-            position: empData.position,
+            employeeName,
+            position: empData.position || empData.role || 'N/A',
             regularHours: totalRegularHours,
             overtimeHours: totalOvertimeHours,
             baseSalary: regularPay,
@@ -268,6 +296,18 @@ export const PayrollGenerator: React.FC<PayrollGeneratorProps> = ({ departmentId
           </Select>
         </FormControl>
 
+        <FormControl sx={{ minWidth: 200 }}>
+          <InputLabel>Calculation Mode</InputLabel>
+          <Select
+            value={calculationMode}
+            label="Calculation Mode"
+            onChange={(e) => setCalculationMode(e.target.value as 'actual' | 'daily')}
+          >
+            <MenuItem value="actual">Actual Hours Worked</MenuItem>
+            <MenuItem value="daily">Full Day if Present (8 hrs)</MenuItem>
+          </Select>
+        </FormControl>
+
         <Button
           variant="contained"
           onClick={handleGenerate}
@@ -291,6 +331,9 @@ export const PayrollGenerator: React.FC<PayrollGeneratorProps> = ({ departmentId
       >
         <DialogTitle>
           Payroll Preview - {format(new Date(year, month), 'MMMM yyyy')}
+          <Typography variant="subtitle2" color="textSecondary" sx={{ mt: 1 }}>
+            Mode: {calculationMode === 'actual' ? 'Actual Hours Worked' : 'Full Day if Present'}
+          </Typography>
         </DialogTitle>
         <DialogContent>
           {error && (
@@ -346,7 +389,6 @@ export const PayrollGenerator: React.FC<PayrollGeneratorProps> = ({ departmentId
                 // Save to Firestore
                 const payrollRef = collection(db, 'payroll');
                 const docRef = await addDoc(payrollRef, {
-                  departmentId,
                   month,
                   year,
                   date: new Date(),

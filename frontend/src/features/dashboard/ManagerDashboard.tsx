@@ -36,6 +36,7 @@ import {
   Assignment as ProjectsIcon,
   CalendarMonth as CalendarIcon,
   Description as DocumentIcon,
+  Description as DescriptionIcon,
   CloudUpload as UploadIcon,
   Download as DownloadIcon,
   Add as AddIcon,
@@ -43,6 +44,7 @@ import {
   Close as CloseIcon,
   Login as LoginIcon,
   Logout as LogoutIcon,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { useManagerData } from '@/hooks/useManagerData';
 import { collection, query, where, getDocs, doc as firestoreDoc, getDoc, updateDoc, orderBy, onSnapshot, limit, addDoc } from 'firebase/firestore';
@@ -91,6 +93,8 @@ export default function ManagerDashboard() {
   const [myTasks, setMyTasks] = useState<any[]>([]);
   const [departmentTasks, setDepartmentTasks] = useState<any[]>([]);
   const [showTaskDialog, setShowTaskDialog] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isPdfPreview, setIsPdfPreview] = useState(false);
   const [newTask, setNewTask] = useState({
     title: '',
     description: '',
@@ -825,6 +829,20 @@ export default function ManagerDashboard() {
                                   {request.reason}
                                 </Typography>
                               )}
+                              {request.medicalCertificateUrl && (
+                                <Button
+                                  variant="text"
+                                  size="small"
+                                  startIcon={<DescriptionIcon />}
+                                  onClick={() => {
+                                    setIsPdfPreview(request.medicalCertificateUrl.toLowerCase().endsWith('.pdf'));
+                                    setPreviewUrl(request.medicalCertificateUrl);
+                                  }}
+                                  sx={{ alignSelf: 'flex-start' }}
+                                >
+                                  View Medical Certificate
+                                </Button>
+                              )}
                               <Stack direction="row" spacing={1}>
                                 <Button
                                   variant="contained"
@@ -1295,6 +1313,39 @@ export default function ManagerDashboard() {
         <DialogActions>
           <Button onClick={() => setShowTaskDialog(false)}>Cancel</Button>
           <Button onClick={handleAddTask} variant="contained">Add Task</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Document Preview Dialog */}
+      <Dialog
+        open={!!previewUrl}
+        onClose={() => setPreviewUrl(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Medical Certificate Preview</DialogTitle>
+        <DialogContent sx={{ minHeight: '60vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          {previewUrl && (
+            isPdfPreview ? (
+              <iframe
+                src={`${previewUrl}#toolbar=0`}
+                style={{ width: '100%', height: '60vh', border: 'none' }}
+                title="PDF Preview"
+              />
+            ) : (
+              <img
+                src={previewUrl}
+                alt="Medical Certificate"
+                style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain' }}
+              />
+            )
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPreviewUrl(null)}>Close</Button>
+          <Button onClick={() => window.open(previewUrl, '_blank')} startIcon={<OpenInNewIcon />}>
+            Open in New Tab
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

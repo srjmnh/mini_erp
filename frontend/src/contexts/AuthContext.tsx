@@ -9,6 +9,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '@/config/firebase';
+import { supabase } from '@/config/supabase';
 import { UserRole } from '@/types/auth';
 
 interface AuthContextType {
@@ -36,6 +37,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Set up auth state observer
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      // Sync with Supabase auth
+      if (user) {
+        const { data: { session }, error } = await supabase.auth.signInWithPassword({
+          email: user.email!,
+          password: user.uid // Using Firebase UID as password for Supabase
+        });
+        if (error) {
+          console.error('Error syncing with Supabase:', error);
+        } else {
+          console.log('Synced with Supabase:', session);
+        }
+      } else {
+        await supabase.auth.signOut();
+      }
       console.log('Auth state changed:', { 
         user: user ? { 
           uid: user.uid, 

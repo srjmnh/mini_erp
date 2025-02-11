@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { collection, addDoc, updateDoc, doc, query, where, orderBy, onSnapshot, getDoc } from 'firebase/firestore';
+import { differenceInDays } from 'date-fns';
+import { updateLeaveBalance } from '@/services/leaveManagement';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import { LeaveType, LeaveStatus, ExpenseCategory, ExpenseStatus } from '@/config/firestore-schema';
@@ -23,6 +25,7 @@ interface LeaveRequest {
   managerId?: string;
   managerName?: string;
   statusText?: string;
+  medicalCertificateUrl?: string;
 }
 
 interface ExpenseRequest {
@@ -212,6 +215,11 @@ export function useRequests() {
       updatedAt: new Date()
     };
 
+    // Calculate leave duration and update leave balance
+    const duration = differenceInDays(new Date(leaveRequest.endDate), new Date(leaveRequest.startDate)) + 1;
+    await updateLeaveBalance(targetEmployee.id, leaveRequest.type, duration);
+
+    // Add the leave request
     const docRef = await addDoc(collection(db, 'leaveRequests'), firestoreLeaveRequest);
     
     // Get department head/manager ID

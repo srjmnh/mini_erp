@@ -246,28 +246,28 @@ const useDashboardData = (): DashboardData => {
       console.log('Fetched tasks:', fetchedTasks);
       setTasks(fetchedTasks);
 
-      // Fetch time off balance
+      // Fetch time off balance from leaveBalances collection
       console.log('Fetching time off balance for user:', user.uid);
-      const timeOffRef = collection(db, 'timeoff_balance');
-      const timeOffQuery = query(timeOffRef, where('userId', '==', user.uid));
-      const timeOffSnapshot = await getDocs(timeOffQuery);
+      const currentYear = new Date().getFullYear();
+      const balanceId = `${user.uid}-${currentYear}`;
+      const balanceRef = collection(db, 'leaveBalances');
+      const balanceDoc = await getDoc(doc(balanceRef, balanceId));
       
-      if (!timeOffSnapshot.empty) {
-        const timeOffDoc = timeOffSnapshot.docs[0];
-        const timeOffData = timeOffDoc.data();
-        console.log('Found time off balance:', timeOffData);
+      if (balanceDoc.exists()) {
+        const data = balanceDoc.data();
+        console.log('Found leave balance:', data);
         
         setTimeOffBalance({
-          vacation: timeOffData.vacation || 0,
-          sick: timeOffData.sick || 0,
-          personal: timeOffData.personal || 0
+          vacation: data.casual || 0, // casual leave is shown as vacation in dashboard
+          sick: data.sick || 0,
+          personal: 0 // we don't have personal leave in the new system
         });
       } else {
-        console.log('No time off balance found, using defaults');
+        console.log('No leave balance found, using defaults');
         setTimeOffBalance({
-          vacation: 15,
-          sick: 10,
-          personal: 5
+          vacation: 25, // default casual leave days
+          sick: 999, // unlimited sick leave
+          personal: 0 // no personal leave
         });
       }
 

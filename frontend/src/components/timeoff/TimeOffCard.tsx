@@ -29,6 +29,10 @@ interface TimeOffCardProps {
     vacation: number;
     sick: number;
     personal: number;
+    used?: {
+      casual?: number;
+      sick?: number;
+    };
   };
   onRequestTimeOff: (request: Omit<TimeOff, 'id' | 'status'>) => Promise<void>;
 }
@@ -73,16 +77,22 @@ export const TimeOffCard: React.FC<TimeOffCardProps> = ({
           </Typography>
           <Stack spacing={2}>
             <Box display="flex" justifyContent="space-between">
-              <Typography>Vacation Days</Typography>
-              <Typography>{timeOffBalance.vacation} days</Typography>
+              <Typography>Casual Leave</Typography>
+              <Box textAlign="right">
+                <Typography>{timeOffBalance.vacation} days remaining</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {timeOffBalance.used?.casual || 0} days used
+                </Typography>
+              </Box>
             </Box>
             <Box display="flex" justifyContent="space-between">
               <Typography>Sick Leave</Typography>
-              <Typography>{timeOffBalance.sick} days</Typography>
-            </Box>
-            <Box display="flex" justifyContent="space-between">
-              <Typography>Personal Days</Typography>
-              <Typography>{timeOffBalance.personal} days</Typography>
+              <Box textAlign="right">
+                <Typography>Unlimited</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {timeOffBalance.used?.sick || 0} days used
+                </Typography>
+              </Box>
             </Box>
           </Stack>
           <Box mt={2}>

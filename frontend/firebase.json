@@ -1,0 +1,49 @@
+-- Allow all authenticated users to access the medical-certificates bucket
+CREATE POLICY "Allow authenticated access to medical certificates"
+ON storage.objects
+FOR ALL
+TO authenticated
+USING (bucket_id = 'medical-certificates');{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "hosting": {
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "firestore": {
+      "port": 8081
+    },
+    "hosting": {
+      "port": 5004
+    },
+    "storage": {
+      "port": 9199
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4004
+    },
+    "hub": {
+      "port": 4400
+    }
+  }
+}

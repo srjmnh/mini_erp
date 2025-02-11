@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import DescriptionIcon from '@mui/icons-material/Description';
+import { differenceInDays } from 'date-fns';
+import { supabase } from '@/config/supabase';
 import {
   Box,
   Container,
@@ -57,6 +61,7 @@ import {
   onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { getLeaveBalance } from '@/services/leaveManagement';
 import { useAuth } from '@/contexts/AuthContext';
 import { format, isAfter } from 'date-fns';
 import { TaskStatus } from '@/config/project-schema';
@@ -519,6 +524,7 @@ const TimeOffCard = () => {
     startDate: new Date(),
     endDate: new Date(),
     reason: '',
+    medicalCertificate: null as File | null,
   });
   const { user } = useAuth();
   const { userRole } = useAuth();
@@ -544,18 +550,9 @@ const TimeOffCard = () => {
         setEmployeeData(employee);
 
         // Get department data to find manager
-        // Get leave balance
-        const balanceDoc = await getDoc(doc(db, 'leaveBalances', employee.id));
-        if (balanceDoc.exists()) {
-          setLeaveBalance(balanceDoc.data());
-        } else {
-          // Set default balance if none exists
-          setLeaveBalance({
-            casualLeaves: 25,
-            sickLeaves: 999999, // Unlimited
-            updatedAt: new Date()
-          });
-        }
+        // Get leave balance using the getLeaveBalance function
+        const balance = await getLeaveBalance(employee.id);
+        setLeaveBalance(balance);
 
         if (employee.departmentId) {
           const departmentDoc = await getDoc(doc(db, 'departments', employee.departmentId));
@@ -615,16 +612,80 @@ const TimeOffCard = () => {
     }
   }, [user?.email, employeeData?.id, userRole]);
 
+  // Calculate if medical certificate is required
+  const requiresMedicalCertificate = useMemo(() => {
+    if (leaveForm.type !== 'sick') return false;
+    const duration = differenceInDays(new Date(leaveForm.endDate), new Date(leaveForm.startDate)) + 1;
+    return duration > 3;
+  }, [leaveForm.type, leaveForm.startDate, leaveForm.endDate]);
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files[0]) {
+      setLeaveForm(prev => ({
+        ...prev,
+        medicalCertificate: event.target.files![0]
+      }));
+    }
+  };
+
   const handleSubmit = async () => {
     try {
       if (!employeeData) {
         throw new Error('Employee data not found');
       }
+
+      // Check if medical certificate is required but not provided
+      if (requiresMedicalCertificate && !leaveForm.medicalCertificate) {
+        throw new Error('Medical certificate is required for sick leave longer than 3 days');
+      }
+
+      let medicalCertificateUrl = '';
+      
+      // Upload medical certificate if present
+      if (leaveForm.medicalCertificate) {
+        try {
+          const fileName = `${employeeData.id}/${new Date().getTime()}-${leaveForm.medicalCertificate.name}`;
+          
+          // Upload file to Supabase Storage using existing client
+          const { data, error: uploadError } = await supabase.storage
+            .from('medical-certificates')
+            .upload(fileName, leaveForm.medicalCertificate, {
+              contentType: leaveForm.medicalCertificate.type,
+              upsert: true // Allow overwriting if file exists
+            });
+
+          if (uploadError) {
+            console.error('Upload error:', uploadError);
+            throw new Error(uploadError.message || 'Failed to upload medical certificate');
+          }
+          
+          if (!data?.path) {
+            throw new Error('No file path returned from upload');
+          }
+
+          // Get the public URL
+          const { data: urlData } = supabase.storage
+            .from('medical-certificates')
+            .getPublicUrl(data.path);
+            
+          if (!urlData?.publicUrl) {
+            throw new Error('Failed to get public URL');
+          }
+
+          medicalCertificateUrl = urlData.publicUrl;
+        } catch (error) {
+          console.error('Error uploading medical certificate:', error);
+          throw new Error(error instanceof Error ? error.message : 'Failed to upload medical certificate');
+        }
+      }
+
+      const { medicalCertificate, ...leaveFormData } = leaveForm;
       await submitLeaveRequest({
-        ...leaveForm,
+        ...leaveFormData,
         employeeId: employeeData.id,
-        status: 'pending',
+        medicalCertificateUrl,
       });
+
       setOpenDialog(false);
       // Reset form
       setLeaveForm({
@@ -632,9 +693,11 @@ const TimeOffCard = () => {
         startDate: new Date(),
         endDate: new Date(),
         reason: '',
+        medicalCertificate: null,
       });
     } catch (error) {
       console.error('Failed to submit leave request:', error);
+      alert(error instanceof Error ? error.message : 'Failed to submit leave request');
     }
   };
 
@@ -662,12 +725,20 @@ const TimeOffCard = () => {
               <Box>
                 <Stack direction="row" spacing={2}>
                   <Chip
-                    label={`Casual Leave: ${leaveBalance.casualLeaves} days`}
+                    label={
+                      leaveBalance && typeof leaveBalance.casual === 'number' && leaveBalance.used
+                        ? `Casual Leave: ${leaveBalance.casual - (leaveBalance.used.casual || 0)}/25 days`
+                        : 'Loading...'
+                    }
                     color="primary"
                     variant="outlined"
                   />
                   <Chip
-                    label={`Sick Leave: ${leaveBalance.sickLeaves === 999999 ? 'Unlimited' : `${leaveBalance.sickLeaves} days`}`}
+                    label={
+                      leaveBalance && leaveBalance.used
+                        ? `Sick Leave: ${leaveBalance.used.sick || 0} days used`
+                        : 'Loading...'
+                    }
                     color="secondary"
                     variant="outlined"
                   />
@@ -721,6 +792,17 @@ const TimeOffCard = () => {
                         <Typography variant="body2" color={request.status === 'approved' ? 'success.main' : 'error.main'}>
                           {request.status === 'approved' ? '✓' : '✕'} {request.approverNote}
                         </Typography>
+                      )}
+                      {request.medicalCertificateUrl && (
+                        <Button
+                          variant="text"
+                          size="small"
+                          startIcon={<DescriptionIcon />}
+                          onClick={() => window.open(request.medicalCertificateUrl, '_blank')}
+                          sx={{ mt: 1 }}
+                        >
+                          View Medical Certificate
+                        </Button>
                       )}
                       {request.status === 'pending' && (
                         <Typography variant="body2" color="info.main">
@@ -870,6 +952,34 @@ const TimeOffCard = () => {
               value={leaveForm.reason}
               onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })}
             />
+
+            {/* Show file upload for sick leave > 3 days */}
+            {requiresMedicalCertificate && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" color="error" gutterBottom>
+                  * Medical certificate required for sick leave &gt; 3 days
+                </Typography>
+                <input
+                  accept="image/*,.pdf"
+                  style={{ display: 'none' }}
+                  id="medical-certificate-upload"
+                  type="file"
+                  onChange={handleFileChange}
+                />
+                <label htmlFor="medical-certificate-upload">
+                  <Button
+                    variant="outlined"
+                    component="span"
+                    startIcon={<CloudUploadIcon />}
+                    fullWidth
+                  >
+                    {leaveForm.medicalCertificate
+                      ? `Selected: ${leaveForm.medicalCertificate.name}`
+                      : 'Upload Medical Certificate'}
+                  </Button>
+                </label>
+              </Box>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>

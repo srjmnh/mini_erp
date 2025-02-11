@@ -200,6 +200,9 @@ export function TimeOffPage() {
         );
       }
 
+      const duration = calculateLeaveDuration(leaveForm.startDate, leaveForm.endDate);
+      
+      // Submit the leave request
       await submitLeaveRequest({
         type: leaveForm.type,
         startDate: leaveForm.startDate,
@@ -207,6 +210,9 @@ export function TimeOffPage() {
         reason: leaveForm.reason,
         medicalCertificateUrl,
       });
+
+      // Update leave balance
+      await updateLeaveBalance(user!.uid, leaveForm.type, duration);
 
       showSnackbar('Leave request submitted successfully', 'success');
       setLeaveForm({
