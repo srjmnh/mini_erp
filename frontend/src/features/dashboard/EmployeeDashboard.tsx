@@ -3,22 +3,25 @@ import {
   Box,
   Container,
   Grid,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  TextField,
+  Slider,
+  IconButton,
   Card,
   CardContent,
   Typography,
   Avatar,
   Stack,
   Chip,
-  IconButton,
   Menu,
   MenuItem,
   Divider,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
+  Snackbar,
+  Alert,
   Tabs,
   Tab,
   List,
@@ -30,7 +33,6 @@ import {
   CircularProgress,
   Paper,
   LinearProgress,
-  Slider,
 } from '@mui/material';
 import {
   Person as PersonIcon,
@@ -54,7 +56,7 @@ import {
   orderBy,
   onSnapshot,
 } from 'firebase/firestore';
-import { db } from '@/config/firebase';
+import { db } from '../../config/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import { format, isAfter } from 'date-fns';
 import { TaskStatus } from '@/config/project-schema';
@@ -889,8 +891,98 @@ export const EmployeeDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(0);
   const [currentTab, setCurrentTab] = useState(0);
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({ 
+    open: false,
+    message: '',
+    severity: 'success'
+  });
+
+  const showSnackbar = (message: string, severity: 'success' | 'error') => {
+    setSnackbar({
+      open: true,
+      message,
+      severity
+    });
+  };
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isProgressDialogOpen, setIsProgressDialogOpen] = useState(false);
+  const [progressComment, setProgressComment] = useState('');
+  const [newProgress, setNewProgress] = useState(0);
+
+  const handleEditTask = (task) => {
+    setSelectedTask(task);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateProgress = (task) => {
+    setSelectedTask(task);
+    setNewProgress(task.progress || 0);
+    setProgressComment('');
+    setIsProgressDialogOpen(true);
+  };
+
+  const handleProgressSubmit = async () => {
+    if (!selectedTask || !progressComment.trim()) return;
+
+    try {
+      const taskRef = doc(db, 'tasks', selectedTask.id);
+      const taskDoc = await getDoc(taskRef);
+
+      if (taskDoc.exists()) {
+        const currentTask = taskDoc.data();
+        const newComment = {
+          text: progressComment,
+          timestamp: new Date(),
+          userId: user?.uid || '',
+          userName: user?.displayName || '',
+          progress: newProgress
+        };
+
+        const updatedComments = [newComment, ...(currentTask.comments || [])];
+
+        await updateDoc(taskRef, {
+          progress: newProgress,
+          comments: updatedComments,
+          lastUpdated: new Date(),
+          latestComment: newComment
+        });
+
+        showSnackbar('Progress updated successfully', 'success');
+        setIsProgressDialogOpen(false);
+        setProgressComment('');
+      }
+    } catch (error) {
+      console.error('Error updating progress:', error);
+      showSnackbar('Error updating progress', 'error');
+    }
+  };
   const [recentExpenses, setRecentExpenses] = useState([]);
   const [showExpenseDialog, setShowExpenseDialog] = useState(false);
+
+  // Load tasks with real-time updates
+  useEffect(() => {
+    if (!user) return;
+
+    const tasksQuery = query(
+      collection(db, 'tasks'),
+      where('assigneeId', '==', user.uid)
+    );
+
+    const unsubscribe = onSnapshot(tasksQuery, (snapshot) => {
+      const updatedTasks = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        comments: doc.data().comments || []
+      }));
+      setTasks(updatedTasks);
+    }, (error) => {
+      console.error('Error loading tasks:', error);
+      showSnackbar('Error loading tasks', 'error');
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -1016,12 +1108,42 @@ export const EmployeeDashboard = () => {
   }, [user]);
 
   useEffect(() => {
-    const loadTasksData = async () => {
-      await loadTasks();
-    };
+    if (!user) return;
 
-    loadTasksData();
-  }, [loadTasks]);
+    // Set up real-time listener for tasks
+    const tasksRef = collection(db, 'tasks');
+    const q = query(tasksRef, where('assigneeId', '==', user.uid));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loadedTasks = snapshot.docs.map(doc => {
+        const data = doc.data();
+        const comments = data.comments || [];
+        // Sort comments by timestamp in descending order (newest first)
+        comments.sort((a, b) => b.timestamp.toDate() - a.timestamp.toDate());
+
+        return {
+          id: doc.id,
+          ...data,
+          comments,
+          progress: data.progress || 0,
+          dueDate: data.dueDate?.toDate(),
+          completed: data.status === 'done',
+          latestComment: comments[0] || null
+        };
+      });
+
+      // Sort tasks by due date
+      const sortedTasks = loadedTasks.sort((a, b) => {
+        const aDate = a.dueDate;
+        const bDate = b.dueDate;
+        return (aDate?.getTime() || 0) - (bDate?.getTime() || 0);
+      });
+
+      setTasks(sortedTasks);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   const handleTaskStatusChange = async (taskId: string, newStatus: TaskStatus) => {
     // Find the task and its project
@@ -1267,20 +1389,37 @@ export const EmployeeDashboard = () => {
                                 <ListItemText 
                                   primary={task.title}
                                   secondary={
-                                    task.dueDate && (
-                                      <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                        <TimeIcon fontSize="small" />
-                                        Due: {
-                                          task.dueDate instanceof Date 
-                                            ? format(task.dueDate, 'MMM d, yyyy')
-                                            : task.dueDate?.toDate 
-                                              ? format(task.dueDate.toDate(), 'MMM d, yyyy')
-                                              : task.dueDate 
-                                                ? format(new Date(task.dueDate), 'MMM d, yyyy')
-                                                : 'No due date'
-                                        }
-                                      </Typography>
-                                    )
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                      {task.dueDate && (
+                                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                          <TimeIcon fontSize="small" />
+                                          Due: {
+                                            task.dueDate instanceof Date 
+                                              ? format(task.dueDate, 'MMM d, yyyy')
+                                              : task.dueDate?.toDate 
+                                                ? format(task.dueDate.toDate(), 'MMM d, yyyy')
+                                                : task.dueDate 
+                                                  ? format(new Date(task.dueDate), 'MMM d, yyyy')
+                                                  : 'No due date'
+                                          }
+                                        </Typography>
+                                      )}
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        <Typography variant="caption" color="text.secondary">
+                                          Progress: {task.progress || 0}%
+                                        </Typography>
+                                        <LinearProgress 
+                                          variant="determinate" 
+                                          value={task.progress || 0}
+                                          sx={{ flexGrow: 1, height: 4, borderRadius: 1 }}
+                                        />
+                                      </Box>
+                                      {task.latestComment && (
+                                        <Typography variant="caption" color="text.secondary">
+                                          Latest: {task.latestComment.text} - {task.latestComment.userName} ({format(task.latestComment.timestamp.toDate(), 'MMM d, HH:mm')})
+                                        </Typography>
+                                      )}
+                                    </Box>
                                   }
                                 />
                               </ListItemButton>
@@ -1696,6 +1835,93 @@ export const EmployeeDashboard = () => {
           }} />
         </DialogContent>
       </Dialog>
+
+      {/* Progress Update Dialog */}
+      <Dialog
+        open={isProgressDialogOpen}
+        onClose={() => setIsProgressDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Update Task Progress</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Current Progress: {selectedTask?.progress || 0}%
+            </Typography>
+            <Slider
+              value={newProgress}
+              onChange={(_, value) => setNewProgress(value as number)}
+              valueLabelDisplay="auto"
+              step={1}
+              min={0}
+              max={100}
+              sx={{
+                '& .MuiSlider-markLabel': {
+                  fontSize: '0.75rem'
+                }
+              }}
+            />
+          </Box>
+          <TextField
+            fullWidth
+            multiline
+            rows={4}
+            label="Progress Update Comment"
+            value={progressComment}
+            onChange={(e) => setProgressComment(e.target.value)}
+            placeholder="Describe the progress made..."
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsProgressDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handleProgressSubmit}
+            variant="contained"
+            disabled={!progressComment.trim()}
+          >
+            Update Progress
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Task Dialog */}
+      <Dialog
+        open={isEditDialogOpen}
+        onClose={() => setIsEditDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Edit Task</DialogTitle>
+        <DialogContent>
+          {/* Add edit task form fields here */}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              // Add save logic here
+              setIsEditDialogOpen(false);
+            }}
+          >
+            Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+      >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </>
   );
 };

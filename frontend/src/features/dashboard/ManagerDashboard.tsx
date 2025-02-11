@@ -1302,63 +1302,131 @@ export default function ManagerDashboard() {
 }
 
 const fetchDepartmentTasks = async () => {
-  if (!user?.uid) return;
+  if (!user?.uid || !department?.id) return;
 
   try {
-    const tasksQuery = query(
+    // Query for in-progress tasks
+    const inProgressQuery = query(
       collection(db, 'tasks'),
-      where('userId', '==', user.uid),
+      where('departmentId', '==', department.id),
+      where('status', '!=', 'done'),
+      orderBy('status'),
       orderBy('dueDate', 'asc')
     );
 
-    return onSnapshot(tasksQuery, async (snapshot) => {
-      const taskDocs = snapshot.docs.map(async (doc) => {
-        const data = doc.data();
-        const dueDate = data.dueDate?.toDate ? data.dueDate.toDate() : null;
-        
-        // Get assignee details
-        let assignedTo = 'Unassigned';
-        if (data.assigneeId) {
-          const assigneeDoc = await getDoc(doc(db, 'employees', data.assigneeId));
-          if (assigneeDoc.exists()) {
-            const assigneeData = assigneeDoc.data();
-            assignedTo = assigneeData.firstName && assigneeData.lastName ? 
-              `${assigneeData.firstName} ${assigneeData.lastName}` : 
-              assigneeData.name || 'Unknown';
+    // Query for completed tasks
+    const completedQuery = query(
+      collection(db, 'tasks'),
+      where('departmentId', '==', department.id),
+      where('status', '==', 'done'),
+      orderBy('dueDate', 'desc')
+    );
+
+    // Set up listeners for both queries
+    const unsubscribeInProgress = onSnapshot(inProgressQuery, (snapshot) => {
+      Promise.all(
+        snapshot.docs.map(async (doc) => {
+          const data = doc.data();
+          const dueDate = data.dueDate?.toDate ? data.dueDate.toDate() : null;
+          
+          // Get assignee details
+          let assignedTo = 'Unassigned';
+          if (data.assigneeId) {
+            const assigneeDoc = await getDoc(doc(db, 'employees', data.assigneeId));
+            if (assigneeDoc.exists()) {
+              const assigneeData = assigneeDoc.data();
+              assignedTo = assigneeData.firstName && assigneeData.lastName ? 
+                `${assigneeData.firstName} ${assigneeData.lastName}` : 
+                assigneeData.name || 'Unknown';
+            }
           }
-        }
 
-        // Get comments
-        const commentsQuery = query(
-          collection(db, `tasks/${doc.id}/comments`),
-          orderBy('timestamp', 'desc')
-        );
-        const commentsSnapshot = await getDocs(commentsQuery);
-        const comments = commentsSnapshot.docs.map(commentDoc => {
-          const commentData = commentDoc.data();
+          // Get comments
+          const commentsQuery = query(
+            collection(db, `tasks/${doc.id}/comments`),
+            orderBy('timestamp', 'desc')
+          );
+          const commentsSnapshot = await getDocs(commentsQuery);
+          const comments = commentsSnapshot.docs.map(commentDoc => {
+            const commentData = commentDoc.data();
+            return {
+              text: commentData.text,
+              progress: commentData.progress,
+              timestamp: commentData.timestamp?.toDate(),
+              userId: commentData.userId,
+              userName: commentData.userName
+            };
+          });
+
           return {
-            text: commentData.text,
-            progress: commentData.progress,
-            timestamp: commentData.timestamp?.toDate(),
-            userId: commentData.userId,
-            userName: commentData.userName
+            id: doc.id,
+            ...data,
+            dueDate,
+            assignedTo,
+            comments,
+            completed: data.completed === true || data.status === 'done',
+            latestComment: comments.length > 0 ? comments[0] : null
           };
+        })
+      ).then(inProgressTasks => {
+        // Get completed tasks
+        const unsubscribeCompleted = onSnapshot(completedQuery, (completedSnapshot) => {
+          Promise.all(
+            completedSnapshot.docs.map(async (doc) => {
+              const data = doc.data();
+              const dueDate = data.dueDate?.toDate ? data.dueDate.toDate() : null;
+              
+              // Get assignee details
+              let assignedTo = 'Unassigned';
+              if (data.assigneeId) {
+                const assigneeDoc = await getDoc(doc(db, 'employees', data.assigneeId));
+                if (assigneeDoc.exists()) {
+                  const assigneeData = assigneeDoc.data();
+                  assignedTo = assigneeData.firstName && assigneeData.lastName ? 
+                    `${assigneeData.firstName} ${assigneeData.lastName}` : 
+                    assigneeData.name || 'Unknown';
+                }
+              }
+
+              // Get comments
+              const commentsQuery = query(
+                collection(db, `tasks/${doc.id}/comments`),
+                orderBy('timestamp', 'desc')
+              );
+              const commentsSnapshot = await getDocs(commentsQuery);
+              const comments = commentsSnapshot.docs.map(commentDoc => {
+                const commentData = commentDoc.data();
+                return {
+                  text: commentData.text,
+                  progress: commentData.progress,
+                  timestamp: commentData.timestamp?.toDate(),
+                  userId: commentData.userId,
+                  userName: commentData.userName
+                };
+              });
+
+              return {
+                id: doc.id,
+                ...data,
+                dueDate,
+                assignedTo,
+                comments,
+                completed: true,
+                latestComment: comments.length > 0 ? comments[0] : null
+              };
+            })
+          ).then(completedTasks => {
+            setDepartmentTasks([...inProgressTasks, ...completedTasks]);
+          });
         });
-
-        return {
-          id: doc.id,
-          ...data,
-          dueDate,
-          assignedTo,
-          comments,
-          completed: data.completed === true || data.status === 'done',
-          latestComment: comments.length > 0 ? comments[0] : null
-        };
       });
-
-      setDepartmentTasks(await Promise.all(taskDocs));
     });
   } catch (error) {
     console.error('Error fetching department tasks:', error);
   }
+
+  return () => {
+    unsubscribeInProgress();
+    unsubscribeCompleted && unsubscribeCompleted();
+  };
 };

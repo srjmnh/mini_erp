@@ -3,11 +3,12 @@ import {
   Box,
   Paper,
   List,
+  Grid,
+  IconButton,
   ListItem,
   ListItemIcon,
   ListItemText,
   ListItemSecondaryAction,
-  IconButton,
   Checkbox,
   Typography,
   Button,
@@ -28,6 +29,7 @@ import {
   Add as AddIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
+  Check as CheckIcon,
 } from '@mui/icons-material';
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, getDoc, orderBy } from 'firebase/firestore';
@@ -333,7 +335,7 @@ export const TaskView: React.FC<Props> = ({ userId, isDepartmentView = false }) 
     setProgressDialogOpen(true);
   };
 
-  const handleUpdateProgress = async (task: Task, newProgress: number, comment: string) => {
+  const handleUpdateProgress = async (task: Task, newProgress: number, comment: string, completed: boolean = false) => {
     try {
       if (!comment.trim()) {
         showSnackbar('Please add a comment', 'error');
@@ -369,6 +371,8 @@ export const TaskView: React.FC<Props> = ({ userId, isDepartmentView = false }) 
         progress: newProgress,
         lastUpdated: new Date(),
         comments: [newComment, ...existingComments],
+        status: completed ? 'done' : 'todo',
+        completed,
         latestComment: {
           text: comment,
           userName: userName,
@@ -472,23 +476,50 @@ export const TaskView: React.FC<Props> = ({ userId, isDepartmentView = false }) 
     return task.comments[0];
   }, []);
 
+  // Group tasks by progress
+  const todoTasks = tasks.filter(task => !task.progress || task.progress === 0);
+  const inProgressTasks = tasks.filter(task => task.progress && task.progress > 0 && task.progress < 100);
+  const completedTasks = tasks.filter(task => task.progress === 100);
+
   return (
     <Box>
-      <Paper elevation={0} sx={{ p: 2, bgcolor: 'transparent' }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6">Tasks</Typography>
-          <Button
-            startIcon={<AddIcon />}
-            variant="contained"
-            size="small"
-            onClick={handleAddTask}
-          >
-            Add Task
-          </Button>
-        </Box>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h6">Tasks</Typography>
+        <Button
+          startIcon={<AddIcon />}
+          variant="contained"
+          size="small"
+          onClick={handleAddTask}
+        >
+          Add Task
+        </Button>
+      </Box>
 
-        <List sx={{ width: '100%' }}>
-          {tasks.map((task) => {
+      <Grid container spacing={3}>
+        {/* Todo Tasks */}
+        <Grid item xs={12} md={4}>
+          <Paper
+            sx={{
+              p: 2,
+              bgcolor: 'background.paper',
+              height: '100%',
+              minHeight: '60vh',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            <Box sx={{
+              p: 2,
+              bgcolor: 'primary.light',
+              color: 'primary.contrastText',
+              borderRadius: 1,
+              mb: 2
+            }}>
+              <Typography variant="h6">To Do</Typography>
+              <Typography variant="body2">{todoTasks.length} tasks</Typography>
+            </Box>
+            <List sx={{ flex: 1, overflowY: 'auto' }}>
+              {todoTasks.map((task) => {
             const latestUpdate = getLatestUpdate(task);
             return (
               <ListItem
@@ -671,9 +702,292 @@ export const TaskView: React.FC<Props> = ({ userId, isDepartmentView = false }) 
                 </Box>
               </ListItem>
             );
-          })}
-        </List>
-      </Paper>
+              })}
+            </List>
+          </Paper>
+        </Grid>
+
+        {/* In Progress Tasks */}
+        <Grid item xs={12} md={4}>
+          <Paper
+            sx={{
+              p: 2,
+              bgcolor: 'background.paper',
+              height: '100%',
+              minHeight: '60vh',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            <Box sx={{
+              p: 2,
+              bgcolor: 'warning.light',
+              color: 'warning.contrastText',
+              borderRadius: 1,
+              mb: 2
+            }}>
+              <Typography variant="h6">In Progress</Typography>
+              <Typography variant="body2">{inProgressTasks.length} tasks</Typography>
+            </Box>
+            <List sx={{ flex: 1, overflowY: 'auto' }}>
+              {inProgressTasks.map((task) => {
+                const latestUpdate = getLatestUpdate(task);
+                return (
+                  <ListItem
+                    key={task.id}
+                    sx={{
+                      px: 2,
+                      py: 1.5,
+                      mb: 1,
+                      bgcolor: 'background.paper',
+                      borderRadius: 1,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      '&:hover': {
+                        bgcolor: 'action.hover'
+                      }
+                    }}
+                  >
+                    <Box sx={{ flex: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                        <Checkbox
+                          checked={task.completed}
+                          onChange={() => handleToggleComplete(task)}
+                          sx={{ ml: -1, mr: 1 }}
+                        />
+                        <Typography sx={{ fontSize: '0.95rem' }}>
+                          {task.title}
+                        </Typography>
+                        <Box
+                          sx={{
+                            ml: 1,
+                            px: 1,
+                            py: 0.2,
+                            borderRadius: 1,
+                            fontSize: '0.75rem',
+                            bgcolor: task.priority === 'high' ? 'error.main' : 
+                                    task.priority === 'medium' ? 'warning.main' : 'success.main',
+                            color: 'white'
+                          }}
+                        >
+                          {task.priority}
+                        </Box>
+                      </Box>
+
+                      <Box sx={{ pl: 4 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                          <Box sx={{ flex: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                              <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
+                                Progress: {task.progress || 0}%
+                              </Typography>
+                              <Button
+                                size="small"
+                                startIcon={<AddIcon />}
+                                onClick={() => handleOpenProgressDialog(task)}
+                                sx={{ 
+                                  ml: 'auto',
+                                  color: 'text.secondary',
+                                  '&:hover': { color: 'primary.main' }
+                                }}
+                              >
+                                Add Progress
+                              </Button>
+                            </Box>
+                            <LinearProgress
+                              variant="determinate"
+                              value={task.progress || 0}
+                              sx={{
+                                height: 4,
+                                borderRadius: 2,
+                                bgcolor: 'action.hover',
+                                '& .MuiLinearProgress-bar': {
+                                  bgcolor: task.completed ? 'success.main' : 'primary.main'
+                                }
+                              }}
+                            />
+                          </Box>
+                        </Box>
+
+                        {task.latestComment && (
+                          <Box sx={{ mt: 1 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              Latest Update:
+                            </Typography>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', mt: 0.5 }}>
+                              <Typography variant="body2">
+                                {task.latestComment.text}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                by {task.latestComment.userName} • {format(task.latestComment.timestamp.toDate(), 'MMM d, yyyy HH:mm')}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        )}
+                      </Box>
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 1, ml: 2, alignItems: 'flex-start' }}>
+                      <IconButton 
+                        size="small"
+                        onClick={() => handleUpdateTask(task.id, 100, 'Task marked as complete', true)}
+                        sx={{ 
+                          color: task.status === 'done' ? 'success.main' : 'text.secondary',
+                          '&:hover': {
+                            color: 'success.main'
+                          }
+                        }}
+                        title="Mark as Complete"
+                      >
+                        <CheckIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton 
+                        size="small"
+                        onClick={() => handleEditTask(task)}
+                        sx={{ color: 'text.secondary' }}
+                        title="Edit Task"
+                      >
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton 
+                        size="small"
+                        onClick={() => handleDeleteTask(task.id)}
+                        sx={{ color: 'text.secondary' }}
+                        title="Delete Task"
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  </ListItem>
+                );
+              })}
+            </List>
+          </Paper>
+        </Grid>
+
+        {/* Completed Tasks */}
+        <Grid item xs={12} md={4}>
+          <Paper
+            sx={{
+              p: 2,
+              bgcolor: 'background.paper',
+              height: '100%',
+              minHeight: '60vh',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            <Box sx={{
+              p: 2,
+              bgcolor: 'success.light',
+              color: 'success.contrastText',
+              borderRadius: 1,
+              mb: 2
+            }}>
+              <Typography variant="h6">Completed</Typography>
+              <Typography variant="body2">{completedTasks.length} tasks</Typography>
+            </Box>
+            <List sx={{ flex: 1, overflowY: 'auto' }}>
+              {completedTasks.map((task) => {
+                const latestUpdate = getLatestUpdate(task);
+                return (
+                  <ListItem
+                    key={task.id}
+                    sx={{
+                      px: 2,
+                      py: 1.5,
+                      mb: 1,
+                      bgcolor: 'background.paper',
+                      borderRadius: 1,
+                      '&:hover': {
+                        bgcolor: 'action.hover'
+                      }
+                    }}
+                  >
+                    <Box sx={{ width: '100%' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                        <Checkbox
+                          checked={task.completed}
+                          onChange={() => handleToggleComplete(task)}
+                          sx={{ ml: -1, mr: 1 }}
+                        />
+                        <Typography sx={{ fontSize: '0.95rem' }}>
+                          {task.title}
+                        </Typography>
+                        <Box
+                          sx={{
+                            ml: 1,
+                            px: 1,
+                            py: 0.2,
+                            borderRadius: 1,
+                            fontSize: '0.75rem',
+                            bgcolor: task.priority === 'high' ? 'error.main' : 
+                                    task.priority === 'medium' ? 'warning.main' : 'success.main',
+                            color: 'white'
+                          }}
+                        >
+                          {task.priority}
+                        </Box>
+                      </Box>
+
+                      <Box sx={{ pl: 4 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                          <Box sx={{ flex: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                              <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
+                                Progress: {task.progress || 0}%
+                              </Typography>
+                              <Button
+                                size="small"
+                                startIcon={<AddIcon />}
+                                onClick={() => handleOpenProgressDialog(task)}
+                                sx={{ 
+                                  ml: 'auto',
+                                  color: 'text.secondary',
+                                  '&:hover': { color: 'primary.main' }
+                                }}
+                              >
+                                Add Progress
+                              </Button>
+                            </Box>
+                            <LinearProgress
+                              variant="determinate"
+                              value={task.progress || 0}
+                              sx={{
+                                height: 4,
+                                borderRadius: 2,
+                                bgcolor: 'action.hover',
+                                '& .MuiLinearProgress-bar': {
+                                  bgcolor: task.completed ? 'success.main' : 'primary.main'
+                                }
+                              }}
+                            />
+                          </Box>
+                        </Box>
+
+                        {task.latestComment && (
+                          <Box sx={{ mt: 1 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              Latest Update:
+                            </Typography>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', mt: 0.5 }}>
+                              <Typography variant="body2">
+                                {task.latestComment.text}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                by {task.latestComment.userName} • {format(task.latestComment.timestamp.toDate(), 'MMM d, yyyy HH:mm')}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        )}
+                      </Box>
+                    </Box>
+                  </ListItem>
+                );
+              })}
+            </List>
+          </Paper>
+        </Grid>
+      </Grid>
 
       {/* Progress Update Dialog */}
       <Dialog 

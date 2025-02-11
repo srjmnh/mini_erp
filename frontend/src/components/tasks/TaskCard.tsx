@@ -73,6 +73,10 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, on
     setComment('');
   };
 
+  const handleComplete = () => {
+    onUpdate(task.id, 100, 'Task marked as complete', true);
+  };
+
   return (
     <Card 
       elevation={0}
@@ -92,8 +96,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, on
         <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
             <Checkbox 
-              checked={task.completed}
-              onChange={() => onUpdate(task.id, task.progress || 0, '', !task.completed)}
+              checked={task.status === 'done'}
+              onChange={handleComplete}
               sx={{ 
                 ml: -1,
                 '&.Mui-checked': {
