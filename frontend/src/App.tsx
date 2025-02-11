@@ -20,6 +20,7 @@ import PerformancePage from './features/hr/PerformancePage';
 import { TimeOff } from './features/hr/pages/TimeOff';
 import ExpensePage from './features/expenses/ExpensePage';
 import HRDashboard from './features/hr/HRDashboard';
+import HRAttendancePage from './features/hr/components/HRAttendancePage';
 import SettingsPage from './features/settings/SettingsPage';
 import CalendarPage from './features/calendar/CalendarPage';
 import { AuthProvider } from './contexts/AuthContext';
@@ -79,6 +80,7 @@ function App() {
                                 <Route path="payroll" element={<PayrollPage />} />
                                 <Route path="performance" element={<PerformancePage />} />
                                 <Route path="roles" element={<RoleConfigurationPage />} />
+                                <Route path="attendance" element={<HRAttendancePage />} />
                               </Route>
                               <Route path="settings" element={<SettingsPage />} />
                             </Route>
@@ -87,14 +89,13 @@ function App() {
                             <Route
                               path="/expenses"
                               element={
-                                <ProtectedRoute allowedRoles={['hr', 'admin']}>
-                                  <ExpensePage />
-                                </ProtectedRoute>
+                                <RequireAuth>
+                                  <DashboardLayout>
+                                    <ExpensePage />
+                                  </DashboardLayout>
+                                </RequireAuth>
                               }
                             />
-
-                            {/* Redirect all other routes to dashboard */}
-                            <Route path="*" element={<Navigate to="/dashboard" replace />} />
                           </Routes>
                         </Router>
                         <StreamChatPopover />

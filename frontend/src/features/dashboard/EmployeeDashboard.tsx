@@ -155,39 +155,45 @@ const formatTaskDate = (date: any): string => {
 };
 
 // Team Member Card
-const TeamMemberCard = ({ member }) => (
-  <Card elevation={0} sx={{ 
-    p: 1, 
-    '&:hover': { 
-      bgcolor: 'action.hover',
-      transform: 'translateY(-2px)',
-    },
-    transition: 'all 0.2s ease-in-out'
-  }}>
-    <CardContent>
-      <Stack direction="row" spacing={2} alignItems="center">
-        <Avatar 
-          src={member.photoUrl}
-          sx={{ 
-            width: 48, 
-            height: 48,
-            bgcolor: 'primary.main' 
-          }}
-        >
-          {member.firstName[0]}
-        </Avatar>
-        <Box>
-          <Typography variant="subtitle1" fontWeight="medium">
-            {member.firstName} {member.lastName}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {member.position}
-          </Typography>
-        </Box>
-      </Stack>
-    </CardContent>
-  </Card>
-);
+const TeamMemberCard = ({ member }) => {
+  const getInitials = (firstName: string = '', lastName: string = '') => {
+    return `${firstName[0] || ''}${lastName[0] || ''}`;
+  };
+
+  return (
+    <Card elevation={0} sx={{ 
+      p: 1, 
+      '&:hover': { 
+        bgcolor: 'action.hover',
+        transform: 'translateY(-2px)',
+      },
+      transition: 'all 0.2s ease-in-out'
+    }}>
+      <CardContent>
+        <Stack direction="row" spacing={2} alignItems="center">
+          <Avatar 
+            src={member.photoUrl}
+            sx={{ 
+              width: 48, 
+              height: 48,
+              bgcolor: 'primary.main' 
+            }}
+          >
+            {getInitials(member.firstName, member.lastName)}
+          </Avatar>
+          <Box>
+            <Typography variant="subtitle1" fontWeight="medium">
+              {[member.firstName, member.lastName].filter(Boolean).join(' ') || 'Team Member'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {member.position || member.role || 'Employee'}
+            </Typography>
+          </Box>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+};
 
 // Project Card
 const ProjectCard = ({ project }) => {
@@ -521,7 +527,7 @@ const TimeOffCard = () => {
   const [leaveRequests, setLeaveRequests] = useState<any[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
 
-  // Listen to leave requests
+  // Listen to leave requests and employee data
   useEffect(() => {
     const fetchEmployeeAndManager = async () => {
       if (!user?.email) return;
@@ -562,7 +568,50 @@ const TimeOffCard = () => {
     };
 
     fetchEmployeeAndManager();
-  }, [user?.email]);
+
+    // Set up real-time listener for leave requests
+    if (employeeData?.id) {
+      const unsubscribe = onSnapshot(
+        query(
+          collection(db, 'leaveRequests'),
+          where('employeeId', '==', employeeData.id),
+          orderBy('createdAt', 'desc')
+        ),
+        (snapshot) => {
+          const requests = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          setLeaveRequests(requests);
+        }
+      );
+
+      // Set up listener for pending approvals if user is a manager or HR
+      if (userRole === 'HR0' || userRole === 'hr' || employeeData?.isManager) {
+        const pendingQuery = query(
+          collection(db, 'leaveRequests'),
+          where('status', '==', 'pending'),
+          where('departmentId', '==', employeeData.departmentId),
+          orderBy('createdAt', 'desc')
+        );
+
+        const pendingUnsubscribe = onSnapshot(pendingQuery, (snapshot) => {
+          const requests = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          setPendingApprovals(requests);
+        });
+
+        return () => {
+          unsubscribe();
+          pendingUnsubscribe();
+        };
+      }
+
+      return () => unsubscribe();
+    }
+  }, [user?.email, employeeData?.id, userRole]);
 
   const handleSubmit = async () => {
     try {
@@ -650,7 +699,16 @@ const TimeOffCard = () => {
                         />
                       </Stack>
                       <Typography variant="body2" color="text.secondary">
-                        {request.startDate && format(new Date(request.startDate), 'MMM d, yyyy')} - {request.endDate && format(new Date(request.endDate), 'MMM d, yyyy')}
+                        {request.startDate ? (
+                          request.startDate.toDate ? 
+                            format(request.startDate.toDate(), 'MMM d, yyyy') : 
+                            format(new Date(request.startDate), 'MMM d, yyyy')
+                        ) : ''} - 
+                        {request.endDate ? (
+                          request.endDate.toDate ? 
+                            format(request.endDate.toDate(), 'MMM d, yyyy') : 
+                            format(new Date(request.endDate), 'MMM d, yyyy')
+                        ) : ''}
                       </Typography>
                       {request.reason && (
                         <Typography variant="body2" color="text.secondary">
@@ -699,7 +757,16 @@ const TimeOffCard = () => {
                         {request.type} Leave
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {request.startDate && format(new Date(request.startDate), 'MMM d, yyyy')} - {request.endDate && format(new Date(request.endDate), 'MMM d, yyyy')}
+                        {request.startDate ? (
+                          request.startDate.toDate ? 
+                            format(request.startDate.toDate(), 'MMM d, yyyy') : 
+                            format(new Date(request.startDate), 'MMM d, yyyy')
+                        ) : ''} - 
+                        {request.endDate ? (
+                          request.endDate.toDate ? 
+                            format(request.endDate.toDate(), 'MMM d, yyyy') : 
+                            format(new Date(request.endDate), 'MMM d, yyyy')
+                        ) : ''}
                       </Typography>
                       {request.reason && (
                         <Typography variant="body2" color="text.secondary">
@@ -843,6 +910,21 @@ export const EmployeeDashboard = () => {
 
         const employeeData = employeeSnapshot.docs[0].data();
         const departmentId = employeeData.departmentId;
+
+        // Load team members from the same department
+        if (departmentId) {
+          const teamMembersQuery = query(
+            collection(db, 'employees'),
+            where('departmentId', '==', departmentId),
+            where('email', '!=', user.email) // Exclude current user
+          );
+          const teamMembersSnapshot = await getDocs(teamMembersQuery);
+          const teamMembersData = teamMembersSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          setTeamMembers(teamMembersData);
+        }
 
         // Load recent expenses
         const expensesRef = collection(db, 'expenses');
@@ -1496,13 +1578,25 @@ export const EmployeeDashboard = () => {
           <Typography variant="h6" gutterBottom>
             Your Team Members
           </Typography>
-          <Grid container spacing={2}>
-            {teamMembers.map((member) => (
-              <Grid item xs={12} sm={6} md={4} key={member.id}>
-                <TeamMemberCard member={member} />
-              </Grid>
-            ))}
-          </Grid>
+          {loading ? (
+            <Box display="flex" justifyContent="center" py={4}>
+              <CircularProgress />
+            </Box>
+          ) : teamMembers.length > 0 ? (
+            <Grid container spacing={2}>
+              {teamMembers.map((member) => (
+                <Grid item xs={12} sm={6} md={4} key={member.id}>
+                  <TeamMemberCard member={member} />
+                </Grid>
+              ))}
+            </Grid>
+          ) : (
+            <Box py={4} textAlign="center">
+              <Typography color="text.secondary">
+                No team members found in your department
+              </Typography>
+            </Box>
+          )}
         </Box>
       )
     },

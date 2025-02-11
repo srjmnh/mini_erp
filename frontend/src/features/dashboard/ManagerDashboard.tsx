@@ -41,6 +41,8 @@ import {
   Add as AddIcon,
   Check as CheckIcon,
   Close as CloseIcon,
+  Login as LoginIcon,
+  Logout as LogoutIcon,
 } from '@mui/icons-material';
 import { useManagerData } from '@/hooks/useManagerData';
 import { collection, query, where, getDocs, doc as firestoreDoc, getDoc, updateDoc, orderBy, onSnapshot, limit, addDoc } from 'firebase/firestore';
@@ -1135,6 +1137,7 @@ export default function ManagerDashboard() {
           </Paper>
         </Grid>
       </Grid>
+
       {/* Comment Dialog */}
       <Dialog
         open={commentDialog.open}
