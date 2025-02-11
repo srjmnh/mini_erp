@@ -19,8 +19,8 @@ import RoleConfigurationPage from './features/roles/RoleConfigurationPage';
 import PerformancePage from './features/hr/PerformancePage';
 import { TimeOff } from './features/hr/pages/TimeOff';
 import ExpensePage from './features/expenses/ExpensePage';
-import HRDashboard from './features/hr/HRDashboard';
-import HRAttendancePage from './features/hr/components/HRAttendancePage';
+import HRRoutes from './features/hr/HRRoutes';
+import { PayrollGenerator } from './features/payroll/components/PayrollGenerator';
 import SettingsPage from './features/settings/SettingsPage';
 import CalendarPage from './features/calendar/CalendarPage';
 import { AuthProvider } from './contexts/AuthContext';
@@ -73,15 +73,7 @@ function App() {
                               <Route path="documents" element={<DocumentsPage />} />
                               <Route path="calendar" element={<CalendarPage />} />
                               <Route path="requests" element={<RequestsPage />} />
-                              <Route path="hr" element={<Outlet />}>
-                                <Route index element={<HRDashboard />} />
-                                <Route path="time-off" element={<TimeOff />} />
-                                <Route path="expenses" element={<ExpensePage />} />
-                                <Route path="payroll" element={<PayrollPage />} />
-                                <Route path="performance" element={<PerformancePage />} />
-                                <Route path="roles" element={<RoleConfigurationPage />} />
-                                <Route path="attendance" element={<HRAttendancePage />} />
-                              </Route>
+                              <Route path="hr/*" element={<HRRoutes />} />
                               <Route path="settings" element={<SettingsPage />} />
                             </Route>
 
