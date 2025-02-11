@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DescriptionIcon from '@mui/icons-material/Description';
-import { differenceInDays } from 'date-fns';
+import { differenceInDays, format, isAfter } from 'date-fns';
 import { supabase } from '@/config/supabase';
 import {
   Box,
@@ -59,11 +59,13 @@ import {
   updateDoc,
   orderBy,
   onSnapshot,
+  limit,
 } from 'firebase/firestore';
-import { db } from '../../config/firebase';
+import { db } from '@/config/firebase';
 import { getLeaveBalance } from '@/services/leaveManagement';
 import { useAuth } from '@/contexts/AuthContext';
-import { format, isAfter } from 'date-fns';
+import { PDFDownloadLink } from '@react-pdf/renderer';
+import PayrollPDF from '../payroll/components/PayrollPDF';
 import { TaskStatus } from '@/config/project-schema';
 import { DatePicker } from '@mui/x-date-pickers';
 import { useRequests } from '@/hooks/useRequests';
@@ -993,6 +995,235 @@ const TimeOffCard = () => {
   );
 };
 
+export const PayrollCard = () => {
+  const [payrollHistory, setPayrollHistory] = useState<any[]>([]);
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+
+
+  console.log('PayrollCard rendered. User:', user?.uid);
+
+  useEffect(() => {
+    console.log('PayrollCard useEffect triggered');
+    if (!user?.uid) {
+      console.log('No user ID, returning');
+      return;
+    }
+
+    const fetchPayrollHistory = async () => {
+      console.log('Fetching payroll history for user:', user.email);
+      try {
+        // Query employee document by email
+        const q = query(collection(db, 'employees'), where('email', '==', user.email));
+        console.log('Query created for:', user.email);
+        
+        console.log('Setting up onSnapshot listener...');
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+          console.log('Snapshot received with', snapshot.docs.length, 'docs');
+          
+          if (snapshot.empty) {
+            console.log('No employee document found');
+            setPayrollHistory([]);
+            setLoading(false);
+            return;
+          }
+
+          const employeeDoc = snapshot.docs[0];
+          const employeeData = employeeDoc.data();
+          console.log('Employee data received:', employeeData);
+          console.log('Payroll array:', employeeData.payroll);
+          
+          const payroll = employeeData.payroll || [];
+          console.log('Setting payroll history:', payroll);
+          setPayrollHistory(payroll);
+          setLoading(false);
+        });
+
+        return unsubscribe;
+      } catch (error) {
+        console.error('Error in fetchPayrollHistory:', error);
+        setLoading(false);
+      }
+    };
+
+    console.log('Calling fetchPayrollHistory...');
+    fetchPayrollHistory();
+  }, [user?.uid]);
+
+  console.log('Rendering PayrollCard. Loading:', loading, 'History:', payrollHistory);
+
+  if (loading) {
+    console.log('Showing loading state');
+    return (
+      <Box>
+        <Card sx={{ p: 2 }}>
+          <CardContent>
+            <Stack spacing={2} alignItems="center">
+              <CircularProgress />
+              <Typography>Loading payroll data...</Typography>
+            </Stack>
+          </CardContent>
+        </Card>
+
+  
+      </Box>
+    );
+  }
+
+  console.log('Rendering main card. Payroll history length:', payrollHistory.length);
+
+  return (
+    <Box>
+      <Card sx={{ p: 2 }}>
+        <CardContent>
+          <Stack spacing={2}>
+            <Typography variant="h6" gutterBottom>
+              Payroll History
+            </Typography>
+          
+          {payrollHistory.length === 0 ? (
+            <Typography color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
+              No payroll records found
+            </Typography>
+          ) : (
+            <Stack spacing={2}>
+              {payrollHistory.map((payroll, index) => {
+                console.log('Rendering payroll record:', payroll);
+                try {
+                  return (
+                    <Paper key={payroll.payrollId || index} elevation={0} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                      <Grid container spacing={2}>
+                        {/* Header */}
+                        <Grid item xs={12}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="center">
+                            <Stack direction="row" spacing={2} alignItems="center">
+                              <Typography variant="h6">
+                                {format(new Date(payroll.date.seconds * 1000), 'MMMM yyyy')}
+                              </Typography>
+                              <Chip
+                                label={payroll.calculationMode}
+                                color="info"
+                                size="small"
+                                sx={{ textTransform: 'capitalize' }}
+                              />
+                            </Stack>
+                            <Stack direction="row" spacing={2} alignItems="center">
+                              <Typography variant="h6" color="primary.main">
+                                ${payroll.totalSalary.toFixed(2)}
+                              </Typography>
+                              <PDFDownloadLink
+                                document={
+                                  <PayrollPDF
+                                    payroll={payroll}
+                                    employeeData={{
+                                      name: user?.displayName || '',
+                                      email: user?.email || '',
+                                      department: 'HR',
+                                      currentDepartment: 'Marketing',
+                                    }}
+                                  />
+                                }
+                                fileName={`payslip-${format(new Date(payroll.date.seconds * 1000), 'MMM-yyyy')}.pdf`}
+                                style={{ textDecoration: 'none' }}
+                              >
+                                {({ blob, url, loading, error }) => (
+                                  <IconButton
+                                    size="small"
+                                    color="primary"
+                                    title="Download Payslip"
+                                    disabled={loading}
+                                  >
+                                    {loading ? <CircularProgress size={20} /> : <DescriptionIcon />}
+                                  </IconButton>
+                                )}
+                              </PDFDownloadLink>
+                            </Stack>
+                          </Stack>
+                        </Grid>
+
+                        <Grid item xs={12}>
+                          <Divider />
+                        </Grid>
+
+                        {/* Work Hours */}
+                        <Grid item xs={12} sm={6}>
+                          <Paper variant="outlined" sx={{ p: 2, height: '100%', borderRadius: 2 }}>
+                            <Stack spacing={2}>
+                              <Typography variant="subtitle1" color="text.secondary">
+                                Work Hours
+                              </Typography>
+                              <Stack spacing={1}>
+                                <Stack direction="row" justifyContent="space-between">
+                                  <Typography variant="body2">Regular Hours:</Typography>
+                                  <Typography variant="body2" fontWeight="medium">
+                                    {payroll.regularHours} hrs
+                                  </Typography>
+                                </Stack>
+                                <Stack direction="row" justifyContent="space-between">
+                                  <Typography variant="body2">Overtime Hours:</Typography>
+                                  <Typography variant="body2" fontWeight="medium" color={payroll.overtimeHours > 0 ? 'warning.main' : 'text.secondary'}>
+                                    {payroll.overtimeHours} hrs
+                                  </Typography>
+                                </Stack>
+                                <Stack direction="row" justifyContent="space-between">
+                                  <Typography variant="body2">Total Hours:</Typography>
+                                  <Typography variant="body2" fontWeight="medium">
+                                    {(payroll.regularHours + payroll.overtimeHours).toFixed(2)} hrs
+                                  </Typography>
+                                </Stack>
+                              </Stack>
+                            </Stack>
+                          </Paper>
+                        </Grid>
+
+                        {/* Earnings */}
+                        <Grid item xs={12} sm={6}>
+                          <Paper variant="outlined" sx={{ p: 2, height: '100%', borderRadius: 2 }}>
+                            <Stack spacing={2}>
+                              <Typography variant="subtitle1" color="text.secondary">
+                                Earnings Breakdown
+                              </Typography>
+                              <Stack spacing={1}>
+                                <Stack direction="row" justifyContent="space-between">
+                                  <Typography variant="body2">Base Salary:</Typography>
+                                  <Typography variant="body2" fontWeight="medium">
+                                    ${payroll.baseSalary.toFixed(2)}
+                                  </Typography>
+                                </Stack>
+                                <Stack direction="row" justifyContent="space-between">
+                                  <Typography variant="body2">Overtime Pay:</Typography>
+                                  <Typography variant="body2" fontWeight="medium" color={payroll.overtimePay > 0 ? 'warning.main' : 'text.secondary'}>
+                                    ${payroll.overtimePay.toFixed(2)}
+                                  </Typography>
+                                </Stack>
+                                <Divider />
+                                <Stack direction="row" justifyContent="space-between">
+                                  <Typography variant="body2" fontWeight="medium">Total Earnings:</Typography>
+                                  <Typography variant="body2" fontWeight="medium" color="success.main">
+                                    ${payroll.totalSalary.toFixed(2)}
+                                  </Typography>
+                                </Stack>
+                              </Stack>
+                            </Stack>
+                          </Paper>
+                        </Grid>
+                      </Grid>
+                    </Paper>
+                  );
+                } catch (error) {
+                  console.error('Error rendering payroll record:', error, 'Record:', payroll);
+                  return null;
+                }
+              })}
+            </Stack>
+          )}
+        </Stack>
+      </CardContent>
+    </Card>
+    </Box>
+  );
+};
+
 export const EmployeeDashboard = () => {
   const { user, userRole } = useAuth();
   const { department, departmentProjects = [], loading: projectsLoading } = useManagerData();
@@ -1000,7 +1231,6 @@ export const EmployeeDashboard = () => {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(0);
-  const [currentTab, setCurrentTab] = useState(0);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({ 
     open: false,
     message: '',
@@ -1874,6 +2104,14 @@ export const EmployeeDashboard = () => {
             </Button>
           </Box>
           <ExpenseCard />
+        </Box>
+      ),
+    },
+    {
+      label: 'Payroll',
+      content: (
+        <Box sx={{ py: 3 }}>
+          <PayrollCard />
         </Box>
       ),
     },

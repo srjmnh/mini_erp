@@ -21,7 +21,18 @@ import {
   Typography,
   Alert
 } from '@mui/material';
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  addDoc,
+  doc,
+  getDoc,
+  updateDoc,
+  DocumentReference,
+  DocumentData
+} from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { format } from 'date-fns';
 
@@ -387,6 +398,7 @@ export const PayrollGenerator: React.FC = () => {
               try {
                 setLoading(true);
                 // Save to Firestore
+                // Save to payroll collection for history
                 const payrollRef = collection(db, 'payroll');
                 const docRef = await addDoc(payrollRef, {
                   month,
@@ -394,6 +406,42 @@ export const PayrollGenerator: React.FC = () => {
                   date: new Date(),
                   entries: generatedPayroll
                 });
+
+                // Save to each employee's document
+                const updatePromises = generatedPayroll.map(async (entry) => {
+                  try {
+                    const employeeRef = doc(db, 'employees', entry.employeeId);
+                    const employeeDoc = await getDoc(employeeRef);
+                    
+                    if (employeeDoc.exists()) {
+                      const employeeData = employeeDoc.data();
+                      const currentPayroll = employeeData.payroll || [];
+                      
+                      return updateDoc(employeeRef, {
+                        payroll: [
+                          {
+                            month,
+                            year,
+                            date: new Date(),
+                            regularHours: entry.regularHours,
+                            overtimeHours: entry.overtimeHours,
+                            baseSalary: entry.baseSalary,
+                            overtimePay: entry.overtimePay,
+                            totalSalary: entry.totalSalary,
+                            calculationMode,
+                            payrollId: docRef.id
+                          },
+                          ...currentPayroll.slice(0, 11) // Keep last 12 months
+                        ]
+                      });
+                    }
+                  } catch (error) {
+                    console.error(`Error updating employee ${entry.employeeId}:`, error);
+                    throw error;
+                  }
+                });
+                
+                await Promise.all(updatePromises);
 
                 // Update local history
                 setPayrollHistory(prev => [{
