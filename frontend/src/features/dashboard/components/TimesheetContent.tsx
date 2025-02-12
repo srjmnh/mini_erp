@@ -23,6 +23,7 @@ import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import TimesheetManagerCard from './TimesheetManagerCard';
+import { useManagerData } from '@/hooks/useManagerData';
 
 interface TimeEntry {
   id: string;
@@ -43,20 +44,38 @@ const TimesheetContent = () => {
   const [activeTab, setActiveTab] = useState('daily');
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const { departmentEmployees = [] } = useManagerData();
 
   useEffect(() => {
     fetchTimeEntries();
-  }, []);
+  }, [departmentEmployees]);
 
   const fetchTimeEntries = async () => {
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
-      const entriesQuery = query(
-        collection(db, 'timeEntries'),
-        where('date', '>=', Timestamp.fromDate(today))
-      );
+      // Get employee IDs from department
+      const departmentEmployeeIds = departmentEmployees
+        .filter(emp => emp?.userId) // Filter out any undefined IDs
+        .map(emp => emp.userId);
+      
+      let entriesQuery;
+      
+      if (departmentEmployeeIds.length > 0) {
+        // If we have department employees, filter by them
+        entriesQuery = query(
+          collection(db, 'timeEntries'),
+          where('date', '>=', Timestamp.fromDate(today)),
+          where('employeeId', 'in', departmentEmployeeIds)
+        );
+      } else {
+        // If no department employees yet, just get today's entries
+        entriesQuery = query(
+          collection(db, 'timeEntries'),
+          where('date', '>=', Timestamp.fromDate(today))
+        );
+      }
       
       const entriesSnapshot = await getDocs(entriesQuery);
       const entries: TimeEntry[] = [];

@@ -15,6 +15,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { format, startOfDay } from 'date-fns';
+import { useManagerData } from '@/hooks/useManagerData';
 
 const TimesheetManagerCard = () => {
   const [summary, setSummary] = useState({
@@ -24,27 +25,30 @@ const TimesheetManagerCard = () => {
     totalEmployees: 0,
   });
   const [loading, setLoading] = useState(true);
+  const { departmentEmployees = [] } = useManagerData();
 
   useEffect(() => {
     fetchSummary();
-  }, []);
+  }, [departmentEmployees]);
 
   const fetchSummary = async () => {
     try {
       const today = startOfDay(new Date());
       const todayTimestamp = Timestamp.fromDate(today);
 
-      // Get all time entries for today
+      // Get department employee IDs
+      const departmentEmployeeIds = departmentEmployees
+        .filter(emp => emp?.userId)
+        .map(emp => emp.userId);
+
+      // Get time entries for today from department employees
       const entriesQuery = query(
         collection(db, 'timeEntries'),
-        where('date', '>=', todayTimestamp)
+        where('date', '>=', todayTimestamp),
+        ...(departmentEmployeeIds.length > 0 ? [where('employeeId', 'in', departmentEmployeeIds)] : [])
       );
       const entriesSnapshot = await getDocs(entriesQuery);
       
-      // Get all employees in the department
-      const employeesSnapshot = await getDocs(collection(db, 'employees'));
-      
-      const totalEmployees = employeesSnapshot.size;
       const uniqueEmployees = new Set();
       let pendingEntries = 0;
       let totalHours = 0;
@@ -60,7 +64,7 @@ const TimesheetManagerCard = () => {
         pendingEntries,
         totalHoursToday: totalHours,
         employeesSubmitted: uniqueEmployees.size,
-        totalEmployees,
+        totalEmployees: departmentEmployees.length,
       });
       setLoading(false);
     } catch (error) {
