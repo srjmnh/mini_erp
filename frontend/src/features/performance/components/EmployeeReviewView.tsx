@@ -252,10 +252,10 @@ export function EmployeeReviewView({ userId }: EmployeeReviewViewProps): JSX.Ele
             <CardContent>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
                 <Box>
-                  <Typography variant="h6" gutterBottom>
+                  <Typography variant="subtitle1" gutterBottom>
                     {templates[review.templateId]?.name || 'Performance Review'}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="caption" color="text.secondary">
                     Completed on {format(
                       review.completedAt?.toDate?.() ? review.completedAt.toDate() :
                       review.createdAt?.toDate?.() ? review.createdAt.toDate() :
@@ -273,7 +273,7 @@ export function EmployeeReviewView({ userId }: EmployeeReviewViewProps): JSX.Ele
 
               {review.overallRating && (
                 <Box sx={{ mb: 2 }}>
-                  <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  <Typography variant="caption" color="text.secondary" gutterBottom>
                     Overall Rating
                   </Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>

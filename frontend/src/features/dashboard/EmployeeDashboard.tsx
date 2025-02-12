@@ -1825,7 +1825,7 @@ export const EmployeeDashboard = () => {
 
           {/* Tasks Section */}
           <Box sx={{ mt: 3 }}>
-            <Typography variant="h6" sx={{ mb: 2 }}>Your Tasks</Typography>
+            <Typography variant="subtitle1" sx={{ mb: 2 }}>Your Tasks</Typography>
             <Box 
               sx={{ 
                 maxHeight: 400,
@@ -1876,11 +1876,12 @@ export const EmployeeDashboard = () => {
                       />
                       <Box>
                         <Typography 
-                          variant="subtitle1" 
+                          variant="caption" 
                           sx={{ 
                             fontWeight: 500,
                             textDecoration: task.completed ? 'line-through' : 'none',
-                            color: task.completed ? 'text.secondary' : 'text.primary'
+                            color: task.completed ? 'text.secondary' : 'text.primary',
+                            fontSize: '0.875rem'
                           }}
                         >
                           {task.title}
@@ -1898,7 +1899,7 @@ export const EmployeeDashboard = () => {
                             }}
                           />
                           {task.dueDate && (
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', fontSize: '0.75rem' }}>
                               <AccessTimeIcon sx={{ fontSize: 14, mr: 0.5 }} />
                               {
                                 task.dueDate instanceof Date 
@@ -1927,7 +1928,7 @@ export const EmployeeDashboard = () => {
                   {/* Progress Section */}
                   <Box sx={{ mb: task.comments?.length ? 2 : 0 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                      <Typography variant="body2" color="text.secondary">
+                      <Typography variant="caption" color="text.secondary">
                         Progress: {task.progress || 0}%
                       </Typography>
                       <Button
@@ -1970,7 +1971,7 @@ export const EmployeeDashboard = () => {
                         borderColor: 'grey.100'
                       }}
                     >
-                      <Typography variant="body2">
+                      <Typography variant="caption" sx={{ fontSize: '0.875rem' }}>
                         {task.comments[0].text}
                       </Typography>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -2000,7 +2001,7 @@ export const EmployeeDashboard = () => {
           {/* Expenses Section */}
           <Box sx={{ mt: 4 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">
+              <Typography variant="subtitle1">
                 Expenses
               </Typography>
               <Button
@@ -2028,7 +2029,7 @@ export const EmployeeDashboard = () => {
                     <ListItemText
                       primary={
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Typography variant="body2">
+                          <Typography variant="caption">
                             ${expense.amount.toFixed(2)} - {expense.category.replace('_', ' ')}
                           </Typography>
                           <Chip
@@ -2055,7 +2056,7 @@ export const EmployeeDashboard = () => {
       label: 'Team',
       content: (
         <Box sx={{ py: 3 }}>
-          <Typography variant="h6" gutterBottom>
+          <Typography variant="subtitle1" sx={{ mb: 2 }}>
             Your Team Members
           </Typography>
           {loading ? (
@@ -2092,7 +2093,7 @@ export const EmployeeDashboard = () => {
       label: 'Performance Reviews',
       content: (
         <Box sx={{ py: 3 }}>
-          <Typography variant="h6" gutterBottom>
+          <Typography variant="subtitle1" sx={{ mb: 2 }}>
             My Performance Reviews
           </Typography>
           <EmployeeReviewView userId={user?.uid || ''} />
@@ -2104,7 +2105,7 @@ export const EmployeeDashboard = () => {
       content: (
         <Box sx={{ py: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-            <Typography variant="h6">
+            <Typography variant="subtitle1">
               My Expenses
             </Typography>
             <Button
@@ -2131,13 +2132,13 @@ export const EmployeeDashboard = () => {
 
   return (
     <>
-      <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Container maxWidth="xl" sx={{ py: 2 }}>
         {/* Page Title */}
         <Box sx={{ mb: 4 }}>
-          <Typography variant="h4" gutterBottom fontWeight="medium">
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>
             Dashboard
           </Typography>
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="caption" color="text.secondary">
             Welcome back! Here's what's happening with your projects.
           </Typography>
         </Box>
@@ -2151,9 +2152,11 @@ export const EmployeeDashboard = () => {
             sx={{
               '& .MuiTab-root': {
                 textTransform: 'none',
-                fontSize: '1rem',
+                fontSize: '0.875rem',
                 fontWeight: 'medium',
-                minWidth: 100,
+                minWidth: 90,
+                minHeight: 40,
+                py: 0.5
               }
             }}
           >
