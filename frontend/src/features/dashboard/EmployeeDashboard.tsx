@@ -74,6 +74,8 @@ import { MiniCalendar } from '@/components/calendar/MiniCalendar';
 import ExpenseForm from '../expenses/ExpenseForm';
 import ExpenseCard from './components/ExpenseCard';
 import { useManagerData } from '@/hooks/useManagerData';
+import TimesheetCard from './components/TimesheetCard';
+import EmployeeTimesheetContent from './components/EmployeeTimesheetContent';
 
 // Helper function to check if a date is overdue
 const isOverdue = (date: Date) => {
@@ -2119,6 +2121,14 @@ export const EmployeeDashboard = () => {
           <ExpenseCard />
         </Box>
       )
+    },
+    {
+      label: 'Timesheet',
+      content: (
+        <Box sx={{ py: 3 }}>
+          <EmployeeTimesheetContent />
+        </Box>
+      ),
     },
     {
       label: 'Payroll',

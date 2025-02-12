@@ -96,6 +96,13 @@ export default function DashboardPage() {
       subtitle: 'Human resources',
     },
     {
+      title: 'Clients',
+      icon: <BusinessIcon sx={{ fontSize: 24 }} />,
+      to: '/clients',
+      color: '#3F51B5',
+      subtitle: 'Client management',
+    },
+    {
       title: 'Settings',
       icon: <SettingsIcon sx={{ fontSize: 24 }} />,
       to: '/settings',

@@ -20,6 +20,8 @@ import PerformancePage from './features/hr/PerformancePage';
 import { TimeOff } from './features/hr/pages/TimeOff';
 import ExpensePage from './features/expenses/ExpensePage';
 import HRRoutes from './features/hr/HRRoutes';
+import ClientRoutes from './features/clients/ClientRoutes';
+import TimesheetRoutes from './features/timesheet/TimesheetRoutes';
 import { PayrollGenerator } from './features/payroll/components/PayrollGenerator';
 import SettingsPage from './features/settings/SettingsPage';
 import CalendarPage from './features/calendar/CalendarPage';
@@ -74,6 +76,8 @@ function App() {
                               <Route path="calendar" element={<CalendarPage />} />
                               <Route path="requests" element={<RequestsPage />} />
                               <Route path="hr/*" element={<HRRoutes />} />
+                              <Route path="clients/*" element={<ClientRoutes />} />
+                              <Route path="timesheet/*" element={<TimesheetRoutes />} />
                               <Route path="settings" element={<SettingsPage />} />
                             </Route>
 

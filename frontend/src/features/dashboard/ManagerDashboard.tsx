@@ -63,10 +63,13 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { MiniCalendar } from '@/components/calendar/MiniCalendar';
 import { TaskView } from '@/features/calendar/components/TaskView';
+import TimesheetManagerCard from './components/TimesheetManagerCard';
+import TimesheetContent from './components/TimesheetContent';
 
 export default function ManagerDashboard() {
   const theme = useTheme();
   const [activeTab, setActiveTab] = useState('leaves');
+  const [timesheetTab, setTimesheetTab] = useState('daily');
   const [historicalRequests, setHistoricalRequests] = useState<any[]>([]);
   const [departmentDocs, setDepartmentDocs] = useState<any[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -757,6 +760,7 @@ export default function ManagerDashboard() {
               <Tab label="Expense Approvals" value="expenses" />
               <Tab label="History" value="history" />
               <Tab label="Projects" value="projects" />
+              <Tab label="Timesheet" value="timesheet" />
               <Tab label="Documents" value="documents" />
               <Tab label="Tasks" value="tasks" />
               <Tab label="Payroll" value="payroll" />
@@ -1040,6 +1044,8 @@ export default function ManagerDashboard() {
                   </Paper>
                 </Box>
               )}
+              {activeTab === 'timesheet' && <TimesheetContent />}
+
               {activeTab === 'documents' && (
                 <>
                   <Box sx={{ mb: 3, display: 'flex', justifyContent: 'flex-end' }}>
@@ -1093,6 +1099,9 @@ export default function ManagerDashboard() {
               )}
               {activeTab === 'projects' && (
                 <Grid container spacing={3}>
+        <Grid item xs={12} md={6} lg={4}>
+          <TimesheetManagerCard />
+        </Grid>
                   {departmentProjects.map((project) => (
                     <Grid item xs={12} key={project.id}>
                       <Box 

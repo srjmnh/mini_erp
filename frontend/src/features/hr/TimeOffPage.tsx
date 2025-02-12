@@ -54,11 +54,32 @@ export default function TimeOffPage() {
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
   const [approverNote, setApproverNote] = useState('');
   
+  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    const fetchProjects = async () => {
+      try {
+        const projectsRef = collection(db, 'projects');
+        const projectsSnap = await getDocs(projectsRef);
+        const projectsList = projectsSnap.docs.map(doc => ({
+          id: doc.id,
+          name: doc.data().name
+        }));
+        setProjects(projectsList);
+      } catch (error) {
+        console.error('Error fetching projects:', error);
+      }
+    };
+
+    fetchProjects();
+  }, []);
+
   const [leaveForm, setLeaveForm] = useState({
     type: 'vacation' as LeaveType,
     startDate: new Date(),
     endDate: new Date(),
     reason: '',
+    projectId: '',
   });
 
   const handleSubmit = async () => {
@@ -196,6 +217,21 @@ export default function TimeOffPage() {
                     {leaveTypes.map((type) => (
                       <MenuItem key={type.value} value={type.value}>
                         {type.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Grid>
+                <Grid item xs={12}>
+                  <TextField
+                    select
+                    fullWidth
+                    label="Project"
+                    value={leaveForm.projectId}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, projectId: e.target.value })}
+                  >
+                    {projects.map((project) => (
+                      <MenuItem key={project.id} value={project.id}>
+                        {project.name}
                       </MenuItem>
                     ))}
                   </TextField>
