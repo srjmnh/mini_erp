@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DescriptionIcon from '@mui/icons-material/Description';
+import { EmployeeReviewView } from '../performance/components/EmployeeReviewView';
 import { differenceInDays, format, isAfter } from 'date-fns';
 import { supabase } from '@/config/supabase';
 import {
@@ -2088,9 +2089,20 @@ export const EmployeeDashboard = () => {
       )
     },
     {
+      label: 'Performance Reviews',
+      content: (
+        <Box sx={{ py: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            My Performance Reviews
+          </Typography>
+          <EmployeeReviewView userId={user?.uid || ''} />
+        </Box>
+      )
+    },
+    {
       label: 'Expenses',
       content: (
-        <Box>
+        <Box sx={{ py: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
             <Typography variant="h6">
               My Expenses
@@ -2105,7 +2117,7 @@ export const EmployeeDashboard = () => {
           </Box>
           <ExpenseCard />
         </Box>
-      ),
+      )
     },
     {
       label: 'Payroll',

@@ -50,6 +50,7 @@ import { useManagerData } from '@/hooks/useManagerData';
 import { collection, query, where, getDocs, doc as firestoreDoc, getDoc, updateDoc, orderBy, onSnapshot, limit, addDoc } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { PayrollCard } from './EmployeeDashboard';
+import { PerformanceReview } from '../performance/components/PerformanceReview';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
 import { supabase } from '@/config/supabase';
@@ -759,6 +760,7 @@ export default function ManagerDashboard() {
               <Tab label="Documents" value="documents" />
               <Tab label="Tasks" value="tasks" />
               <Tab label="Payroll" value="payroll" />
+              <Tab label="Performance Reviews" value="performance" />
             </Tabs>
             <Box sx={{ p: 3, flex: 1, overflowY: 'auto' }}>
               {activeTab === 'expenses' && (
@@ -1160,6 +1162,16 @@ export default function ManagerDashboard() {
                       <Typography variant="h6">Department Payroll</Typography>
                     </Box>
                     <PayrollCard />
+                  </Paper>
+                </Grid>
+              )}
+              {activeTab === 'performance' && (
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="h6">Performance Reviews</Typography>
+                    </Box>
+                    <PerformanceReview />
                   </Paper>
                 </Grid>
               )}
