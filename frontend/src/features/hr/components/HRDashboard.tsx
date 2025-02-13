@@ -1,5 +1,5 @@
-import React from 'react';
-import { Box, Container, Grid, Paper, Typography, Button } from '@mui/material';
+import React, { useState } from 'react';
+import { Box, Container, Grid, Paper, Typography, Button, Tabs, Tab } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
@@ -7,6 +7,7 @@ import GroupIcon from '@mui/icons-material/Group';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import EmployeeReports from './EmployeeReports';
 
 const DashboardCard: React.FC<{
   title: string;
@@ -138,7 +139,7 @@ const HRDashboard: React.FC = () => {
             title="Employee Reports"
             icon={<AssessmentIcon fontSize="large" />}
             to="/hr/reports"
-            description="Generate detailed reports on attendance, performance, and other employee metrics."
+            description="View comprehensive employee data including leave history, assets, and work hours."
           />
         </Grid>
       </Box>
