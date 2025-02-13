@@ -7,6 +7,7 @@ import GroupIcon from '@mui/icons-material/Group';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import WorkIcon from '@mui/icons-material/Work';
 import EmployeeReports from './EmployeeReports';
 
 const DashboardCard: React.FC<{
@@ -140,6 +141,13 @@ const HRDashboard: React.FC = () => {
             icon={<AssessmentIcon fontSize="large" />}
             to="/hr/reports"
             description="View comprehensive employee data including leave history, assets, and work hours."
+          />
+
+          <DashboardCard
+            title="Recruitment"
+            icon={<WorkIcon fontSize="large" />}
+            to="/hr/recruitment"
+            description="Manage job postings, track candidates, schedule interviews, and handle onboarding."
           />
         </Grid>
       </Box>

@@ -31,6 +31,7 @@ import { ProjectProvider } from './contexts/ProjectContext';
 import { SupabaseProvider } from './contexts/SupabaseContext';
 import { SnackbarProvider } from './contexts/SnackbarContext';
 import { ChatProvider } from './contexts/ChatContext';
+
 import theme from './theme';
 import StreamChatPopover from '@/components/chat/StreamChatPopover';
 import ProtectedRoute from './components/auth/ProtectedRoute';

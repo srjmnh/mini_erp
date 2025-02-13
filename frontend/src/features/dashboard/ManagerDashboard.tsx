@@ -13,6 +13,7 @@ import {
   Divider,
   Button,
   Card,
+  CardContent,
   Chip,
   Dialog,
   DialogTitle,
@@ -36,6 +37,7 @@ import {
   Assignment as ProjectsIcon,
   CalendarMonth as CalendarIcon,
   Description as DocumentIcon,
+  Assessment as AssessmentIcon,
   Description as DescriptionIcon,
   CloudUpload as UploadIcon,
   Download as DownloadIcon,
@@ -765,6 +767,7 @@ export default function ManagerDashboard() {
               <Tab label="Tasks" value="tasks" />
               <Tab label="Payroll" value="payroll" />
               <Tab label="Performance Reviews" value="performance" />
+              <Tab label="HR Access" value="hr" />
             </Tabs>
             <Box sx={{ p: 3, flex: 1, overflowY: 'auto' }}>
               {activeTab === 'expenses' && (
@@ -1099,9 +1102,100 @@ export default function ManagerDashboard() {
               )}
               {activeTab === 'projects' && (
                 <Grid container spacing={3}>
-        <Grid item xs={12} md={6} lg={4}>
-          <TimesheetManagerCard />
-        </Grid>
+                  {departmentProjects.map((project) => (
+                    <Grid item xs={12} key={project.id}>
+                      <Card>
+                        <CardContent>
+                          <Typography variant="h6">{project.name}</Typography>
+                          <Typography variant="body2">{project.description}</Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  ))}
+                </Grid>
+              )}
+              {activeTab === 'hr' && (
+                <Box>
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} sm={6} md={4}>
+                      <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                        <CardContent sx={{ flexGrow: 1 }}>
+                          <Stack direction="row" alignItems="center" spacing={1} mb={2}>
+                            <PeopleIcon color="primary" />
+                            <Typography variant="h6">Recruitment</Typography>
+                          </Stack>
+                          <Typography variant="body2" color="text.secondary">
+                            Manage job postings, review applications, and schedule interviews.
+                          </Typography>
+                        </CardContent>
+                        <Box sx={{ p: 2, pt: 0 }}>
+                          <Button
+                            variant="outlined"
+                            fullWidth
+                            onClick={() => navigate('/hr/recruitment')}
+                            startIcon={<OpenInNewIcon />}
+                          >
+                            Access Recruitment
+                          </Button>
+                        </Box>
+                      </Card>
+                    </Grid>
+
+                    <Grid item xs={12} sm={6} md={4}>
+                      <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                        <CardContent sx={{ flexGrow: 1 }}>
+                          <Stack direction="row" alignItems="center" spacing={1} mb={2}>
+                            <LoginIcon color="primary" />
+                            <Typography variant="h6">Attendance</Typography>
+                          </Stack>
+                          <Typography variant="body2" color="text.secondary">
+                            View and manage attendance records, time-off requests, and work schedules.
+                          </Typography>
+                        </CardContent>
+                        <Box sx={{ p: 2, pt: 0 }}>
+                          <Button
+                            variant="outlined"
+                            fullWidth
+                            onClick={() => navigate('/hr/attendance')}
+                            startIcon={<OpenInNewIcon />}
+                          >
+                            Access Attendance
+                          </Button>
+                        </Box>
+                      </Card>
+                    </Grid>
+
+                    <Grid item xs={12} sm={6} md={4}>
+                      <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                        <CardContent sx={{ flexGrow: 1 }}>
+                          <Stack direction="row" alignItems="center" spacing={1} mb={2}>
+                            <AssessmentIcon color="primary" />
+                            <Typography variant="h6">Employee Reports</Typography>
+                          </Stack>
+                          <Typography variant="body2" color="text.secondary">
+                            Access detailed reports and analytics about your department's performance.
+                          </Typography>
+                        </CardContent>
+                        <Box sx={{ p: 2, pt: 0 }}>
+                          <Button
+                            variant="outlined"
+                            fullWidth
+                            onClick={() => navigate('/hr/reports')}
+                            startIcon={<OpenInNewIcon />}
+                          >
+                            View Reports
+                          </Button>
+                        </Box>
+                      </Card>
+                    </Grid>
+                  </Grid>
+                </Box>
+              )}
+              {activeTab === 'projects' && (
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={6} lg={4}>
+                    <TimesheetManagerCard />
+                  </Grid>
                   {departmentProjects.map((project) => (
                     <Grid item xs={12} key={project.id}>
                       <Box 

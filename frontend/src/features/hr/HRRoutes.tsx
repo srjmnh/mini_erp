@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom';
+import RecruitmentPage from './components/RecruitmentPage';
 import HRDashboard from './components/HRDashboard';
 import HRAttendancePage from './components/HRAttendancePage';
 import HRPayrollPage from './components/HRPayrollPage';
@@ -13,6 +14,7 @@ const HRRoutes: React.FC = () => {
       <Route path="/payroll" element={<HRPayrollPage />} />
       <Route path="/roles" element={<RoleConfigurationPage />} />
       <Route path="/reports" element={<EmployeeReportPage />} />
+      <Route path="/recruitment" element={<RecruitmentPage />} />
     </Routes>
   );
 };
