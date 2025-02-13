@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ResponsiveBar } from '@nivo/bar';
 import {
   Box,
   Paper,
@@ -61,6 +62,7 @@ interface EmployeeReport {
   id: string;
   firstName: string;
   lastName: string;
+  fullName: string;
   email: string;
   department: {
     id: string;
@@ -110,8 +112,42 @@ const EmployeeReports = () => {
       console.log('Found employees:', employeesSnapshot.size);
       const employeeData: EmployeeReport[] = [];
 
+      // Helper function to get employee name parts
+      const getEmployeeNameParts = (employee: any) => {
+        // Case 1: name object with firstName/lastName
+        if (employee.name?.firstName || employee.name?.lastName) {
+          return {
+            firstName: employee.name.firstName || '',
+            lastName: employee.name.lastName || ''
+          };
+        }
+        // Case 2: direct firstName/lastName fields
+        if (employee.firstName || employee.lastName) {
+          return {
+            firstName: employee.firstName || '',
+            lastName: employee.lastName || ''
+          };
+        }
+        // Case 3: just name field
+        if (employee.name && typeof employee.name === 'string') {
+          const parts = employee.name.split(' ');
+          return {
+            firstName: parts[0] || '',
+            lastName: parts.slice(1).join(' ') || ''
+          };
+        }
+        return { firstName: '', lastName: '' };
+      };
+
       for (const employeeDoc of employeesSnapshot.docs) {
         const employee = employeeDoc.data();
+        console.log('Processing employee:', {
+          id: employeeDoc.id,
+          firstName: employee.firstName,
+          lastName: employee.lastName,
+          name: employee.name,
+          fullData: employee
+        });
         console.log('Employee raw data:', {
           id: employeeDoc.id,
           ...employee,
@@ -292,10 +328,12 @@ const EmployeeReports = () => {
           }
         };
 
+        const nameParts = getEmployeeNameParts(employee);
         employeeData.push({
           id: employeeDoc.id,
-          firstName: employee.firstName || '',
-          lastName: employee.lastName || '',
+          firstName: nameParts.firstName,
+          lastName: nameParts.lastName,
+          fullName: `${nameParts.firstName} ${nameParts.lastName}`.trim() || 'Unknown',
           email: employee.email || '',
           department,
           position: employee.position || '',
@@ -333,7 +371,75 @@ const EmployeeReports = () => {
   }
 
   return (
-    <Paper sx={{ p: 3 }}>
+    <Paper sx={{ p: 3 }}>      
+      {/* Leave Balance Chart */}
+      <Box sx={{ height: 400, mb: 4 }}>
+        <Typography variant="h6" gutterBottom>
+          Employee Leave Usage
+        </Typography>
+        <ResponsiveBar
+          data={employees.map(emp => ({
+            employee: emp.fullName || `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'Unknown',
+            'Casual Leave': emp.leaveBalance?.used?.casual || 0,
+            'Sick Leave': emp.leaveBalance?.used?.sick || 0,
+          }))}
+          keys={['Casual Leave', 'Sick Leave']}
+          indexBy="employee"
+          margin={{ top: 50, right: 170, bottom: 50, left: 60 }}
+          padding={0.3}
+          valueScale={{ type: 'linear' }}
+          indexScale={{ type: 'band', round: true }}
+          colors={['#ff9800', '#f44336']}
+          groupMode="grouped"
+          borderColor={{ from: 'color', modifiers: [['darker', 1.6]] }}
+          axisTop={null}
+          axisRight={null}
+          axisBottom={{
+            tickSize: 5,
+            tickPadding: 5,
+            tickRotation: -45,
+            legend: 'Employee',
+            legendPosition: 'middle',
+            legendOffset: 45
+          }}
+          axisLeft={{
+            tickSize: 5,
+            tickPadding: 5,
+            tickRotation: 0,
+            legend: 'Days',
+            legendPosition: 'middle',
+            legendOffset: -40
+          }}
+          labelSkipWidth={12}
+          labelSkipHeight={12}
+          legends={[
+            {
+              dataFrom: 'keys',
+              anchor: 'bottom-right',
+              direction: 'column',
+              justify: false,
+              translateX: 160,
+              translateY: 0,
+              itemsSpacing: 2,
+              itemWidth: 140,
+              itemHeight: 20,
+              itemDirection: 'left-to-right',
+              itemOpacity: 0.85,
+              symbolSize: 20,
+              effects: [
+                {
+                  on: 'hover',
+                  style: {
+                    itemOpacity: 1
+                  }
+                }
+              ]
+            }
+          ]}
+          role="application"
+          ariaLabel="Employee Leave Usage"
+        />
+      </Box>
       <Box sx={{ mb: 3 }}>
         <Typography variant="h6" gutterBottom>
           Employee Reports
@@ -381,7 +487,7 @@ const EmployeeReports = () => {
                       </Avatar>
                       <Box>
                         <Typography variant="subtitle2">
-                          {employee.firstName} {employee.lastName}
+                          {employee.fullName || `${employee.firstName || ''} ${employee.lastName || ''}`.trim() || 'Unknown'}
                         </Typography>
                         <Typography variant="body2" color="textSecondary">
                           {employee.email}
