@@ -123,6 +123,69 @@ export const deleteEmployeePhoto = async (photoUrl: string) => {
   }
 };
 
+export const uploadCandidateDocument = async (file: File, candidateId: string) => {
+  try {
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      throw new StorageError('File size must be less than 10MB');
+    }
+
+    // Check if file exists
+    if (!file) {
+      throw new StorageError('No file provided');
+    }
+
+    // Log file information for debugging
+    console.log('File type:', file.type);
+    console.log('File name:', file.name);
+
+    // Get file extension
+    const fileExt = file?.name?.split('.')?.pop()?.toLowerCase() || '';
+    
+    // Create a unique file name with the original extension
+    const fileName = `candidates/${candidateId}/${uuidv4()}.${fileExt}`;
+
+    console.log('Uploading candidate document:', {
+      bucket: BUCKET_NAME,
+      fileName,
+      fileSize: file.size,
+      fileType: file.type
+    });
+
+    // Upload the file to Supabase storage
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from(BUCKET_NAME)
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error('Supabase storage upload error:', uploadError);
+      throw new StorageError('Failed to upload document', uploadError);
+    }
+
+    if (!uploadData) {
+      throw new StorageError('No upload data received');
+    }
+
+    // Get the public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from(BUCKET_NAME)
+      .getPublicUrl(fileName);
+
+    return {
+      fileName: file.name,
+      url: publicUrl,
+      path: fileName
+    };
+
+  } catch (error) {
+    console.error('Error in uploadCandidateDocument:', error);
+    throw error instanceof StorageError ? error : new StorageError('Failed to upload document', error);
+  }
+};
+
 export const uploadChatFile = async (file: File, userId: string) => {
   try {
     const fileExt = file.name.split('.').pop();

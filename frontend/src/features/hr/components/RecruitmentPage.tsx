@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import CardMembershipIcon from '@mui/icons-material/CardMembership';
+import BadgeIcon from '@mui/icons-material/Badge';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import {
   Box,
   Paper,
@@ -25,6 +28,10 @@ import {
   InputLabel,
   Select,
   OutlinedInput,
+  Card,
+  CardContent,
+  CardActions,
+  Stack,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -33,8 +40,17 @@ import {
   Person as PersonIcon,
   Event as EventIcon,
   Description as DescriptionIcon,
+  FileUpload as FileUploadIcon,
+  Folder as FolderIcon,
+  Close as CloseIcon,
+  Visibility as VisibilityIcon,
+  AttachFile as AttachFileIcon,
+  Work as WorkIcon,
+  Phone as PhoneIcon,
+  CalendarToday as CalendarTodayIcon,
 } from '@mui/icons-material';
 import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, getDoc, Timestamp } from 'firebase/firestore';
+import { supabase } from '@/config/supabase';
 import { useUser } from '../../../contexts/UserContext';
 import { db } from '@/config/firebase';
 import { useSnackbar } from '@/contexts/SnackbarContext';
@@ -50,6 +66,14 @@ interface JobPosting {
   deadline: string;
 }
 
+interface CandidateDocument {
+  id: string;
+  name: string;
+  url: string;
+  category: 'resume' | 'certificate' | 'id_proof' | 'offer_letter' | 'other';
+  uploadDate: string;
+}
+
 interface Candidate {
   id: string;
   jobPostingId: string;
@@ -60,7 +84,16 @@ interface Candidate {
   status: 'new' | 'screening' | 'interview' | 'offer' | 'hired' | 'rejected';
   notes: string;
   appliedDate: string;
+  documents?: CandidateDocument[];
 }
+
+const documentCategories = [
+  { value: 'resume', label: 'Resume' },
+  { value: 'certificate', label: 'Certificates' },
+  { value: 'id_proof', label: 'ID Proof' },
+  { value: 'offer_letter', label: 'Offer Letter' },
+  { value: 'other', label: 'Other' }
+];
 
 interface Interview {
   id: string;
@@ -126,6 +159,156 @@ interface Employee {
   department: string;
 }
 
+interface DocumentPreviewDialogProps {
+  open: boolean;
+  onClose: () => void;
+  document: CandidateDocument | null;
+}
+
+const DocumentPreviewDialog: React.FC<DocumentPreviewDialogProps> = ({
+  open,
+  onClose,
+  document
+}) => {
+  if (!document) return null;
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Typography variant="h6">{document.name}</Typography>
+          <IconButton onClick={onClose} size="small">
+            <CloseIcon />
+          </IconButton>
+        </Box>
+      </DialogTitle>
+      <DialogContent>
+        <Box sx={{ height: '70vh', width: '100%', overflow: 'auto' }}>
+          {document.url.toLowerCase().endsWith('.pdf') ? (
+            <iframe
+              src={`${document.url}#view=FitH`}
+              width="100%"
+              height="100%"
+              style={{ border: 'none' }}
+            />
+          ) : (
+            <img
+              src={document.url}
+              alt={document.name}
+              style={{ maxWidth: '100%', height: 'auto' }}
+            />
+          )}
+        </Box>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+interface DocumentUploadDialogProps {
+  open: boolean;
+  onClose: () => void;
+  onUpload: (document: Omit<CandidateDocument, 'id'>) => void;
+}
+
+import { uploadCandidateDocument } from '@/services/supabaseStorage';
+
+const DocumentUploadDialog: React.FC<DocumentUploadDialogProps> = ({
+  open,
+  onClose,
+  onUpload
+}) => {
+  const [file, setFile] = useState<File | null>(null);
+  const [category, setCategory] = useState<string>('');
+  const [uploading, setUploading] = useState(false);
+
+  const handleUpload = async () => {
+    if (!file || !category) return;
+
+    setUploading(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `candidate-documents/${fileName}`;
+
+      const { error: uploadError, data } = await supabase.storage
+        .from('documents')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('documents')
+        .getPublicUrl(filePath);
+
+      onUpload({
+        name: file.name,
+        url: publicUrl,
+        category: category as CandidateDocument['category'],
+        uploadDate: new Date().toISOString()
+      });
+
+      onClose();
+      setFile(null);
+      setCategory('');
+    } catch (error) {
+      console.error('Error uploading document:', error);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose}>
+      <DialogTitle>Upload Document</DialogTitle>
+      <DialogContent>
+        <Box sx={{ mt: 2 }}>
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel>Document Category</InputLabel>
+            <Select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              label="Document Category"
+            >
+              {documentCategories.map((cat) => (
+                <MenuItem key={cat.value} value={cat.value}>
+                  {cat.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <input
+            accept="image/*,application/pdf"
+            style={{ display: 'none' }}
+            id="document-file"
+            type="file"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+          />
+          <label htmlFor="document-file">
+            <Button
+              variant="outlined"
+              component="span"
+              fullWidth
+              startIcon={<FileUploadIcon />}
+            >
+              {file ? file.name : 'Choose File'}
+            </Button>
+          </label>
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          onClick={handleUpload}
+          disabled={!file || !category || uploading}
+          variant="contained"
+        >
+          {uploading ? 'Uploading...' : 'Upload'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
 const RecruitmentPage: React.FC = () => {
   const { user, userRole } = useAuth();
   console.log('Current user:', user);
@@ -141,6 +324,12 @@ const RecruitmentPage: React.FC = () => {
   const [selectedInterview, setSelectedInterview] = useState<Interview | null>(null);
   const [isOnboardingDialogOpen, setIsOnboardingDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<OnboardingTask | null>(null);
+  
+  // Document management state
+  const [isDocumentUploadOpen, setIsDocumentUploadOpen] = useState(false);
+  const [isDocumentPreviewOpen, setIsDocumentPreviewOpen] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState<CandidateDocument | null>(null);
+  const [selectedCandidateForDoc, setSelectedCandidateForDoc] = useState<string | null>(null);
   
   const [interviewForm, setInterviewForm] = useState({
     candidateId: '',
@@ -321,10 +510,25 @@ const RecruitmentPage: React.FC = () => {
         }
       }
       const snapshot = await getDocs(candidatesQuery);
-      const candidates = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Candidate[];
+      
+      // Fetch candidates with their documents
+      const candidatesPromises = snapshot.docs.map(async (doc) => {
+        const candidateData = doc.data();
+        const documentsRef = collection(db, 'candidates', doc.id, 'documents');
+        const documentsSnapshot = await getDocs(documentsRef);
+        const documents = documentsSnapshot.docs.map(docDoc => ({
+          id: docDoc.id,
+          ...docDoc.data()
+        }));
+
+        return {
+          id: doc.id,
+          ...candidateData,
+          documents: documents
+        };
+      });
+
+      const candidates = await Promise.all(candidatesPromises) as Candidate[];
       setCandidates(candidates);
     } catch (error) {
       console.error('Error fetching candidates:', error);
@@ -782,7 +986,19 @@ const RecruitmentPage: React.FC = () => {
   // Candidate management states
   const [isCandidateDialogOpen, setIsCandidateDialogOpen] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
-  const [candidateForm, setCandidateForm] = useState({
+  const [documentUploadOpen, setDocumentUploadOpen] = useState(false);
+  const [selectedDocumentType, setSelectedDocumentType] = useState('');
+  const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
+  const [candidateForm, setCandidateForm] = useState<{
+    jobPostingId: string;
+    name: string;
+    email: string;
+    phone: string;
+    resumeUrl: string;
+    status: Candidate['status'];
+    notes: string;
+    documents?: CandidateDocument[];
+  }>({
     jobPostingId: '',
     name: '',
     email: '',
@@ -814,6 +1030,17 @@ const RecruitmentPage: React.FC = () => {
     } catch (error) {
       console.error('Error saving candidate:', error);
       showSnackbar('Error saving candidate', 'error');
+    }
+  };
+
+  const handleDeleteDocument = async (candidateId: string, documentId: string) => {
+    try {
+      await deleteDoc(doc(db, 'candidates', candidateId, 'documents', documentId));
+      showSnackbar('Document deleted successfully', 'success');
+      fetchCandidates();
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      showSnackbar('Error deleting document', 'error');
     }
   };
 
@@ -864,87 +1091,343 @@ const RecruitmentPage: React.FC = () => {
           Add Candidate
         </Button>
       </Box>
-
+      
       <Grid container spacing={2}>
-        {candidates.map((candidate) => {
-          const job = jobPostings.find(j => j.id === candidate.jobPostingId);
-          return (
-            <Grid item xs={12} md={6} key={candidate.id}>
-              <Paper sx={{ p: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+        {candidates.map((candidate) => (
+          <Grid item xs={12} sm={6} md={4} key={candidate.id}>
+            <Card sx={{
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              '&:hover': {
+                boxShadow: 3,
+                transform: 'translateY(-2px)',
+                transition: 'all 0.2s ease-in-out'
+              }
+            }}>
+              <CardContent sx={{ flex: 1, p: 2.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
                   <Box>
-                    <Typography variant="h6">{candidate.name}</Typography>
-                    <Typography variant="body2" color="textSecondary">
-                      {job?.title || 'Unknown Position'}
+                    <Typography variant="h6" sx={{ mb: 0.5, fontWeight: 500 }}>
+                      {candidate.name}
                     </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <WorkIcon sx={{ fontSize: 16, color: 'primary.main' }} />
+                      <Typography variant="body2" color="text.secondary">
+                        {candidate.jobPostingId ? jobPostings.find(j => j.id === candidate.jobPostingId)?.title : 'No Position'}
+                      </Typography>
+                    </Box>
                   </Box>
-                  <Box>
-                    <IconButton
-                      size="small"
-                      onClick={() => {
-                        setSelectedCandidate(candidate);
-                        setCandidateForm({
-                          jobPostingId: candidate.jobPostingId,
-                          name: candidate.name,
-                          email: candidate.email,
-                          phone: candidate.phone,
-                          resumeUrl: candidate.resumeUrl,
-                          status: candidate.status,
-                          notes: candidate.notes,
-                        });
-                        setIsCandidateDialogOpen(true);
-                      }}
-                    >
-                      <EditIcon />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleDeleteCandidate(candidate.id)}
-                    >
-                      <DeleteIcon />
-                    </IconButton>
-                  </Box>
-                </Box>
-
-                <Grid container spacing={1} sx={{ mb: 2 }}>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2">
-                      <strong>Email:</strong> {candidate.email}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2">
-                      <strong>Phone:</strong> {candidate.phone}
-                    </Typography>
-                  </Grid>
-                </Grid>
-
-                <Typography variant="body2" paragraph>
-                  <strong>Notes:</strong><br />
-                  {candidate.notes}
-                </Typography>
-
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Chip
                     label={candidate.status.toUpperCase()}
-                    color={getStatusColor(candidate.status)}
+                    color={
+                      candidate.status === 'hired'
+                        ? 'success'
+                        : candidate.status === 'rejected'
+                        ? 'error'
+                        : candidate.status === 'interview'
+                        ? 'warning'
+                        : 'primary'
+                    }
                     size="small"
+                    sx={{ 
+                      borderRadius: 1,
+                      fontWeight: 500,
+                      fontSize: '0.75rem'
+                    }}
                   />
-                  <Typography variant="caption">
-                    Applied: {new Date(candidate.appliedDate).toLocaleDateString()}
-                  </Typography>
                 </Box>
-              </Paper>
-            </Grid>
-          );
-        })}
+                
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <PersonIcon sx={{ fontSize: 18, color: 'primary.light' }} />
+                    <Typography variant="body2">{candidate.email}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <PhoneIcon sx={{ fontSize: 18, color: 'primary.light' }} />
+                    <Typography variant="body2">{candidate.phone}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <CalendarTodayIcon sx={{ fontSize: 18, color: 'primary.light' }} />
+                    <Typography variant="body2">
+                      Applied: {new Date(candidate.appliedDate).toLocaleDateString()}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <DescriptionIcon sx={{ fontSize: 18, color: 'primary.light' }} />
+                      <Typography variant="body2" sx={{ mr: 1 }}>
+                        Documents:
+                      </Typography>
+                    </Box>
+                    {candidate.documents?.length ? (
+                      <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {candidate.documents.map((doc) => (
+                          <Tooltip key={doc.id} title={`${doc.name} (${doc.category})`}>
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                setSelectedDocument(doc);
+                                setDocumentPreviewOpen(true);
+                              }}
+                            >
+                              {doc.category === 'resume' && <DescriptionIcon sx={{ fontSize: 18 }} color="primary" />}
+                              {doc.category === 'certificate' && <CardMembershipIcon sx={{ fontSize: 18 }} color="secondary" />}
+                              {doc.category === 'id_proof' && <BadgeIcon sx={{ fontSize: 18 }} color="error" />}
+                              {doc.category === 'offer_letter' && <WorkIcon sx={{ fontSize: 18 }} color="success" />}
+                              {doc.category === 'other' && <AttachFileIcon sx={{ fontSize: 18 }} />}
+                            </IconButton>
+                          </Tooltip>
+                        ))}
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        No documents
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+              </CardContent>
+              <CardActions sx={{ p: 2, pt: 0 }}>
+                <Button
+                  size="small"
+                  startIcon={<EditIcon />}
+                  variant="outlined"
+                  color="primary"
+                  onClick={() => {
+                    setSelectedCandidate(candidate);
+                    setCandidateForm({
+                      jobPostingId: candidate.jobPostingId,
+                      name: candidate.name,
+                      email: candidate.email,
+                      phone: candidate.phone,
+                      resumeUrl: candidate.resumeUrl,
+                      status: candidate.status,
+                      notes: candidate.notes,
+                    });
+                    setIsCandidateDialogOpen(true);
+                  }}
+                >
+                  Edit
+                </Button>
+                <Button
+                  size="small"
+                  color="error"
+                  startIcon={<DeleteIcon />}
+                  variant="outlined"
+                  onClick={() => handleDeleteCandidate(candidate.id)}
+                >
+                  Delete
+                </Button>
+              </CardActions>
+            </Card>
+          </Grid>
+        ))}
       </Grid>
+
+      {/* Document Preview Dialog */}
+      <Dialog
+        open={documentPreviewOpen}
+        onClose={() => setDocumentPreviewOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          {selectedDocument?.name}
+          <IconButton
+            aria-label="close"
+            onClick={() => setDocumentPreviewOpen(false)}
+            sx={{ position: 'absolute', right: 8, top: 8 }}
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          {selectedDocument?.url && (
+            selectedDocument.url.toLowerCase().endsWith('.pdf') ? (
+              <iframe
+                src={selectedDocument.url}
+                style={{ width: '100%', height: '80vh', border: 'none' }}
+                title="PDF Preview"
+              />
+            ) : (
+              <Box
+                component="img"
+                src={selectedDocument.url}
+                alt={selectedDocument.name}
+                sx={{
+                  width: '100%',
+                  height: 'auto',
+                  maxHeight: '80vh',
+                  objectFit: 'contain'
+                }}
+              />
+            )
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Candidate Dialog */}
       <Dialog open={isCandidateDialogOpen} onClose={() => setIsCandidateDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>{selectedCandidate ? 'Edit Candidate' : 'Add Candidate'}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
+            {/* Basic Information */}
+            <Grid item xs={12}>
+              <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 500 }}>Basic Information</Typography>
+            </Grid>
+
+            {/* Document Upload Section */}
+            {isCandidateDialogOpen && (
+              <>
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" sx={{ mt: 3, mb: 2, fontWeight: 500 }}>Documents</Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Box sx={{ mb: 2 }}>
+                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap', mb: 2 }}>
+                      {selectedCandidate?.documents?.map((doc) => (
+                        <Tooltip key={doc.id} title={`${doc.name} (${doc.category})`}>
+                          <IconButton
+                            onClick={() => {
+                              setSelectedDocument(doc);
+                              setDocumentPreviewOpen(true);
+                            }}
+                          >
+                            {doc.category === 'resume' && <DescriptionIcon color="primary" />}
+                            {doc.category === 'certificate' && <CardMembershipIcon color="secondary" />}
+                            {doc.category === 'id_proof' && <BadgeIcon color="error" />}
+                            {doc.category === 'offer_letter' && <WorkIcon color="success" />}
+                            {doc.category === 'other' && <AttachFileIcon />}
+                          </IconButton>
+                        </Tooltip>
+                      ))}
+                      {selectedCandidate ? (
+                        <Button
+                          variant="outlined"
+                          startIcon={<CloudUploadIcon />}
+                          onClick={() => setDocumentUploadOpen(true)}
+                        >
+                          Upload Document
+                        </Button>
+                      ) : (
+                        <Typography variant="body2" color="textSecondary">
+                          You can upload documents after creating the candidate
+                        </Typography>
+                      )}
+                    </Box>
+
+                    {/* Document Upload Dialog */}
+                    <Dialog 
+                      open={documentUploadOpen} 
+                      onClose={() => {
+                        setDocumentUploadOpen(false);
+                        setSelectedDocumentType('');
+                      }}
+                    >
+                      <DialogTitle>Upload Document</DialogTitle>
+                      <DialogContent>
+                        <Stack spacing={2} sx={{ mt: 2, minWidth: 300 }}>
+                          <FormControl fullWidth required>
+                            <InputLabel>Document Type</InputLabel>
+                            <Select
+                              value={selectedDocumentType}
+                              onChange={(e) => setSelectedDocumentType(e.target.value)}
+                              label="Document Type"
+                            >
+                              <MenuItem value="resume">Resume</MenuItem>
+                              <MenuItem value="certificate">Certificate</MenuItem>
+                              <MenuItem value="id_proof">ID Proof</MenuItem>
+                              <MenuItem value="offer_letter">Offer Letter</MenuItem>
+                              <MenuItem value="other">Other</MenuItem>
+                            </Select>
+                          </FormControl>
+
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,.gif"
+                            style={{ display: 'none' }}
+                            id="document-upload"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file || !selectedCandidate || !selectedDocumentType) {
+                                showSnackbar('Please select a document type', 'error');
+                                return;
+                              }
+
+                              try {
+                                const uploadResult = await uploadCandidateDocument(file, selectedCandidate.id);
+                                
+                                if (uploadResult.url) {
+                                  await addDoc(collection(db, 'candidates', selectedCandidate.id, 'documents'), {
+                                    name: file.name,
+                                    url: uploadResult.url,
+                                    category: selectedDocumentType,
+                                    uploadDate: new Date().toISOString()
+                                  });
+
+                                  showSnackbar('Document uploaded successfully', 'success');
+                                  setDocumentUploadOpen(false);
+                                  setSelectedDocumentType('');
+                                  fetchCandidates();
+                                }
+                              } catch (error) {
+                                console.error('Error uploading document:', error);
+                                showSnackbar('Error uploading document', 'error');
+                              }
+                            }}
+                          />
+                          <Button
+                            variant="contained"
+                            onClick={() => document.getElementById('document-upload')?.click()}
+                            startIcon={<CloudUploadIcon />}
+                            fullWidth
+                          >
+                            Choose File
+                          </Button>
+                        </Stack>
+                      </DialogContent>
+                    </Dialog>
+
+                    {/* Document Preview Dialog */}
+                    <Dialog
+                      open={documentPreviewOpen}
+                      onClose={() => {
+                        setDocumentPreviewOpen(false);
+                        setSelectedDocument(null);
+                      }}
+                      maxWidth="md"
+                      fullWidth
+                    >
+                      <DialogTitle>
+                        {selectedDocument?.name}
+                        <Typography variant="caption" display="block" color="text.secondary">
+                          {selectedDocument?.category} - Uploaded on {new Date(selectedDocument?.uploadDate || '').toLocaleDateString()}
+                        </Typography>
+                      </DialogTitle>
+                      <DialogContent>
+                        {selectedDocument?.url && (
+                          selectedDocument.url.toLowerCase().endsWith('.pdf') ? (
+                            <iframe
+                              src={selectedDocument.url}
+                              style={{ width: '100%', height: '500px', border: 'none' }}
+                              title="PDF Preview"
+                            />
+                          ) : (
+                            <img
+                              src={selectedDocument.url}
+                              alt={selectedDocument.name}
+                              style={{ maxWidth: '100%', height: 'auto' }}
+                            />
+                          )
+                        )}
+                      </DialogContent>
+                    </Dialog>
+                  
+                  </Box>
+                </Grid>
+              </>
+            )}
             <Grid item xs={12} sm={6}>
               <TextField
                 fullWidth
