@@ -1,24 +1,29 @@
 import React from 'react';
-import { Box, Typography, Avatar, useTheme } from '@mui/material';
-import { MessageResponse } from 'stream-chat';
-import { format } from 'date-fns';
+import { Box, Paper, Typography, Avatar, useTheme } from '@mui/material';
+import { StreamChat, Message } from 'stream-chat';
 import { Check, DoneAll } from '@mui/icons-material';
 
-interface MessageProps {
-  message: MessageResponse;
+interface ChatMessageProps {
+  message: Message;
   isOwnMessage: boolean;
 }
 
-export default function Message({ message, isOwnMessage }: MessageProps) {
+export default function StreamChatMessage({ message, isOwnMessage }: ChatMessageProps) {
   const theme = useTheme();
+  const messageTime = new Date(message.created_at || Date.now()).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 
   return (
     <Box
       sx={{
         display: 'flex',
-        flexDirection: isOwnMessage ? 'row-reverse' : 'row',
-        gap: 1,
+        justifyContent: isOwnMessage ? 'flex-end' : 'flex-start',
+        alignItems: 'flex-end',
         mb: 2,
+        gap: 1,
+        px: 2,
         '&:hover': {
           '& .message-actions': {
             opacity: 1,
@@ -26,45 +31,51 @@ export default function Message({ message, isOwnMessage }: MessageProps) {
         },
       }}
     >
-      <Avatar
-        src={message.user?.image}
-        sx={{ 
-          width: 32, 
-          height: 32,
-          bgcolor: !message.user?.image ? 
-            `hsl(${(message.user?.name || '').length * 30}, 70%, 50%)` : undefined,
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-        }}
-      >
-        {message.user?.name?.[0]?.toUpperCase()}
-      </Avatar>
-      <Box
-        sx={{
-          maxWidth: '70%',
-        }}
-      >
+      {!isOwnMessage && (
+        <Avatar
+          src={message.user?.image}
+          alt={message.user?.name || ''}
+          sx={{ 
+            width: 32, 
+            height: 32,
+            bgcolor: !message.user?.image ? 
+              `hsl(${(message.user?.name || '').length * 30}, 70%, 50%)` : undefined
+          }}
+        >
+          {(message.user?.name || '')[0]}
+        </Avatar>
+      )}
+      <Box sx={{ maxWidth: '70%' }}>
         {!isOwnMessage && (
-          <Typography variant="caption" color="text.secondary">
+          <Typography 
+            variant="caption" 
+            sx={{ 
+              ml: 1, 
+              mb: 0.5, 
+              display: 'block',
+              color: 'text.secondary',
+              fontWeight: 500
+            }}
+          >
             {message.user?.name}
           </Typography>
         )}
-        <Box
+        <Paper
+          elevation={0}
           sx={{
-            backgroundColor: isOwnMessage
-              ? `${theme.palette.primary.main}`
+            p: 1.5,
+            bgcolor: isOwnMessage 
+              ? `${theme.palette.primary.main}` 
               : theme.palette.grey[50],
             color: isOwnMessage ? 'white' : 'inherit',
             borderRadius: 2.5,
-            p: 1.5,
-            position: 'relative',
+            borderTopLeftRadius: !isOwnMessage ? 0 : 2.5,
+            borderTopRightRadius: isOwnMessage ? 0 : 2.5,
             boxShadow: isOwnMessage 
               ? '0 2px 8px rgba(0,0,0,0.15)'
               : '0 1px 4px rgba(0,0,0,0.05)',
+            position: 'relative',
             transition: 'all 0.2s ease',
-            '& img': {
-              maxWidth: '100%',
-              borderRadius: 1,
-            },
             '&:hover': {
               transform: 'translateY(-1px)',
               boxShadow: isOwnMessage 
@@ -74,11 +85,12 @@ export default function Message({ message, isOwnMessage }: MessageProps) {
           }}
         >
           <Typography 
-            variant="body1" 
+            variant="body2" 
             sx={{ 
               wordBreak: 'break-word',
               lineHeight: 1.5,
               letterSpacing: '0.01em',
+              fontWeight: 400,
             }}
           >
             {message.text}
@@ -93,26 +105,23 @@ export default function Message({ message, isOwnMessage }: MessageProps) {
             <Typography 
               variant="caption" 
               sx={{ 
-                fontSize: '0.75rem',
+                fontSize: '0.7rem',
                 color: isOwnMessage 
                   ? 'rgba(255,255,255,0.7)' 
                   : theme.palette.text.secondary,
               }}
             >
-              {format(new Date(message.created_at || ''), 'HH:mm')}
+              {messageTime}
             </Typography>
             {isOwnMessage && (
-              <Box 
-                className="message-actions"
-                sx={{ 
-                  display: 'flex', 
-                  alignItems: 'center',
-                  color: message.status === 'received' 
-                    ? 'rgba(255,255,255,0.9)'
-                    : 'rgba(255,255,255,0.5)',
-                  transition: 'opacity 0.2s ease',
-                }}
-              >
+              <Box sx={{ 
+                display: 'flex', 
+                alignItems: 'center',
+                color: message.status === 'received' 
+                  ? theme.palette.primary.light
+                  : 'rgba(255,255,255,0.5)',
+                ml: 0.5,
+              }}>
                 {message.status === 'received' ? (
                   <DoneAll sx={{ fontSize: '0.9rem' }} />
                 ) : (
@@ -121,7 +130,7 @@ export default function Message({ message, isOwnMessage }: MessageProps) {
               </Box>
             )}
           </Box>
-        </Box>
+        </Paper>
       </Box>
     </Box>
   );

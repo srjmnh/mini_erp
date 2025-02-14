@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Settings as SettingsOutlined } from '@mui/icons-material';
+
 import { StreamChat, Channel } from 'stream-chat';
 import {
   Box,
@@ -40,7 +42,6 @@ import GroupChatDialog from './GroupChatDialog';
 import axios from 'axios';
 import { format, isToday, isYesterday } from 'date-fns';
 import { uploadChatFile } from '@/services/supabaseStorage';
-import FilePreviewDialog from './FilePreviewDialog';
 
 interface Employee {
   id: string;
@@ -49,6 +50,19 @@ interface Employee {
   photoURL?: string;
   position?: string;
 }
+
+import {
+  Channel,
+  ChannelHeader,
+  MessageList,
+  MessageInput,
+  Thread,
+  Window,
+  ChannelList as StreamChannelList,
+  useChannelStateContext,
+  useChannelActionContext,
+} from 'stream-chat-react';
+import 'stream-chat-react/dist/css/index.css';
 
 export default function StreamChatPopover() {
   const { user } = useAuth();
@@ -67,246 +81,315 @@ export default function StreamChatPopover() {
   const [userStatus, setUserStatus] = useState<'online' | 'away' | 'busy'>('online');
   const [isConnected, setIsConnected] = useState(false);
   const [statusAnchorEl, setStatusAnchorEl] = useState<null | HTMLElement>(null);
-  const [previewFile, setPreviewFile] = useState<{ url: string; name: string; type: string; } | null>(null);
-
-  // Use refs to maintain stable references to channels and current channel
-  const channelsRef = React.useRef<Channel[]>([]);
-  const currentChannelRef = React.useRef<Channel | null>(null);
-
-  // Sync refs with state
-  useEffect(() => {
-    channelsRef.current = channels;
-  }, [channels]);
 
   useEffect(() => {
-    currentChannelRef.current = channel;
-  }, [channel]);
+    const initChat = async () => {
+      if (!user?.email) return;
 
-  // Function to safely update channels state
-  const updateChannelsState = React.useCallback((updater: (prev: Channel[]) => Channel[]) => {
-    setChannels(prev => {
-      const updated = updater(prev);
-      channelsRef.current = updated;
-      return updated;
-    });
-  }, []);
-
-  // Function to update a specific channel in the list
-  const updateChannelInList = React.useCallback((channelToUpdate: Channel, moveToTop: boolean = false) => {
-    updateChannelsState(prev => {
-      const updatedChannels = [...prev];
-      const channelIndex = updatedChannels.findIndex(ch => ch.cid === channelToUpdate.cid);
-      
-      if (channelIndex !== -1) {
-        // Create updated channel with preserved data
-        const updatedChannel = {
-          ...updatedChannels[channelIndex],
-          state: {
-            ...updatedChannels[channelIndex].state,
-            messages: channelToUpdate.state.messages,
-            last_message_at: channelToUpdate.state.last_message_at,
-          },
-          data: {
-            ...updatedChannels[channelIndex].data,
-            ...channelToUpdate.data,
-          },
-        };
-
-        if (moveToTop) {
-          // Remove and add to top
-          updatedChannels.splice(channelIndex, 1);
-          return [updatedChannel, ...updatedChannels];
-        } else {
-          // Update in place
-          updatedChannels[channelIndex] = updatedChannel;
-          return updatedChannels;
-        }
-      }
-      return prev;
-    });
-  }, []);
-
-  // Function to load channels with proper error handling
-  const loadChannels = useCallback(async () => {
-    if (!chatClient) return;
-    
-    try {
-      console.log('Loading channels...');
-      
-      // Query team channels with explicit watching
-      const teamChannels = await chatClient.queryChannels(
-        { 
-          type: 'team',
-          members: { $in: [chatClient.userID] }
-        },
-        { last_message_at: -1 },
-        { 
-          state: true,
-          watch: true,
-          presence: true,
-          messages: { limit: 30 },
-          watchers: { limit: 30 }
-        }
-      );
-
-      // Query DM channels
-      const dmChannels = await chatClient.queryChannels(
-        { 
-          type: 'messaging',
-          members: { $in: [chatClient.userID] }
-        },
-        { last_message_at: -1 },
-        { 
-          state: true,
-          watch: true,
-          presence: true,
-          messages: { limit: 30 }
-        }
-      );
-
-      console.log('Channels loaded:', {
-        team: teamChannels.length,
-        dm: dmChannels.length
-      });
-
-      // Update channels state while preserving references
-      setChannels(prev => {
-        const existingChannels = new Map(prev.map(ch => [ch.cid, ch]));
-        const allChannels = [...teamChannels, ...dmChannels];
+      try {
+        const userId = user.email.replace(/[.@]/g, '_');
+        console.log('Initializing chat with user:', user);
         
-        allChannels.forEach(newChannel => {
-          const existing = existingChannels.get(newChannel.cid);
-          if (existing) {
-            existing.state = newChannel.state;
-            existing.data = newChannel.data;
-            existingChannels.set(newChannel.cid, existing);
-          } else {
-            existingChannels.set(newChannel.cid, newChannel);
-          }
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/stream/token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId,
+            email: user.email,
+            name: user.name || user.email.split('@')[0],
+            image: user.photoURL,
+          }),
         });
 
-        return Array.from(existingChannels.values())
-          .sort((a, b) => {
-            const aTime = a.state.last_message_at ? new Date(a.state.last_message_at).getTime() : 0;
-            const bTime = b.state.last_message_at ? new Date(b.state.last_message_at).getTime() : 0;
-            return bTime - aTime;
+        const { token } = await response.json();
+        const client = StreamChat.getInstance(import.meta.env.VITE_STREAM_API_KEY);
+        await client.connectUser(
+          {
+            id: userId,
+            name: user.name || user.email.split('@')[0],
+            email: user.email,
+            image: user.photoURL,
+          },
+          token
+        );
+
+        setChatClient(client);
+        setIsConnected(true);
+      } catch (error) {
+        console.error('Error initializing chat:', error);
+        setIsConnected(false);
+      }
+    };
+
+    initChat();
+    return () => {
+      chatClient?.disconnectUser();
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!chatClient) return;
+
+    const fetchChannels = async () => {
+      try {
+        console.log('Fetching channels for user:', chatClient.userID);
+
+        // First query team channels
+        const teamFilter = { 
+          type: 'team',
+          members: { $in: [chatClient.userID] }
+        };
+
+        // Then query direct message channels
+        const dmFilter = {
+          type: 'messaging',
+          members: { $in: [chatClient.userID] }
+        };
+
+        const sort = { last_message_at: -1 };
+
+        const [teamChannels, dmChannels] = await Promise.all([
+          chatClient.queryChannels(teamFilter, sort, {
+            watch: true,
+            state: true,
+            presence: true,
+            message_limit: 30,
+          }),
+          chatClient.queryChannels(dmFilter, sort, {
+            watch: true,
+            state: true,
+            presence: true,
+            message_limit: 30,
+          })
+        ]);
+
+        console.log('Fetched team channels:', teamChannels.map(ch => ({
+          id: ch.id,
+          type: ch.type,
+          name: ch.data?.name,
+          members: Object.keys(ch.state.members)
+        })));
+
+        // Combine and sort all channels
+        const allChannels = [...teamChannels, ...dmChannels].sort((a, b) => {
+          const aDate = a.state.last_message_at || a.created_at;
+          const bDate = b.state.last_message_at || b.created_at;
+          return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
+        });
+
+        setChannels(allChannels);
+
+        // Set up event handlers
+        const handleChannelCreated = (event: any) => {
+          const { channel } = event;
+          if (channel.state.members[chatClient.userID]) {
+            setChannels(prev => [channel, ...prev]);
+          }
+        };
+
+        const handleChannelUpdated = (event: any) => {
+          const { channel } = event;
+          setChannels(prev => {
+            const index = prev.findIndex(ch => ch.cid === channel.cid);
+            if (index === -1) return prev;
+            const newChannels = [...prev];
+            newChannels[index] = channel;
+            return newChannels;
           });
+        };
+
+        const handleNewMessage = (event: any) => {
+          const { message, cid } = event;
+          setChannels(prev => {
+            const channelIndex = prev.findIndex(ch => ch.cid === cid);
+            if (channelIndex === -1) return prev;
+
+            const newChannels = [...prev];
+            const channel = newChannels[channelIndex];
+            
+            // Update channel's messages
+            channel.state.messages = [...channel.state.messages, message];
+            
+            // Move channel to top
+            newChannels.splice(channelIndex, 1);
+            return [channel, ...newChannels];
+          });
+        };
+
+        const handleChannelDeleted = (event: any) => {
+          const { channel } = event;
+          setChannels(prev => prev.filter(ch => ch.cid !== channel.cid));
+        };
+
+        // Add event listeners
+        chatClient.on('channel.created', handleChannelCreated);
+        chatClient.on('channel.updated', handleChannelUpdated);
+        chatClient.on('channel.deleted', handleChannelDeleted);
+        chatClient.on('message.new', handleNewMessage);
+
+        // Cleanup event listeners
+        return () => {
+          chatClient.off('channel.created', handleChannelCreated);
+          chatClient.off('channel.updated', handleChannelUpdated);
+          chatClient.off('channel.deleted', handleChannelDeleted);
+          chatClient.off('message.new', handleNewMessage);
+        };
+      } catch (error) {
+        console.error('Error fetching channels:', error);
+        showSnackbar('Error loading chats', 'error');
+      }
+    };
+
+    fetchChannels();
+  }, [chatClient]);
+
+  useEffect(() => {
+    if (chatClient) {
+      const updateStatus = async () => {
+        try {
+          await chatClient.partialUpdateUser({
+            id: chatClient.userID,
+            set: {
+              status: userStatus,
+            },
+          });
+        } catch (error) {
+          console.error('Error updating status:', error);
+        }
+      };
+      updateStatus();
+    }
+  }, [userStatus, chatClient]);
+
+  useEffect(() => {
+    if (chatClient) {
+      chatClient.on('user.presence.changed', event => {
+        setChannels(prev => prev.map(ch => {
+          const members = ch.state.members;
+          if (!members) return ch;
+          
+          const updatedMembers = { ...members };
+          if (updatedMembers[event.user.id]) {
+            updatedMembers[event.user.id] = {
+              ...updatedMembers[event.user.id],
+              user: event.user,
+            };
+          }
+          
+          return {
+            ...ch,
+            state: {
+              ...ch.state,
+              members: updatedMembers,
+            },
+          };
+        }));
       });
 
-    } catch (error) {
-      console.error('Error loading channels:', error);
+      return () => {
+        chatClient.off('user.presence.changed');
+      };
     }
   }, [chatClient]);
 
-  const handleSendMessage = async () => {
-    if (!channel || !message.trim()) return;
+  useEffect(() => {
+    const loadMessages = async () => {
+      if (!channel || !chatClient) return;
+      
+      try {
+        // Get a fresh channel instance
+        const channelInstance = chatClient.channel(channel.type, channel.id);
+        await channelInstance.watch();
+        
+        // Get messages
+        const messages = channel.state.messages || [];
+        setMessages(messages);
 
-    const messageText = message.trim();
-    setMessage('');
+        // Subscribe to new messages
+        const handleNewMessage = (event: any) => {
+          console.log('New message received:', event);
+          setMessages(prev => [...prev, event.message]);
+        };
+
+        // Subscribe to message updates
+        const handleMessageUpdated = (event: any) => {
+          console.log('Message updated:', event);
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === event.message.id ? event.message : msg
+            )
+          );
+        };
+
+        channelInstance.on('message.new', handleNewMessage);
+        channelInstance.on('message.updated', handleMessageUpdated);
+
+        return () => {
+          channelInstance.off('message.new', handleNewMessage);
+          channelInstance.off('message.updated', handleMessageUpdated);
+        };
+      } catch (error) {
+        console.error('Error loading messages:', error);
+        showSnackbar('Error loading messages', 'error');
+      }
+    };
+
+    loadMessages();
+  }, [channel, chatClient]);
+
+  useEffect(() => {
+    if (!channel || !chatClient) return;
 
     try {
-      console.log('Sending message to channel:', channel.cid);
+      const channelInstance = chatClient.channel(channel.type, channel.id);
       
-      // Send message and let the WebSocket handle the update
-      await channel.sendMessage({
-        text: messageText,
-        user: {
-          id: user?.email?.replace(/[.@]/g, '_') || '',
-          name: user?.displayName || '',
-          image: user?.photoURL
+      const handleNewMessage = (event: any) => {
+        if (event.message.user?.id !== chatClient.userID) {
+          setChannels(prev => prev.map(ch => 
+            ch.id === channel.id 
+              ? { ...ch, unreadCount: (ch.countUnread?.() || 0) + 1 }
+              : ch
+          ));
         }
-      });
+      };
 
+      channelInstance.on('message.new', handleNewMessage);
+
+      return () => {
+        channelInstance.off('message.new', handleNewMessage);
+      };
     } catch (error) {
-      console.error('Error sending message:', error);
-      setMessage(messageText);
+      console.error('Error setting up message listeners:', error);
     }
-  };
+  }, [channel, chatClient]);
 
-  // Effect to establish WebSocket connection and handle real-time updates
-  useEffect(() => {
-    if (!chatClient || !channel) return;
-
-    // Watch the channel to establish WebSocket connection
-    const watchChannel = async () => {
-      try {
-        const response = await channel.watch();
-        setMessages(response.messages || []);
-      } catch (error) {
-        console.error('Error watching channel:', error);
-      }
-    };
-
-    // Set up message listener for current channel only
-    const handleNewMessage = (event: any) => {
-      if (event.cid === channel.cid) {
-        setMessages(prev => {
-          const messageExists = prev.some(msg => msg.id === event.message.id);
-          if (messageExists) return prev;
-          return [...prev, event.message];
-        });
-
-        // Update channel order
-        setChannels(prev => {
-          const updatedChannels = [...prev];
-          const channelIndex = updatedChannels.findIndex(ch => ch.cid === event.cid);
-          
-          if (channelIndex !== -1) {
-            const updatedChannel = updatedChannels[channelIndex];
-            updatedChannel.state.last_message_at = new Date();
-            updatedChannels.splice(channelIndex, 1);
-            return [updatedChannel, ...updatedChannels];
-          }
-          return prev;
-        });
-      }
-    };
-
-    watchChannel();
-    channel.on('message.new', handleNewMessage);
-
-    return () => {
-      channel.off('message.new', handleNewMessage);
-    };
-  }, [chatClient, channel]);
-
-  // Initial channel load
-  useEffect(() => {
-    if (!chatClient) return;
-    loadChannels();
-  }, [chatClient, loadChannels]);
-
-  // Handle user presence
   useEffect(() => {
     if (!chatClient) return;
 
-    const handlePresenceChange = (event: any) => {
-      setChannels(prev => prev.map(ch => {
-        const members = ch.state.members;
-        if (!members) return ch;
-        
-        const updatedMembers = { ...members };
-        if (updatedMembers[event.user.id]) {
-          updatedMembers[event.user.id] = {
-            ...updatedMembers[event.user.id],
-            user: event.user,
-          };
+    const handleChannelUpdated = (event: any) => {
+      const loadChannels = async () => {
+        if (!chatClient || !user?.email) return;
+
+        try {
+          const filter = { type: 'messaging', members: { $in: [user.email.replace(/[.@]/g, '_')] } };
+          const sort = { last_message_at: -1 };
+          const channels = await chatClient.queryChannels(filter, sort);
+          setChannels(channels);
+        } catch (error) {
+          console.error('Error loading channels:', error);
         }
-        
-        return {
-          ...ch,
-          state: {
-            ...ch.state,
-            members: updatedMembers,
-          },
-        };
-      }));
+      };
+      loadChannels();
     };
 
-    chatClient.on('user.presence.changed', handlePresenceChange);
+    chatClient.on('message.new', handleChannelUpdated);
+    chatClient.on('channel.updated', handleChannelUpdated);
 
     return () => {
-      chatClient.off('user.presence.changed', handlePresenceChange);
+      chatClient.off('message.new', handleChannelUpdated);
+      chatClient.off('channel.updated', handleChannelUpdated);
     };
   }, [chatClient]);
 
@@ -389,162 +472,91 @@ export default function StreamChatPopover() {
     }
   };
 
+  const handleSendMessage = async () => {
+    if (!channel || !message.trim()) return;
+
+    try {
+      const messageData = {
+        text: message,
+        user: {
+          id: user?.email?.replace(/[.@]/g, '_') || '',
+          name: user?.displayName || user?.email?.split('@')[0] || '',
+          image: user?.photoURL,
+        },
+      };
+
+      await channel.sendMessage(messageData);
+      setMessage('');
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
+  };
+
+  const [channelSettingsOpen, setChannelSettingsOpen] = useState(false);
+  const [selectedSettingsChannel, setSelectedSettingsChannel] = useState<Channel | null>(null);
+
+  const handleChannelSettings = (channel: Channel) => {
+    setSelectedSettingsChannel(channel);
+    setChannelSettingsOpen(true);
+  };
+
   const handleChannelSelect = async (selectedChannel: Channel) => {
     try {
-      // Watch the channel first to ensure we have latest state
-      await selectedChannel.watch();
+      if (!chatClient) return;
+      setLoading(true);
+
+      console.log('Selecting channel:', selectedChannel.cid);
+
+      // Get a fresh channel instance
+      const channelInstance = chatClient.channel(selectedChannel.type, selectedChannel.id);
       
-      // Update messages immediately with current channel state
-      setMessages(selectedChannel.state.messages || []);
+      // Watch the channel to get real-time updates
+      const watchResponse = await channelInstance.watch();
+      console.log('Channel watch response:', watchResponse);
       
-      // For direct messages, set the selected employee
-      if (selectedChannel.data?.type !== 'team') {
+      // Query messages
+      const messagesResponse = await channelInstance.query({
+        messages: { limit: 50 },
+        watch: true,
+        state: true,
+      });
+      console.log('Channel messages response:', messagesResponse);
+
+      // Mark as read
+      await channelInstance.markRead();
+
+      // Update state
+      setChannel(channelInstance);
+      setMessages(messagesResponse.messages || []);
+
+      if (selectedChannel.type === 'team') {
+        // For group chats, use channel data
+        setSelectedEmployee(null);
+      } else {
+        // For direct messages, get the other user
         const members = Object.values(selectedChannel.state.members);
         const otherMember = members.find(
-          member => member.user_id !== chatClient?.userID
+          member => member.user_id !== chatClient.userID
         );
         if (otherMember) {
           setSelectedEmployee({
             id: otherMember.user_id,
             name: otherMember.user?.name || '',
             email: otherMember.user?.email || '',
-            position: otherMember.user?.position || '',
-            photoURL: otherMember.user?.image || '',
+            position: otherMember.user?.position,
+            photoURL: otherMember.user?.image,
           });
         }
-      } else {
-        // For group chats, clear selected employee
-        setSelectedEmployee(null);
       }
-      
-      // Set the channel
-      setChannel(selectedChannel);
-      
-      // Mark channel as read
-      await selectedChannel.markRead();
     } catch (error) {
       console.error('Error selecting channel:', error);
+      showSnackbar('Error loading chat', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
   const open = Boolean(anchorEl);
-
-  useEffect(() => {
-    if (!chatClient) return;
-
-    const updateStatus = async () => {
-      try {
-        await chatClient.partialUpdateUser({
-          id: chatClient.userID,
-          set: {
-            status: userStatus,
-          },
-        });
-      } catch (error) {
-        console.error('Error updating status:', error);
-      }
-    };
-    updateStatus();
-  }, [userStatus, chatClient]);
-
-  // Initialize chat client
-  useEffect(() => {
-    const initChat = async () => {
-      if (!user?.email) return;
-
-      try {
-        const userId = user.email.replace(/[.@]/g, '_');
-        console.log('Initializing chat with user:', user);
-        
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/stream/token`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            userId,
-            email: user.email,
-            name: user.name || user.email.split('@')[0],
-            image: user.photoURL,
-          }),
-        });
-
-        const { token } = await response.json();
-        const client = StreamChat.getInstance(import.meta.env.VITE_STREAM_API_KEY);
-        
-        // Connect user
-        await client.connectUser(
-          {
-            id: userId,
-            name: user.name || user.email.split('@')[0],
-            email: user.email,
-            image: user.photoURL,
-          },
-          token
-        );
-
-        setChatClient(client);
-        setIsConnected(true);
-      } catch (error) {
-        console.error('Error initializing chat:', error);
-        setIsConnected(false);
-      }
-    };
-
-    initChat();
-    return () => {
-      if (chatClient) {
-        chatClient.disconnectUser();
-      }
-    };
-  }, [user]);
-
-  const handleFileClick = (attachment: any) => {
-    // Log the attachment to debug
-    console.log('Attachment clicked:', attachment);
-    
-    // Get the correct URL based on attachment type
-    const fileUrl = attachment.asset_url || attachment.thumb_url || attachment.image_url || attachment.url;
-    
-    // Determine MIME type
-    let mimeType = attachment.mime_type;
-    if (!mimeType) {
-      // Try to determine type from file extension
-      const ext = (attachment.title || '').split('.').pop()?.toLowerCase();
-      if (ext) {
-        switch (ext) {
-          case 'jpg':
-          case 'jpeg':
-            mimeType = 'image/jpeg';
-            break;
-          case 'png':
-            mimeType = 'image/png';
-            break;
-          case 'gif':
-            mimeType = 'image/gif';
-            break;
-          case 'pdf':
-            mimeType = 'application/pdf';
-            break;
-          case 'mp4':
-            mimeType = 'video/mp4';
-            break;
-          default:
-            mimeType = 'application/octet-stream';
-        }
-      }
-    }
-
-    setPreviewFile({
-      url: fileUrl,
-      name: attachment.title || 'File',
-      type: mimeType
-    });
-  };
-
-  const handleClosePreview = () => {
-    setPreviewFile(null);
-  };
 
   if (!chatClient) {
     return null;
@@ -654,17 +666,18 @@ export default function StreamChatPopover() {
             {/* Chat list */}
             <List sx={{ flex: 1, overflow: 'auto' }}>
               {channels.map((ch) => {
-                const isGroupChat = ch.data?.type === 'team';
+                const isGroup = ch.type === 'team';
                 const messages = ch.state?.messages || [];
                 const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
                 const unreadCount = ch.countUnread?.() || 0;
 
                 // For group chats, use channel data
-                const channelName = isGroupChat ? ch.data?.name : null;
-                const channelImage = isGroupChat ? ch.data?.image : null;
+                const channelName = isGroup ? ch.data?.name : null;
+                const channelImage = isGroup ? ch.data?.image : null;
+                const memberCount = Object.keys(ch.state?.members || {}).length;
 
                 // For direct messages, get the other user
-                const otherUser = !isGroupChat && ch.state.members
+                const otherUser = !isGroup && ch.state.members
                   ? Object.values(ch.state.members).find(
                       (m) => m.user?.id !== chatClient?.userID
                     )?.user
@@ -676,11 +689,24 @@ export default function StreamChatPopover() {
                     button
                     selected={channel?.id === ch.id}
                     onClick={() => handleChannelSelect(ch)}
+                    secondaryAction={
+                      isGroup && (
+                        <IconButton 
+                          edge="end" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleChannelSettings(ch);
+                          }}
+                        >
+                          <SettingsOutlined />
+                        </IconButton>
+                      )
+                    }
                   >
                     <ListItemAvatar>
-                      {isGroupChat ? (
+                      {isGroup ? (
                         <Avatar src={channelImage}>
-                          <GroupIcon />
+                          {channelName?.[0]?.toUpperCase() || <GroupIcon />}
                         </Avatar>
                       ) : (
                         <Badge
@@ -692,54 +718,61 @@ export default function StreamChatPopover() {
                           }}
                         >
                           <Avatar src={otherUser?.image}>
-                            {otherUser?.name?.[0]?.toUpperCase()}
+                            {otherUser?.name?.[0]?.toUpperCase() || '?'}
                           </Avatar>
                         </Badge>
                       )}
                     </ListItemAvatar>
                     <ListItemText
                       primary={
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Typography noWrap>
-                            {isGroupChat ? channelName : otherUser?.name || 'Unknown User'}
-                          </Typography>
-                          {isGroupChat && (
-                            <Chip
-                              size="small"
-                              label="Group"
-                              variant="outlined"
-                              sx={{ height: 20 }}
-                            />
-                          )}
-                        </Box>
-                      }
-                      secondary={
-                        <Box
-                          sx={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 1,
-                          }}
-                        >
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <Typography
-                            variant="body2"
-                            color="text.secondary"
                             sx={{
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              flex: 1,
+                              fontWeight: unreadCount > 0 ? 700 : 400,
                             }}
                           >
-                            {lastMessage?.text || 'No messages yet'}
+                            {isGroup ? channelName : otherUser?.name || 'Unknown'}
                           </Typography>
                           {unreadCount > 0 && (
                             <Chip
                               size="small"
                               label={unreadCount}
                               color="primary"
-                              sx={{ minWidth: 'auto' }}
+                              sx={{ height: 20, minWidth: 20 }}
                             />
+                          )}
+                        </Box>
+                      }
+                      secondary={
+                        <Box>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              maxWidth: '200px',
+                              fontWeight: unreadCount > 0 ? 700 : 400,
+                            }}
+                          >
+                            {lastMessage ? (
+                              <>
+                                {lastMessage.user?.id === chatClient?.userID ? 'You: ' : 
+                                  isGroup ? `${lastMessage.user?.name}: ` : ''}
+                                {lastMessage.text}
+                              </>
+                            ) : (
+                              'No messages yet'
+                            )}
+                          </Typography>
+                          {isGroup && (
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ display: 'block', mt: 0.5 }}
+                            >
+                              {memberCount} members
+                            </Typography>
                           )}
                         </Box>
                       }
@@ -772,7 +805,7 @@ export default function StreamChatPopover() {
 
           {/* Right side - Chat area */}
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            {channel ? (
+            {selectedEmployee ? (
               <>
                 {/* Chat header */}
                 <Box
@@ -782,49 +815,57 @@ export default function StreamChatPopover() {
                     borderColor: 'divider',
                     display: 'flex',
                     alignItems: 'flex-start',
+                    justifyContent: 'space-between'
                   }}
                 >
-                  {channel.data?.type === 'team' ? (
-                    <>
-                      <Avatar src={channel.data?.image} sx={{ mr: 1 }}>
-                        <GroupIcon />
-                      </Avatar>
-                      <Box>
-                        <Typography variant="subtitle1">
-                          {channel.data?.name}
-                        </Typography>
-                        <Typography 
-                          variant="body2" 
-                          color="text.secondary"
-                          sx={{ mt: 0.5 }}
-                        >
-                          {Object.keys(channel.state.members || {}).length} members
-                        </Typography>
-                      </Box>
-                    </>
-                  ) : selectedEmployee ? (
-                    <>
-                      <Avatar src={selectedEmployee.photoURL} sx={{ mr: 1 }}>
-                        {selectedEmployee.name?.[0]?.toUpperCase()}
-                      </Avatar>
-                      <Box>
-                        <Typography variant="subtitle1">
-                          {selectedEmployee.name}
-                        </Typography>
-                        <Typography 
-                          variant="body2" 
-                          color="text.secondary"
-                          sx={{ mt: 0.5 }}
-                        >
-                          {selectedEmployee.position || 'Employee'}
-                        </Typography>
-                      </Box>
-                    </>
-                  ) : null}
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
+                    {channel?.type === 'team' ? (
+                      <>
+                        <Avatar src={channel.data?.image} sx={{ mr: 1 }}>
+                          {channel.data?.name?.[0]?.toUpperCase() || <GroupIcon />}
+                        </Avatar>
+                        <Box>
+                          <Typography variant="subtitle1">
+                            {channel.data?.name}
+                          </Typography>
+                          <Typography 
+                            variant="body2" 
+                            color="text.secondary"
+                            sx={{ mt: 0.5 }}
+                          >
+                            {Object.keys(channel.state?.members || {}).length} members
+                          </Typography>
+                        </Box>
+                      </>
+                    ) : selectedEmployee ? (
+                      <>
+                        <Avatar src={selectedEmployee.photoURL} sx={{ mr: 1 }}>
+                          {selectedEmployee.name?.[0]?.toUpperCase()}
+                        </Avatar>
+                        <Box>
+                          <Typography variant="subtitle1">
+                            {selectedEmployee.name}
+                          </Typography>
+                          <Typography 
+                            variant="body2" 
+                            color="text.secondary"
+                            sx={{ mt: 0.5 }}
+                          >
+                            {selectedEmployee.position || 'Employee'}
+                          </Typography>
+                        </Box>
+                      </>
+                    ) : null}
+                  </Box>
+                  {channel?.type === 'team' && (
+                    <IconButton onClick={() => handleChannelSettings(channel)}>
+                      <SettingsOutlined />
+                    </IconButton>
+                  )}
                 </Box>
 
                 {/* Chat messages */}
-                <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+                <Box sx={{ flex: 1, overflow: 'auto', p: 2, bgcolor: '#f5f5f5' }}>
                   {loading ? (
                     <Box
                       sx={{
@@ -837,7 +878,7 @@ export default function StreamChatPopover() {
                       <CircularProgress />
                     </Box>
                   ) : messages.length > 0 ? (
-                    <Box>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                       {messages.map((msg) => {
                         const fileAttachment = msg.attachments?.[0];
                         const isFileMessage = fileAttachment?.type === 'file';
@@ -850,72 +891,17 @@ export default function StreamChatPopover() {
                               fileUrl={fileAttachment.asset_url || ''}
                               fileType={fileAttachment.mime_type || ''}
                               fileSize={fileAttachment.file_size || 0}
-                              isOwnMessage={msg.user?.id === chatClient.userID}
+                              isOwnMessage={msg.user?.id === chatClient?.userID}
                             />
                           );
                         }
 
                         return (
-                          <Box
+                          <Message
                             key={msg.id}
-                            sx={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: msg.user?.id === chatClient?.userID ? 'flex-end' : 'flex-start',
-                              mb: 1,
-                            }}
-                          >
-                            <Box
-                              sx={{
-                                backgroundColor: msg.user?.id === chatClient?.userID ? 'primary.main' : 'grey.100',
-                                color: msg.user?.id === chatClient?.userID ? 'white' : 'inherit',
-                                borderRadius: 2,
-                                p: 1,
-                                maxWidth: '70%',
-                              }}
-                            >
-                              {msg.user?.id !== chatClient?.userID && (
-                                <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-                                  {msg.user?.name || 'Unknown'}
-                                </Typography>
-                              )}
-                              <Typography variant="body1">{msg.text}</Typography>
-                              {msg.attachments && msg.attachments.length > 0 && (
-                                <Box sx={{ mt: 1 }}>
-                                  {msg.attachments.map((attachment: any, index: number) => (
-                                    <Box
-                                      key={index}
-                                      onClick={() => handleFileClick(attachment)}
-                                      sx={{
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 1,
-                                        p: 1,
-                                        bgcolor: 'rgba(0, 0, 0, 0.04)',
-                                        borderRadius: 1,
-                                        '&:hover': {
-                                          bgcolor: 'rgba(0, 0, 0, 0.08)',
-                                        }
-                                      }}
-                                    >
-                                      <AttachFileIcon sx={{ fontSize: 20 }} />
-                                      <Typography variant="body2" sx={{ 
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap'
-                                      }}>
-                                        {attachment.title || 'File'}
-                                      </Typography>
-                                    </Box>
-                                  ))}
-                                </Box>
-                              )}
-                            </Box>
-                            <Typography variant="caption" sx={{ mt: 0.5, color: 'text.secondary' }}>
-                              {new Date(msg.created_at || Date.now()).toLocaleTimeString()}
-                            </Typography>
-                          </Box>
+                            message={msg}
+                            isOwnMessage={msg.user?.id === chatClient?.userID}
+                          />
                         );
                       })}
                     </Box>
@@ -923,13 +909,19 @@ export default function StreamChatPopover() {
                     <Box
                       sx={{
                         display: 'flex',
+                        flexDirection: 'column',
                         justifyContent: 'center',
                         alignItems: 'center',
                         height: '100%',
                         color: 'text.secondary',
+                        gap: 1,
                       }}
                     >
+                      <ChatIcon sx={{ fontSize: 40, opacity: 0.5 }} />
                       <Typography>No messages yet</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Be the first to send a message!
+                      </Typography>
                     </Box>
                   )}
                 </Box>
@@ -1042,12 +1034,6 @@ export default function StreamChatPopover() {
           // No need to manually update channels here as it will be handled by the channel.created event
           setGroupChatOpen(false);
         }}
-      />
-
-      <FilePreviewDialog
-        open={Boolean(previewFile)}
-        onClose={handleClosePreview}
-        file={previewFile}
       />
     </Box>
   );

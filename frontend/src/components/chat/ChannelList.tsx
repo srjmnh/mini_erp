@@ -108,6 +108,11 @@ export default function ChannelList() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
 
+  // Debug logging
+  useEffect(() => {
+    console.log('Channels updated:', channels);
+  }, [channels]);
+
   const handleChannelClick = (channel: Channel) => {
     setActiveChannel(channel);
   };
@@ -165,7 +170,16 @@ export default function ChannelList() {
   });
 
   return (
-    <Box sx={{ width: 280, height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{
+      width: 280,
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      bgcolor: 'background.paper',
+      borderRight: 1,
+      borderColor: 'divider',
+      boxShadow: '0 0 10px rgba(0,0,0,0.1)',
+    }}>
       {/* Header */}
       <Box
         sx={{
@@ -175,73 +189,158 @@ export default function ChannelList() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          bgcolor: theme.palette.primary.main,
+          color: 'white',
         }}
       >
-        <Typography variant="h6">Channels</Typography>
-        <Tooltip title="Create Channel">
-          <IconButton onClick={() => setCreateDialogOpen(true)}>
-            <AddCircleOutline />
-          </IconButton>
-        </Tooltip>
+        <Typography variant="h6" sx={{ fontWeight: 600 }}>Chats</Typography>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Tooltip title="New Chat">
+            <IconButton
+              size="small"
+              onClick={() => setCreateDialogOpen(true)}
+              sx={{ color: 'white' }}
+            >
+              <AddCircleOutline />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
 
       {/* Search */}
-      <Box sx={{ p: 2 }}>
+      <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
         <TextField
           fullWidth
           size="small"
-          placeholder="Search channels"
+          placeholder="Search chats..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           InputProps={{
             startAdornment: <Search sx={{ mr: 1, color: 'text.secondary' }} />,
           }}
+          sx={{
+            '& .MuiOutlinedInput-root': {
+              borderRadius: '20px',
+              bgcolor: theme.palette.grey[100],
+              '&:hover': {
+                bgcolor: theme.palette.grey[200],
+              },
+              '& fieldset': {
+                border: 'none',
+              },
+            },
+          }}
         />
       </Box>
 
       {/* Channel List */}
-      <List sx={{ flex: 1, overflow: 'auto' }}>
-        {sortedChannels.map((channel) => (
+      <List sx={{ 
+        flex: 1, 
+        overflow: 'auto',
+        px: 1.5,
+        py: 1,
+        '& .MuiListItem-root': {
+          borderRadius: 2,
+          mb: 0.5,
+          transition: 'all 0.2s ease',
+          '&:hover': {
+            bgcolor: theme.palette.grey[100],
+            transform: 'translateX(4px)',
+          },
+          '&.Mui-selected': {
+            bgcolor: theme.palette.primary.soft,
+            '&:hover': {
+              bgcolor: theme.palette.primary.soft,
+            },
+          },
+        },
+      }}>
+        {sortedChannels.length === 0 ? (
+          <Box sx={{ 
+            p: 3, 
+            textAlign: 'center', 
+            color: 'text.secondary',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 2
+          }}>
+            <Box sx={{ 
+              p: 2, 
+              bgcolor: theme.palette.grey[50], 
+              borderRadius: 2,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 1
+            }}>
+              <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                No chats yet
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Start a new conversation
+              </Typography>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<AddCircleOutline />}
+                onClick={() => setCreateDialogOpen(true)}
+                sx={{ mt: 1 }}
+              >
+                New Chat
+              </Button>
+            </Box>
+          </Box>
+        ) : (
+          sortedChannels.map((channel) => (
           <ListItem
             key={channel.cid}
             button
             onClick={() => handleChannelClick(channel)}
             sx={{
-              borderRadius: 1,
-              mx: 1,
-              mb: 0.5,
+              borderRadius: 2,
+              mb: 1,
+              bgcolor: 'background.paper',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
               '&:hover': {
-                backgroundColor: 'action.hover',
+                bgcolor: theme.palette.grey[50],
+                transform: 'translateX(4px)',
               },
             }}
           >
-            <ListItemIcon>
-              {channel.data?.private ? (
-                <LockOutlined fontSize="small" />
-              ) : (
-                <TagOutlined fontSize="small" />
-              )}
-            </ListItemIcon>
+            <ListItemAvatar>
+              <Avatar
+                src={channel.data?.image}
+                sx={{
+                  bgcolor: !channel.data?.image
+                    ? `hsl(${(channel.data?.name || '').length * 30}, 70%, 50%)`
+                    : undefined
+                }}
+              >
+                {(channel.data?.name || '')[0]?.toUpperCase()}
+              </Avatar>
+            </ListItemAvatar>
             <ListItemText
               primary={
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Typography
-                    variant="body1"
+                    variant="subtitle2"
                     sx={{
-                      fontWeight: channel.state.unreadCount ? 600 : 400,
+                      fontWeight: channel.state.unreadCount ? 600 : 500,
+                      color: channel.state.unreadCount ? 'primary.main' : 'text.primary',
                     }}
                   >
-                    {channel.data?.name || 'Unnamed Channel'}
+                    {channel.data?.name || 'Unnamed Chat'}
                   </Typography>
                   {channel.state.unreadCount > 0 && (
                     <Badge
                       badgeContent={channel.state.unreadCount}
-                      color="error"
+                      color="primary"
                       sx={{
                         '& .MuiBadge-badge': {
-                          fontSize: '0.75rem',
-                          height: '18px',
-                          minWidth: '18px',
+                          fontSize: '0.7rem',
+                          height: '16px',
+                          minWidth: '16px',
                         },
                       }}
                     />
@@ -249,8 +348,28 @@ export default function ChannelList() {
                 </Box>
               }
               secondary={
-                channel.state.last_message_at &&
-                new Date(channel.state.last_message_at).toLocaleDateString()
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: 'text.secondary',
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {channel.state.last_message?.text || 'No messages yet'}
+                  </Typography>
+                  {channel.state.last_message_at && (
+                    <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+                      {new Date(channel.state.last_message_at).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </Typography>
+                  )}
+                </Box>
               }
             />
             <IconButton

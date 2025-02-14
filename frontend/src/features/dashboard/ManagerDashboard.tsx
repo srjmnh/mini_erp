@@ -372,7 +372,8 @@ export default function ManagerDashboard() {
             // Get assignee details
             let assignedTo = 'Unassigned';
             if (data.assigneeId) {
-              const assigneeDoc = await getDoc(doc(db, 'employees', data.assigneeId));
+              const employeeRef = doc(db, 'employees', data.assigneeId);
+              const assigneeDoc = await getDoc(employeeRef);
               if (assigneeDoc.exists()) {
                 const assigneeData = assigneeDoc.data();
                 assignedTo = assigneeData.firstName && assigneeData.lastName ? 
@@ -1557,7 +1558,8 @@ const fetchDepartmentTasks = async () => {
               // Get assignee details
               let assignedTo = 'Unassigned';
               if (data.assigneeId) {
-                const assigneeDoc = await getDoc(doc(db, 'employees', data.assigneeId));
+                const employeeRef = doc(db, 'employees', data.assigneeId);
+              const assigneeDoc = await getDoc(employeeRef);
                 if (assigneeDoc.exists()) {
                   const assigneeData = assigneeDoc.data();
                   assignedTo = assigneeData.firstName && assigneeData.lastName ? 

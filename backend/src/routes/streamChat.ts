@@ -48,4 +48,18 @@ router.post('/create-user', async (req, res) => {
   }
 });
 
+router.get('/users', async (req, res) => {
+  try {
+    const response = await serverClient.queryUsers(
+      {}, 
+      { last_active: -1 }, 
+      { limit: 50 }
+    );
+    res.json(response.users);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Error fetching users' });
+  }
+});
+
 export default router;

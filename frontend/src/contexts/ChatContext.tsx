@@ -14,6 +14,9 @@ interface ChatContextType {
   clearMessages: () => void;
   user: any;
   chatClient: any;
+  channels: any[];
+  activeChannel: any;
+  setActiveChannel: (channel: any) => void;
   setCurrentUserStatus: (status: string) => void;
 }
 
@@ -24,7 +27,32 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isProcessing, setIsProcessing] = useState(false);
   const [user, setUser] = useState(null);
   const [chatClient, setChatClient] = useState(null);
+  const [channels, setChannels] = useState([]);
+  const [activeChannel, setActiveChannel] = useState(null);
   const [currentUserStatus, setCurrentUserStatus] = useState(null);
+
+  // Function to update channels
+  const updateChannels = useCallback(async (client: any) => {
+    if (!client || !user?.uid) return;
+    
+    try {
+      const filter = {
+        members: { $in: [user.uid] }
+      };
+      const sort = { last_message_at: -1 };
+      
+      // Watch for new channels and updates
+      const channels = await client.queryChannels(filter, sort, {
+        watch: true, // this ensures we receive real-time updates
+        state: true,
+      });
+      
+      console.log('Updated channels:', channels);
+      setChannels(channels);
+    } catch (error) {
+      console.error('Error updating channels:', error);
+    }
+  }, [user?.uid]);
 
   const addMessage = useCallback((content: string, type: Message['type']) => {
     const newMessage: Message = {
@@ -61,7 +89,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const client = StreamChat.getInstance(import.meta.env.VITE_STREAM_API_KEY);
         
         // Get token from backend
-        const response = await fetch('http://localhost:3000/api/stream/token', {
+        const response = await fetch('/api/stream/token', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -94,6 +122,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.log('Connected to Stream chat');
         setChatClient(client);
         setCurrentUserStatus('online');
+
+        // Initial channel load
+        await updateChannels(client);
+
+        // Listen for channel updates
+        client.on('notification.message_new', () => updateChannels(client));
+        client.on('notification.added_to_channel', () => updateChannels(client));
+        client.on('notification.removed_from_channel', () => updateChannels(client));
+        client.on('channel.updated', () => updateChannels(client));
+        client.on('channel.deleted', () => updateChannels(client));
       } catch (error) {
         console.error('Error connecting to Stream:', error);
         setChatClient(null);
@@ -105,8 +143,17 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       const cleanup = async () => {
         if (chatClient) {
+          // Remove listeners
+          chatClient.off('notification.message_new');
+          chatClient.off('notification.added_to_channel');
+          chatClient.off('notification.removed_from_channel');
+          chatClient.off('channel.updated');
+          chatClient.off('channel.deleted');
+          
           await chatClient.disconnectUser();
           setChatClient(null);
+          setChannels([]);
+          setActiveChannel(null);
         }
       };
       cleanup();
@@ -121,6 +168,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     clearMessages,
     user,
     chatClient,
+    channels,
+    activeChannel,
+    setActiveChannel,
     setCurrentUserStatus,
   };
 
