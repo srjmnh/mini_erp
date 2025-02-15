@@ -1,8 +1,3 @@
-# Environment variables
-!.env.example
-*/.env
-*/.env.*
-
 # Python
 __pycache__/
 *.py[cod]
@@ -64,7 +59,7 @@ build/
 .DS_Store
 *.log
 
-# OS files
+# OS
 .DS_Store
 .DS_Store?
 ._*
