@@ -25,5 +25,6 @@ dist-ssr
 *.sw?
 
 # Environment variables
-.env.local
-.env.*.local
+# Removed .env from gitignore as requested
+# .env.local
+# .env.*.local
