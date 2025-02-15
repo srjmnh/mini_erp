@@ -1,14 +1,7 @@
 # Environment variables
-.env
-.env.*
 !.env.example
 */.env
 */.env.*
-apis.txt
-**/credentials.*
-**/firebase-adminsdk*.json
-.firebase/
-firebase-debug.log
 
 # Python
 __pycache__/
@@ -80,3 +73,9 @@ build/
 ehthumbs.db
 Thumbs.db
 frontend/service-account.json
+
+apis.txt
+**/credentials.*
+**/firebase-adminsdk*.json
+.firebase/
+firebase-debug.log
