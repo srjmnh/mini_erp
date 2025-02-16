@@ -1,70 +1,79 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StreamChat, Channel } from 'stream-chat';
+import { StreamVideoClient } from '@stream-io/video-client';
 import {
   Box,
-  IconButton,
   Typography,
   Menu,
   MenuItem,
   ListItemIcon,
   ListItemText,
-  TextField,
-  Button,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
+  TextField,
   List,
   ListItem,
-  ListItemButton,
+  ListItemAvatar,
   Paper,
   Divider,
   Checkbox,
-  Chip,
+  Badge,
+  Button,
   Drawer,
   LinearProgress,
   Switch,
   Popover,
   CircularProgress,
-  Badge,
-  Tooltip,
+  Autocomplete,
+  Chip,
+  InputAdornment,
+  ListItemButton,
+  IconButton,
+  ListItemSecondaryAction,
   Avatar,
   AvatarGroup,
-  ListItemAvatar,
-  Autocomplete,
-  InputAdornment,
   Collapse
 } from '@mui/material';
-
 import {
-  Chat as ChatIcon,
+  Close as CloseIcon,
   Send as SendIcon,
-  AttachFile as AttachFileIcon,
-  CircleOutlined,
-  CheckCircleOutline,
-  RemoveCircleOutline,
-  Group as GroupIcon,
-  Person as PersonIcon,
   Add as AddIcon,
-  MoreVert as MoreVertIcon,
+  Search as SearchIcon,
+  Group as GroupIcon,
+  PushPin as PushPinIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  AddReaction as AddReactionIcon,
-  ChatBubbleOutline as ChatBubbleOutlineIcon,
-  Close as CloseIcon,
-  InsertDriveFile as InsertDriveFileIcon,
-  Download as DownloadIcon,
-  PictureAsPdf as PictureAsPdfIcon,
-  Image as ImageIcon,
-  Description as DescriptionIcon,
-  Visibility as VisibilityIcon,
-  ContentCopy as ContentCopyIcon,
-  Check as CheckIcon,
+  Call as CallIcon,
+  Videocam as VideocamIcon,
+  CallEnd as CallEndIcon,
+  Mic as MicIcon,
+  MicOff as MicOffIcon,
+  Videocam as VideoIcon,
+  VideocamOff as VideoOffIcon,
+  MoreVert as MoreVertIcon,
+  Reply as ReplyIcon,
   Forward as ForwardIcon,
-  PushPin as PushPinIcon,
-  ExpandLess as ExpandLessIcon,
-  ExpandMore as ExpandMoreIcon,
-  Settings as SettingsIcon
+  InsertEmoticon as EmojiIcon,
+  AttachFile as AttachFileIcon,
+  Visibility as VisibilityIcon,
+  Settings as SettingsIcon,
+  PictureAsPdf as PictureAsPdfIcon,
+  InsertDriveFile as InsertDriveFileIcon,
+  Image as ImageIcon,
+  VideoFile as VideoFileIcon,
+  AudioFile as AudioFileIcon,
+  Description as DescriptionIcon,
+  Chat as ChatIcon,
+  RadioButtonUnchecked as CircleOutlined,
+  Archive as ArchiveIcon,
+  Movie as MovieIcon,
+  Download as DownloadIcon,
+  ContentCopy as ContentCopyIcon,
+  Person as PersonIcon,
+  AddReaction as AddReactionIcon,
+  ChatBubbleOutline as ChatBubbleOutlineIcon
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@mui/material/styles';
@@ -72,7 +81,6 @@ import { useSnackbar } from 'notistack'; // Add this line
 import Message from './Message';
 import FileMessage from './FileMessage';
 import NewChatDialog from './NewChatDialog';
-import GroupChatDialog from './GroupChatDialog';
 import axios from 'axios';
 import { format, isToday, isYesterday } from 'date-fns';
 import { uploadChatFile } from '@/services/supabaseStorage';
@@ -148,7 +156,7 @@ const isMessageEdited = (msg: any) => {
     new Date(msg.updated_at).getTime() > new Date(msg.created_at).getTime() + 1000; // 1 second buffer
 };
 
-export default function StreamChatPopover() {
+const StreamChatPopover: React.FC = () => {
   const { user } = useAuth();
   const theme = useTheme();
   const { enqueueSnackbar } = useSnackbar();
@@ -168,6 +176,7 @@ export default function StreamChatPopover() {
   const [chatClient, setChatClient] = useState<StreamChat | null>(null);
   const [channel, setChannel] = useState<Channel | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
@@ -205,6 +214,13 @@ export default function StreamChatPopover() {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState<any[]>([]);
   const [showPinnedMessages, setShowPinnedMessages] = useState(false);
+  const [isCallActive, setIsCallActive] = useState(false);
+  const [isVideoCall, setIsVideoCall] = useState(false);
+  const [callDialog, setCallDialog] = useState(false);
+  const [isCaller, setIsCaller] = useState(false);
+  const [isReceivingCall, setIsReceivingCall] = useState(false);
+  const [videoClient, setVideoClient] = useState<StreamVideoClient | null>(null);
+  const [call, setCall] = useState<any>(null);
 
   // Refs
   const channelsRef = React.useRef<Channel[]>([]);
@@ -555,7 +571,7 @@ export default function StreamChatPopover() {
         body: JSON.stringify({
           userId: employeeId,
           email: employee.email,
-          name: employee.name,
+          name: employee.name || employee.email,
           image: employee.photoURL,
         }),
       });
@@ -829,11 +845,33 @@ export default function StreamChatPopover() {
 
   // Add function to create new chat and forward
   const handleCreateNewChatAndForward = async () => {
+    if (!chatClient || !user?.email || !forwardMessage) {
+      console.error('Missing required data:', { chatClient: !!chatClient, userEmail: !!user?.email, forwardMessage: !!forwardMessage });
+      return;
+    }
+
     try {
-      const newChannel = await chatClient?.channel('messaging', {
-        members: [...newChatUsers, chatClient.userID],
+      const channelId = `chat_${Date.now()}`;
+      const members = [
+        ...newChatUsers.map(u => u.email.replace(/[.@]/g, '_')),
+        user.email.replace(/[.@]/g, '_')
+      ];
+
+      console.log('Creating new channel with members:', members);
+
+      // Create the channel
+      const newChannel = chatClient.channel('messaging', channelId, {
+        members,
+        created_by: user.email.replace(/[.@]/g, '_'),
+        data: {
+          config: {
+            commands: ['giphy']
+          }
+        }
       });
-      await newChannel?.watch();
+
+      await newChannel.create();
+      await newChannel.watch();
       
       const sourceChannel = channels.find(ch => ch.id === channel?.id);
       const sourceChatName = sourceChannel ? getChannelDisplayName() : 'Unknown Chat';
@@ -847,13 +885,13 @@ export default function StreamChatPopover() {
         attachments: forwardMessage.attachments,
         mentioned_users: [],
         user: {
-          id: user?.email?.replace(/[.@]/g, '_') || '',
-          name: user?.displayName || '',
-          image: user?.photoURL
+          id: user.email.replace(/[.@]/g, '_'),
+          name: user.displayName || user.email,
+          image: user.photoURL
         }
       };
 
-      await newChannel?.sendMessage(messageData);
+      await newChannel.sendMessage(messageData);
       
       setShowNewChatDialog(false);
       setForwardDialogOpen(false);
@@ -861,63 +899,516 @@ export default function StreamChatPopover() {
       setForwardComment('');
       setSelectedChannels([]);
       setNewChatUsers([]);
-      loadChannels();
+      await loadChannels();
+
+      console.log('Successfully created new chat and forwarded message');
     } catch (error) {
       console.error('Error creating new chat and forwarding:', error);
+      enqueueSnackbar('Failed to create chat and forward message', { variant: 'error' });
     }
   };
+
+  // Handle creating a new chat
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
+  const [selectedNewChatUser, setSelectedNewChatUser] = useState<Employee | null>(null);
+
+  const handleCreateNewChat = async () => {
+    if (!chatClient || !user?.email || !selectedNewChatUser) {
+      console.error('Missing required data:', { 
+        chatClient: !!chatClient, 
+        userEmail: !!user?.email,
+        selectedUser: !!selectedNewChatUser 
+      });
+      return;
+    }
+
+    try {
+      setIsCreatingChat(true);
+
+      // Create or update both users first
+      const currentUserId = user.email.replace(/[.@]/g, '_');
+      const otherUserId = selectedNewChatUser.email.replace(/[.@]/g, '_');
+
+      console.log('Creating chat with users:', {
+        currentUser: {
+          id: currentUserId,
+          email: user.email,
+          name: user.displayName || user.email.split('@')[0],
+        },
+        otherUser: {
+          id: otherUserId,
+          email: selectedNewChatUser.email,
+          name: selectedNewChatUser.name || selectedNewChatUser.email.split('@')[0],
+        }
+      });
+
+      // Create the users via backend
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/stream/create-chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentUser: {
+            id: currentUserId,
+            email: user.email,
+            name: user.displayName || user.email.split('@')[0],
+            image: user.photoURL,
+          },
+          otherUser: {
+            id: otherUserId,
+            email: selectedNewChatUser.email,
+            name: selectedNewChatUser.name || selectedNewChatUser.email.split('@')[0],
+            image: selectedNewChatUser.photoURL,
+          },
+        }),
+      });
+
+      const responseData = await response.json();
+      
+      if (!response.ok) {
+        console.error('Backend error:', responseData);
+        throw new Error(responseData.error || 'Failed to create users and chat');
+      }
+
+      const { channelId } = responseData;
+      console.log('Channel created with ID:', channelId);
+      
+      // Get the channel
+      const newChannel = chatClient.channel('messaging', channelId);
+      await newChannel.watch();
+      
+      // Set the channel and close dialog
+      setShowNewChatDialog(false);
+      setSelectedNewChatUser(null);
+      
+      // Load channels first to ensure the new channel is in the list
+      await loadChannels();
+      
+      // Then set the active channel
+      setChannel(newChannel);
+      setActiveChat(channelId);
+      
+      console.log('Successfully created new chat');
+      enqueueSnackbar('Chat created successfully', { variant: 'success' });
+    } catch (error) {
+      console.error('Error creating new chat:', error);
+      enqueueSnackbar(error.message || 'Failed to create chat', { variant: 'error' });
+    } finally {
+      setIsCreatingChat(false);
+    }
+  };
+
+  // New chat dialog component
+  const NewChatDialogComponent = () => (
+    <Dialog 
+      open={showNewChatDialog} 
+      onClose={() => {
+        setShowNewChatDialog(false);
+        setSelectedNewChatUser(null);
+      }}
+      maxWidth="sm"
+      fullWidth
+    >
+      <DialogTitle>New Chat</DialogTitle>
+      <DialogContent>
+        <Autocomplete
+          options={employees}
+          getOptionLabel={(option) => option.name || option.email}
+          value={selectedNewChatUser}
+          onChange={(_, value) => setSelectedNewChatUser(value)}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              autoFocus
+              margin="dense"
+              label="Select a person"
+              fullWidth
+              variant="outlined"
+            />
+          )}
+          renderOption={(props, option) => (
+            <Box component="li" {...props}>
+              <ListItemAvatar>
+                <Avatar src={option.photoURL} alt={option.name}>
+                  {option.name?.[0] || option.email?.[0]}
+                </Avatar>
+              </ListItemAvatar>
+              <ListItemText 
+                primary={option.name || option.email}
+                secondary={option.position || option.email}
+              />
+            </Box>
+          )}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => {
+          setShowNewChatDialog(false);
+          setSelectedNewChatUser(null);
+        }}>
+          Cancel
+        </Button>
+        <Button 
+          onClick={handleCreateNewChat} 
+          disabled={!selectedNewChatUser || isCreatingChat}
+          variant="contained"
+        >
+          {isCreatingChat ? (
+            <>
+              Creating... <CircularProgress size={16} sx={{ ml: 1 }} />
+            </>
+          ) : (
+            'Start Chat'
+          )}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+
+  // Consolidated group chat creation function
+  const handleCreateGroupChat = async (selectedUsers: Employee[], groupName: string) => {
+    try {
+      setIsLoading(true);
+      const members = [...selectedUsers.map(user => user.email.replace(/[.@]/g, '_')), user.email.replace(/[.@]/g, '_')];
+      const channelId = `group-${Date.now()}`;
+
+      // Create users through backend API
+      for (const selectedUser of selectedUsers) {
+        try {
+          const response = await fetch('http://localhost:3001/api/stream/create-user', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              userId: selectedUser.email.replace(/[.@]/g, '_'),
+              name: selectedUser.displayName || selectedUser.email,
+              email: selectedUser.email,
+              image: selectedUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedUser.displayName || selectedUser.email)}`
+            }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Failed to create user ${selectedUser.email}`);
+          }
+        } catch (error) {
+          console.error(`Error creating user ${selectedUser.email}:`, error);
+          throw new Error(`Failed to create user ${selectedUser.email}`);
+        }
+      }
+
+      // Create the channel after ensuring all users exist
+      const newChannel = chatClient.channel('team', channelId, {
+        name: groupName,
+        members,
+        created_by: {
+          id: user.email.replace(/[.@]/g, '_'),
+          name: user.displayName || user.email
+        },
+        image: `https://ui-avatars.com/api/?name=${encodeURIComponent(groupName)}&background=random`,
+        data: {
+          members: selectedUsers.reduce((acc, member) => ({
+            ...acc,
+            [member.email.replace(/[.@]/g, '_')]: {
+              name: member.displayName || member.email,
+              image: member.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(member.displayName || member.email)}`
+            }
+          }), {
+            [user.email.replace(/[.@]/g, '_')]: {
+              name: user.displayName || user.email,
+              image: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || user.email)}`
+            }
+          })
+        }
+      });
+
+      await newChannel.watch();
+      
+      // Send initial message
+      await newChannel.sendMessage({
+        text: `👋 ${user.displayName || user.email} created the group "${groupName}"`,
+        user: {
+          id: user.email.replace(/[.@]/g, '_'),
+          name: user.displayName || user.email
+        }
+      });
+
+      handleCloseGroupDialog();
+      setActiveChannel(newChannel);
+    } catch (error) {
+      console.error('Error creating group chat:', error);
+      enqueueSnackbar(error.message || 'Error creating group chat', { variant: 'error' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Consolidated group chat dialog component
+  const GroupChatDialog = React.memo(({ open, onClose }: any) => {
+    const [groupName, setGroupName] = useState('');
+    const [selectedMembers, setSelectedMembers] = useState<Employee[]>([]);
+    const [searchQuery, setSearchQuery] = useState('');
+
+    const filteredEmployees = employees.filter(emp => 
+      emp.email !== user?.email && // Don't show current user
+      (emp.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+       emp.email.toLowerCase().includes(searchQuery.toLowerCase()))
+    );
+
+    const handleCreateGroup = async () => {
+      if (!groupName.trim() || selectedMembers.length === 0) return;
+      
+      await handleCreateGroupChat(selectedMembers, groupName);
+      onClose();
+    };
+
+    const handleClose = () => {
+      onClose();
+      setGroupName('');
+      setSelectedMembers([]);
+      setSearchQuery('');
+    };
+
+    return (
+      <Dialog 
+        open={open} 
+        onClose={handleClose}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Create Group Chat</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Group Name"
+            fullWidth
+            variant="outlined"
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+          
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Search Employees
+          </Typography>
+          
+          <TextField
+            fullWidth
+            variant="outlined"
+            placeholder="Search by name or email"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon />
+                </InputAdornment>
+              ),
+            }}
+            sx={{ mb: 2 }}
+          />
+
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+              Selected Members ({selectedMembers.length})
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              {selectedMembers.map((member) => (
+                <Chip
+                  key={member.email}
+                  label={member.name || member.email}
+                  onDelete={() => setSelectedMembers(prev => prev.filter(m => m.email !== member.email))}
+                  avatar={
+                    <Avatar 
+                      src={member.photoURL} 
+                      alt={member.name || member.email}
+                    >
+                      {member.name?.[0] || member.email[0]}
+                    </Avatar>
+                  }
+                />
+              ))}
+            </Box>
+          </Box>
+
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Available Members
+          </Typography>
+          <List sx={{ maxHeight: 200, overflowY: 'auto' }}>
+            {filteredEmployees.map((employee) => (
+              <ListItem
+                key={employee.email}
+                disablePadding
+                secondaryAction={
+                  <Checkbox
+                    edge="end"
+                    checked={selectedMembers.some(m => m.email === employee.email)}
+                    onChange={() => {
+                      setSelectedMembers(prev => {
+                        const exists = prev.some(m => m.email === employee.email);
+                        return exists
+                          ? prev.filter(m => m.email !== employee.email)
+                          : [...prev, employee];
+                      });
+                    }}
+                  />
+                }
+              >
+                <ListItemButton onClick={() => {
+                  setSelectedMembers(prev => {
+                    const exists = prev.some(m => m.email === employee.email);
+                    return exists
+                      ? prev.filter(m => m.email !== employee.email)
+                      : [...prev, employee];
+                  });
+                }}>
+                  <ListItemAvatar>
+                    <Avatar src={employee.photoURL} alt={employee.name || employee.email}>
+                      {employee.name?.[0] || employee.email[0]}
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText 
+                    primary={employee.name || employee.email}
+                    secondary={employee.position || employee.email}
+                  />
+                </ListItemButton>
+              </ListItem>
+            ))}
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleClose}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleCreateGroup}
+            disabled={!groupName.trim() || selectedMembers.length === 0 || isLoading}
+            variant="contained"
+          >
+            {isLoading ? (
+              <>
+                Creating... <CircularProgress size={16} sx={{ ml: 1 }} />
+              </>
+            ) : (
+              'Create Group'
+            )}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    );
+  });
 
   // Initialize chat client
   useEffect(() => {
     const initChat = async () => {
-      if (!user?.email) return;
+      if (!user?.email) {
+        console.log('No user email available');
+        return;
+      }
 
       try {
-        const userId = user.email.replace(/[.@]/g, '_');
-        console.log('Initializing chat with user:', user);
-        
+        console.log('Initializing chat...');
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/stream/token`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            userId,
+            userId: user.email.replace(/[.@]/g, '_'),
             email: user.email,
             name: user.name || user.email.split('@')[0],
             image: user.photoURL,
           }),
         });
 
-        const { token } = await response.json();
-        const client = StreamChat.getInstance(import.meta.env.VITE_STREAM_API_KEY);
-        
-        // Connect user
-        await client.connectUser(
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('Got token response:', data);
+
+        if (!data.token) {
+          throw new Error('No token in response');
+        }
+
+        // Initialize chat client
+        const chatClient = StreamChat.getInstance(import.meta.env.VITE_STREAM_API_KEY!);
+        await chatClient.connectUser(
           {
-            id: userId,
+            id: user.email.replace(/[.@]/g, '_'),
             name: user.name || user.email.split('@')[0],
-            email: user.email,
             image: user.photoURL,
           },
-          token
+          data.token
         );
+        console.log('Chat client connected');
+        setChatClient(chatClient);
 
-        setChatClient(client);
-        setIsConnected(true);
       } catch (error) {
-        console.error('Error initializing chat:', error);
-        setIsConnected(false);
+        console.error('Error initializing chat client:', error);
+        if (chatClient) {
+          chatClient.disconnectUser();
+          setChatClient(null);
+        }
       }
     };
 
     initChat();
+
     return () => {
       if (chatClient) {
         chatClient.disconnectUser();
+        setChatClient(null);
       }
     };
   }, [user]);
+
+  // Initialize Stream Video client separately
+  useEffect(() => {
+    if (!chatClient?.tokenManager?.token || !user?.email) {
+      console.log('Waiting for chat client and token...');
+      return;
+    }
+
+    const initVideo = async () => {
+      try {
+        console.log('Initializing video client...');
+        const token = chatClient.tokenManager.token;
+        const userId = user.email.replace(/[.@]/g, '_');
+
+        const videoClient = new StreamVideoClient({
+          apiKey: import.meta.env.VITE_STREAM_API_KEY!,
+          token,
+          user: {
+            id: userId,
+            name: user.name || user.email.split('@')[0],
+            image: user.photoURL || undefined,
+          },
+        });
+
+        // Don't call connectUser() since the token is already connected
+        setVideoClient(videoClient);
+        console.log('Video client initialized');
+
+      } catch (error) {
+        console.error('Error initializing video client:', error);
+        setVideoClient(null);
+      }
+    };
+
+    initVideo();
+
+    return () => {
+      if (videoClient) {
+        videoClient.disconnectUser();
+        setVideoClient(null);
+      }
+    };
+  }, [chatClient?.tokenManager?.token, user]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -978,7 +1469,7 @@ export default function StreamChatPopover() {
     // Set up message listener for current channel only
     const handleNewMessage = (event: any) => {
       const { message } = event;
-      // Only add to messages if it's not a thread reply
+      // Only add to messages if it's not a thread reply and not already in the list
       if (!message.parent_id) {
         setMessages(prev => {
           // Check if message already exists
@@ -986,6 +1477,11 @@ export default function StreamChatPopover() {
           if (messageExists) return prev;
           return [...prev, message];
         });
+
+        // Update channel in list to reflect new message
+        if (message.user?.id !== chatClient?.userID) {
+          updateChannelInList(channel, true);
+        }
       }
     };
 
@@ -995,7 +1491,7 @@ export default function StreamChatPopover() {
     return () => {
       channel.off('message.new', handleNewMessage);
     };
-  }, [chatClient, channel]);
+  }, [chatClient, channel, updateChannelInList]);
 
   // Add typing event handlers
   useEffect(() => {
@@ -1409,7 +1905,7 @@ export default function StreamChatPopover() {
         const { message: newMessage } = event;
         if (newMessage?.parent_id === threadId) {
           setThreadReplies(prev => {
-            // Check if message already exists to avoid duplicates
+            // Check if message already exists
             const exists = prev.some(msg => msg.id === newMessage.id);
             if (!exists) {
               return [...prev, newMessage];
@@ -1518,11 +2014,25 @@ export default function StreamChatPopover() {
     </Popover>
   );
 
-  const getFileIcon = (mimeType: string) => {
-    if (mimeType.startsWith('image/')) return <ImageIcon />;
-    if (mimeType.includes('pdf')) return <PictureAsPdfIcon />;
-    if (mimeType.includes('word') || mimeType.includes('document')) return <DescriptionIcon />;
-    return <InsertDriveFileIcon />;
+  const getFileIcon = (mimeType?: string) => {
+    if (!mimeType) return <InsertDriveFileIcon sx={{ fontSize: 40 }} />;
+    
+    if (mimeType.includes('pdf')) {
+      return <PictureAsPdfIcon sx={{ fontSize: 40, color: '#e94040' }} />;
+    }
+    if (mimeType.includes('image')) {
+      return <ImageIcon sx={{ fontSize: 40, color: '#4CAF50' }} />;
+    }
+    if (mimeType.includes('video')) {
+      return <VideoFileIcon sx={{ fontSize: 40, color: '#2196F3' }} />;
+    }
+    if (mimeType.includes('audio')) {
+      return <AudioFileIcon sx={{ fontSize: 40, color: '#9C27B0' }} />;
+    }
+    if (mimeType.includes('text')) {
+      return <DescriptionIcon sx={{ fontSize: 40, color: '#607D8B' }} />;
+    }
+    return <InsertDriveFileIcon sx={{ fontSize: 40, color: '#757575' }} />;
   };
 
   const formatFileSize = (bytes: number) => {
@@ -1533,67 +2043,250 @@ export default function StreamChatPopover() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  if (!chatClient) {
-    return null;
-  }
+  const handleStartCall = async (isVideo: boolean = false) => {
+    if (!videoClient || !channel || !user?.email) return;
 
-  // Add the function inside the component to access chatClient
+    try {
+      // Create a new call
+      const callId = `${channel.id}-${Date.now()}`;
+      console.log('Starting call...', { callId, isVideo });
+      
+      // Get channel members and format them as objects
+      const members = Object.entries(channel.state.members).map(([id, member]) => ({
+        user_id: id,
+        role: 'call_member'
+      }));
+      console.log('Call members:', members);
+
+      const newCall = videoClient.call('default', callId);
+      const callData = await newCall.getOrCreate({
+        data: { members }
+      });
+      console.log('Call created with data:', callData);
+      
+      // Set call state
+      setCall(newCall);
+      setIsVideoCall(isVideo);
+      setCallDialog(true);
+      setIsCaller(true);
+
+      // Send call start message
+      await channel.sendMessage({
+        text: `${isVideo ? 'Video' : 'Voice'} call`,
+        type: 'regular',
+        data: {
+          isCall: true,
+          callStatus: 'started',
+          callId,
+          callType: isVideo ? 'video' : 'audio',
+          callerId: user.email.replace(/[.@]/g, '_'),
+          members
+        }
+      });
+
+      // Join the call with proper settings
+      await newCall.join({
+        camera: isVideo,
+        microphone: true,
+        speaker: true
+      });
+      
+      setIsCallActive(true);
+      console.log('Call started and joined');
+    } catch (error) {
+      console.error('Error starting call:', error);
+      handleEndCall();
+    }
+  };
+
+  const handleAcceptCall = async () => {
+    console.log('Accepting call...', { call });
+    if (!call) {
+      console.error('No call to accept');
+      return;
+    }
+
+    try {
+      // Accept and join the call with proper settings
+      await call.accept();
+      await call.join({
+        camera: isVideoCall,
+        microphone: true,
+        speaker: true
+      });
+      
+      console.log('Call accepted and joined');
+      
+      // Update UI state
+      setIsCallActive(true);
+      setIsCaller(false);
+    } catch (error) {
+      console.error('Error accepting call:', error);
+      handleEndCall();
+    }
+  };
+
+  const handleEndCall = async () => {
+    console.log('Ending call...', { call, isCallActive });
+    if (!call) {
+      console.log('No active call to end');
+      setCallDialog(false);
+      setIsCallActive(false);
+      setIsCaller(false);
+      return;
+    }
+
+    try {
+      // Only try to leave if the call is active and we're still connected
+      if (isCallActive && call.state.status === 'connected') {
+        console.log('Leaving active call...');
+        await call.leave();
+        console.log('Left call successfully');
+      } else {
+        console.log('Call already ended or not connected');
+      }
+
+      // Send end message only if we have a channel
+      if (channel) {
+        try {
+          await channel.sendMessage({
+            text: 'Call ended',
+            type: 'regular',
+            data: {
+              isCall: true,
+              callStatus: 'ended',
+              callId: call.id,
+            }
+          });
+          console.log('Sent call end message');
+        } catch (error) {
+          console.error('Error sending call end message:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Error ending call:', error);
+    } finally {
+      // Always clean up state
+      setCallDialog(false);
+      setIsCallActive(false);
+      setIsCaller(false);
+      setCall(null);
+      setLocalAudioLevel(0);
+      setRemoteAudioLevel(0);
+    }
+  };
+
+  // Handle incoming call messages
+  useEffect(() => {
+    if (!channel || !videoClient || !user?.email) return;
+
+    const handleNewMessage = async (event: any) => {
+      const message = event.message;
+      if (!message.data?.isCall) return;
+
+      console.log('Received call message:', message);
+      const { callStatus, callId, callType, callerId, members } = message.data;
+
+      // Ignore our own messages
+      if (callerId === user.email.replace(/[.@]/g, '_')) return;
+
+      try {
+        if (callStatus === 'started' && !call) {
+          console.log('Incoming call...', { callId, callType, members });
+          const incomingCall = videoClient.call('default', callId);
+          const callData = await incomingCall.getOrCreate({
+            data: { members }
+          });
+          console.log('Retrieved call data:', callData);
+          
+          setCall(incomingCall);
+          setIsVideoCall(callType === 'video');
+          setCallDialog(true);
+          setIsCaller(false);
+        } else if (callStatus === 'ended' && call?.id === callId) {
+          console.log('Call ended by other participant');
+          // Don't try to leave again, just clean up
+          setCallDialog(false);
+          setIsCallActive(false);
+          setIsCaller(false);
+          setCall(null);
+          setLocalAudioLevel(0);
+          setRemoteAudioLevel(0);
+        }
+      } catch (error) {
+        console.error('Error handling call message:', error);
+        // Clean up on error
+        setCallDialog(false);
+        setIsCallActive(false);
+        setIsCaller(false);
+        setCall(null);
+        setLocalAudioLevel(0);
+        setRemoteAudioLevel(0);
+      }
+    };
+
+    channel.on('message.new', handleNewMessage);
+    return () => {
+      channel.off('message.new', handleNewMessage);
+    };
+  }, [channel, videoClient, user, call]);
+
+  const getChannelAvatar = () => {
+    if (!channel) return null;
+    
+    if (channel.data?.type === 'team') {
+      return channel.data?.image || <GroupIcon />;
+    }
+
+    // For DMs, get the other user's avatar
+    const otherMember = Object.entries(channel.data?.members || {})
+      .filter(([id]) => id !== chatClient?.userID)
+      .map(([_, member]: [string, any]) => member.user)[0];
+
+    if (otherMember?.image) {
+      return otherMember.image;
+    }
+
+    // Use first letter of name or email
+    if (otherMember?.name) {
+      return otherMember.name[0].toUpperCase();
+    }
+    if (otherMember?.id) {
+      return otherMember.id.replace(/_/g, '.')[0].toUpperCase();
+    }
+
+    return '?';
+  };
+
   const getChannelDisplayName = () => {
     if (!channel) return '';
     
     // For group chats, use channel name
     if (channel.data?.type === 'team') {
-      return channel.data?.name || 'Group Chat';
+      const name = channel.data?.name;
+      return name || 'Unnamed Group';
     }
 
     // For DMs, show the other person's name and info
     if (channel.data?.type === 'messaging') {
+      // First try to get from channel members
       const otherMember = Object.entries(channel.data?.members || {})
         .filter(([id]) => id !== chatClient?.userID)
         .map(([_, member]: [string, any]) => member.user)[0];
-      
-      if (otherMember) {
-        const position = otherMember.position || '';
-        const name = otherMember.name || otherMember.id;
+
+      if (otherMember?.name || otherMember?.id) {
+        const name = otherMember.name || otherMember.id.replace(/_/g, '.'); // Convert back from Stream Chat ID format
+        const position = otherMember.position;
         return position ? `${name} (${position})` : name;
+      }
+
+      // Fallback to channel name if available
+      if (channel.data?.name) {
+        return channel.data.name;
       }
     }
 
-    return 'Chat';
-  };
-
-  // Add function to query users
-  const queryUsers = async () => {
-    if (!chatClient) return;
-    
-    try {
-      setLoadingUsers(true);
-      const response = await chatClient.queryUsers(
-        { id: { $ne: chatClient.userID } },
-        { name: 1 },
-        { limit: 100 }
-      );
-      
-      const usersMap = response.users.reduce((acc: { [key: string]: any }, user: any) => {
-        acc[user.id] = user;
-        return acc;
-      }, {});
-      
-      setUsers(usersMap);
-    } catch (error) {
-      console.error('Error querying users:', error);
-    } finally {
-      setLoadingUsers(false);
-    }
-  };
-
-  // Add function to get recent channels
-  const getRecentChannels = () => {
-    // Filter out the current channel from the forward options
-    const otherChannels = channels.filter(ch => ch.id !== channel?.id);
-    
-    // Sort by last message time, handling undefined cases
-    return sortChannels(otherChannels);
+    return 'Loading...';
   };
 
   const renderMessage = (message: any) => {
@@ -1620,114 +2313,20 @@ export default function StreamChatPopover() {
           <Paper 
             variant="outlined" 
             sx={{ 
-              p: 1.5,
-              bgcolor: isCurrentUser ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.04)',
-              borderLeft: '4px solid',
-              borderLeftColor: isCurrentUser ? 'rgba(255, 255, 255, 0.5)' : 'primary.main',
-              borderRadius: 1,
-              '& *': {
-                borderColor: isCurrentUser ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.12)'
-              }
+              mt: 1,
+              maxHeight: '200px',
+              overflowY: 'auto',
+              bgcolor: 'grey.50',
+              p: 1
             }}
           >
-            <Typography 
-              variant="caption" 
-              sx={{ 
-                display: 'block', 
-                mb: 1,
-                color: isCurrentUser ? 'rgba(255, 255, 255, 0.7)' : 'text.secondary',
-                '& .MuiSvgIcon-root': {
-                  color: isCurrentUser ? 'rgba(255, 255, 255, 0.7)' : 'action.active'
-                }
-              }}
-            >
-              <ForwardIcon sx={{ fontSize: '1rem', mr: 0.5, verticalAlign: 'text-bottom' }} />
-              Forwarded message from{headerPart}
-            </Typography>
-            <Typography 
-              variant="body1"
-              sx={{
-                color: isCurrentUser ? 'common.white' : 'text.primary',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word'
-              }}
-            >
-              {messagePart}
-            </Typography>
-            {message.attachments?.length > 0 && (
-              <Box sx={{ mt: 1 }}>
-                {message.attachments.map((attachment, index) => (
-                  <Box
-                    key={index}
-                    onClick={() => handleFilePreview(attachment)}
-                    sx={{
-                      cursor: 'pointer',
-                      '&:hover': {
-                        bgcolor: isCurrentUser 
-                          ? 'rgba(255, 255, 255, 0.25)' 
-                          : 'rgba(0, 0, 0, 0.08)',
-                      },
-                      borderRadius: 1,
-                      overflow: 'hidden',
-                      mt: 1,
-                    }}
-                  >
-                    {attachment.mime_type?.startsWith('image/') ? (
-                      <Box sx={{ position: 'relative' }}>
-                        <img 
-                          src={attachment.asset_url} 
-                          alt={attachment.title}
-                          style={{ 
-                            maxWidth: '100%', 
-                            maxHeight: 200, 
-                            borderRadius: 4,
-                            cursor: 'pointer'
-                          }}
-                        />
-                      </Box>
-                    ) : (
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1,
-                          p: 1,
-                          bgcolor: 'rgba(0, 0, 0, 0.04)',
-                        }}
-                      >
-                        {attachment.mime_type?.includes('pdf') ? (
-                          <PictureAsPdfIcon sx={{ fontSize: 40 }} />
-                        ) : (
-                          getFileIcon(attachment.mime_type)
-                        )}
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Typography 
-                            variant="body2" 
-                            noWrap
-                            sx={{
-                              color: 'rgba(0, 0, 0, 0.87)'
-                            }}
-                          >
-                            {attachment.title}
-                          </Typography>
-                          <Typography 
-                            variant="caption" 
-                            sx={{
-                              color: 'rgba(0, 0, 0, 0.6)'
-                            }}
-                          >
-                            {formatFileSize(attachment.file_size || 0)}
-                          </Typography>
-                        </Box>
-                        <VisibilityIcon sx={{
-                          color: 'rgba(0, 0, 0, 0.54)'
-                        }} />
-                      </Box>
-                    )}
-                  </Box>
-                ))}
-              </Box>
-            )}
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <PushPinIcon sx={{ fontSize: 16, color: 'text.secondary', mr: 1 }} />
+              <Typography variant="caption" color="text.secondary">
+                Forwarded message from {headerPart}
+              </Typography>
+            </Box>
+            <Typography>{messagePart}</Typography>
           </Paper>
         </Box>
       );
@@ -1775,43 +2374,18 @@ export default function StreamChatPopover() {
                     />
                   </Box>
                 ) : (
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 1,
-                      p: 1,
-                      bgcolor: 'rgba(0, 0, 0, 0.04)',
-                    }}
-                  >
-                    {attachment.mime_type?.includes('pdf') ? (
-                      <PictureAsPdfIcon sx={{ fontSize: 40 }} />
-                    ) : (
-                      getFileIcon(attachment.mime_type)
-                    )}
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography 
-                        variant="body2" 
-                        noWrap
-                        sx={{
-                          color: 'rgba(0, 0, 0, 0.87)'
-                        }}
-                      >
-                        {attachment.title}
-                      </Typography>
-                      <Typography 
-                        variant="caption" 
-                        sx={{
-                          color: 'rgba(0, 0, 0, 0.6)'
-                        }}
-                      >
-                        {formatFileSize(attachment.file_size || 0)}
-                      </Typography>
-                    </Box>
-                    <VisibilityIcon sx={{
-                      color: 'rgba(0, 0, 0, 0.54)'
-                    }} />
-                  </Box>
+                  getFileIcon(attachment.mime_type)
+                )}
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="body2" noWrap>{attachment.title}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {formatFileSize(attachment.file_size || 0)}
+                  </Typography>
+                </Box>
+                {attachment.mime_type?.startsWith('image/') && (
+                  <IconButton size="small" onClick={() => handleFilePreview(attachment)}>
+                    <VisibilityIcon />
+                  </IconButton>
                 )}
               </Box>
             ))}
@@ -1935,12 +2509,395 @@ export default function StreamChatPopover() {
     }
   };
 
+  const queryUsers = async () => {
+    if (!chatClient) return;
+    
+    try {
+      setLoadingUsers(true);
+      const response = await chatClient.queryUsers(
+        { id: { $ne: chatClient.userID } },
+        { name: 1 },
+        { limit: 100 }
+      );
+
+      const usersMap = response.users.reduce((acc: { [key: string]: any }, user: any) => {
+        acc[user.id] = user;
+        return acc;
+      }, {});
+      
+      setUsers(usersMap);
+    } catch (error) {
+      console.error('Error querying users:', error);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  const getRecentChannels = () => {
+    // Filter out the current channel from the forward options
+    const otherChannels = channels.filter(ch => ch.id !== channel?.id);
+    
+    // Sort by last message time, handling undefined cases
+    return sortChannels(otherChannels);
+  };
+
+  // Voice activity state
+  const [localAudioLevel, setLocalAudioLevel] = useState<number>(0);
+  const [remoteAudioLevel, setRemoteAudioLevel] = useState<number>(0);
+
+  // Monitor audio levels
+  useEffect(() => {
+    if (!call || !isCallActive) return;
+
+    const updateAudioLevels = () => {
+      try {
+        // Get local participant's audio level
+        const localParticipant = call.state.localParticipant;
+        if (localParticipant?.publishedTracks?.audio) {
+          const audioLevel = call.getAudioLevelForParticipant(localParticipant.sessionId) || 0;
+          setLocalAudioLevel(Math.min(audioLevel * 200, 100));
+        }
+
+        // Get remote participant's audio level
+        const remoteParticipant = Object.values(call.state.participants).find(
+          p => p.userId !== user!.email.replace(/[.@]/g, '_')
+        );
+        if (remoteParticipant?.publishedTracks?.audio) {
+          const audioLevel = call.getAudioLevelForParticipant(remoteParticipant.sessionId) || 0;
+          setRemoteAudioLevel(Math.min(audioLevel * 200, 100));
+        }
+      } catch (error) {
+        console.error('Error updating audio levels:', error);
+      }
+    };
+
+    // Update frequently for smooth visualization
+    const interval = setInterval(updateAudioLevels, 100);
+    return () => clearInterval(interval);
+  }, [call, isCallActive, user]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (call) {
+        call.stopAudioLevelMonitoring();
+      }
+    };
+  }, [call]);
+
+  // Audio level indicator component
+  const AudioLevelIndicator = ({ level }: { level: number }) => (
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        height: 24,
+        gap: 0.5
+      }}
+    >
+      {[0, 1, 2].map((i) => (
+        <Box
+          key={i}
+          sx={{
+            width: 3,
+            height: `${Math.min(8 + (i * 8), (level / 100) * (24 + i * 8))}px`,
+            bgcolor: level > (i + 1) * 25 ? 'primary.main' : 'action.disabled',
+            borderRadius: 4,
+            transition: 'all 0.1s ease-out'
+          }}
+        />
+      ))}
+    </Box>
+  );
+
+  // Call Dialog UI
+  const CallDialogComponent = () => {
+    if (!callDialog) return null;
+
+    return (
+      <Dialog 
+        open={callDialog} 
+        onClose={() => !isCallActive && handleEndCall()}
+        maxWidth="xs"
+        PaperProps={{
+          sx: {
+            position: 'fixed',
+            top: 16,
+            right: 16,
+            left: 'auto',
+            bottom: 'auto',
+            m: 0,
+            width: isVideoCall && isCallActive ? '400px' : '320px',
+            height: isVideoCall && isCallActive ? '300px' : 'auto',
+            bgcolor: 'background.paper',
+            borderRadius: 3,
+            overflow: 'hidden',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+            border: '1px solid',
+            borderColor: 'divider',
+            transition: 'all 0.3s ease-in-out',
+            transform: 'translateY(0)',
+            animation: 'slideIn 0.3s ease-out',
+            '@keyframes slideIn': {
+              from: {
+                transform: 'translateY(-100%)',
+                opacity: 0
+              },
+              to: {
+                transform: 'translateY(0)',
+                opacity: 1
+              }
+            },
+            '&:before': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 4,
+              background: !isCallActive 
+                ? 'linear-gradient(90deg, #6366f1 0%, #a855f7 100%)'
+                : 'linear-gradient(90deg, #22c55e 0%, #16a34a 100%)',
+              borderTopLeftRadius: 12,
+              borderTopRightRadius: 12
+            }
+          },
+        }}
+      >
+        {/* Background gradient */}
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: !isCallActive 
+              ? 'linear-gradient(135deg, rgba(99,102,241,0.05) 0%, rgba(168,85,247,0.05) 100%)'
+              : 'none',
+            zIndex: 0
+          }}
+        />
+
+        {/* Close button */}
+        {!isCallActive && !isCaller && (
+          <IconButton
+            size="small"
+            onClick={handleEndCall}
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              zIndex: 2,
+              color: 'text.secondary'
+            }}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        )}
+
+        {/* Rest of the dialog content remains the same */}
+        {/* Content */}
+        <Box sx={{ position: 'relative', zIndex: 1 }}>
+          <DialogContent sx={{ p: 2 }}>
+            {isCallActive && isVideoCall ? (
+              // Video container
+              <Box
+                sx={{
+                  width: '100%',
+                  height: '200px',
+                  bgcolor: 'black',
+                  borderRadius: 2,
+                  overflow: 'hidden',
+                  position: 'relative'
+                }}
+              >
+                {call && (
+                  <>
+                    <video
+                      ref={(el) => el && call.setTargetElement(el)}
+                      autoPlay
+                      playsInline
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover'
+                      }}
+                    />
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        right: 8,
+                        bottom: 8,
+                        width: 80,
+                        height: 60,
+                        borderRadius: 1,
+                        overflow: 'hidden',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                        border: '2px solid rgba(255,255,255,0.8)'
+                      }}
+                    >
+                      <video
+                        ref={(el) => el && call.setLocalVideoElement(el)}
+                        autoPlay
+                        playsInline
+                        muted
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover'
+                        }}
+                      />
+                    </Box>
+                  </>
+                )}
+              </Box>
+            ) : (
+              // Audio call UI
+              <Box sx={{ textAlign: 'center', py: 1 }}>
+                <Avatar
+                  src={channel?.data?.image || ''}
+                  sx={{
+                    width: 56,
+                    height: 56,
+                    mb: 1,
+                    mx: 'auto',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)'
+                  }}
+                >
+                  {channel?.data?.name?.[0]?.toUpperCase() || '?'}
+                </Avatar>
+                <Typography variant="subtitle1" sx={{ mb: 0.5, fontWeight: 600 }}>
+                  {channel?.data?.name || 'Unknown'}
+                </Typography>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ mb: 1, display: 'block' }}
+                >
+                  {!isCallActive ? (
+                    isCaller ? 'Calling...' : 'Incoming call...'
+                  ) : (
+                    'Call in progress'
+                  )}
+                </Typography>
+
+                {/* Voice indicators */}
+                {isCallActive && (
+                  <Box sx={{ 
+                    display: 'flex', 
+                    gap: 2, 
+                    justifyContent: 'center',
+                    mb: 1
+                  }}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                        You
+                      </Typography>
+                      <AudioLevelIndicator level={localAudioLevel} />
+                    </Box>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                        Them
+                      </Typography>
+                      <AudioLevelIndicator level={remoteAudioLevel} />
+                    </Box>
+                  </Box>
+                )}
+              </Box>
+            )}
+          </DialogContent>
+
+          {/* Call controls */}
+          <DialogActions
+            sx={{
+              justifyContent: 'center',
+              gap: 1.5,
+              p: 1.5,
+              bgcolor: 'background.paper',
+              borderTop: '1px solid',
+              borderColor: 'divider'
+            }}
+          >
+            {isCallActive ? (
+              <IconButton
+                onClick={handleEndCall}
+                sx={{
+                  bgcolor: 'error.main',
+                  color: 'white',
+                  '&:hover': {
+                    bgcolor: 'error.dark',
+                  },
+                  width: 40,
+                  height: 40,
+                  boxShadow: '0 2px 8px rgba(211,47,47,0.3)'
+                }}
+              >
+                <CallEndIcon />
+              </IconButton>
+            ) : isCaller ? (
+              <IconButton
+                onClick={handleEndCall}
+                sx={{
+                  bgcolor: 'error.main',
+                  color: 'white',
+                  '&:hover': {
+                    bgcolor: 'error.dark',
+                  },
+                  width: 40,
+                  height: 40,
+                  boxShadow: '0 2px 8px rgba(211,47,47,0.3)'
+                }}
+              >
+                <CallEndIcon />
+              </IconButton>
+            ) : (
+              // Accept/Reject for receiver
+              <>
+                <IconButton
+                  onClick={handleAcceptCall}
+                  sx={{
+                    bgcolor: 'success.main',
+                    color: 'white',
+                    '&:hover': {
+                      bgcolor: 'success.dark',
+                    },
+                    width: 40,
+                    height: 40,
+                    boxShadow: '0 2px 8px rgba(46,125,50,0.3)'
+                  }}
+                >
+                  <CallIcon />
+                </IconButton>
+                <IconButton
+                  onClick={handleEndCall}
+                  sx={{
+                    bgcolor: 'error.main',
+                    color: 'white',
+                    '&:hover': {
+                      bgcolor: 'error.dark',
+                    },
+                    width: 40,
+                    height: 40,
+                    boxShadow: '0 2px 8px rgba(211,47,47,0.3)'
+                  }}
+                >
+                  <CallEndIcon />
+                </IconButton>
+              </>
+            )}
+          </DialogActions>
+        </Box>
+      </Dialog>
+    );
+  };
+
   return (
     <Box
       sx={{
         position: 'fixed',
         bottom: '20px',
-        right: '80px', // Move it 80px from right (chatbot is at 20px)
+        right: '80px',
         zIndex: 1200,
       }}
     >
@@ -1989,9 +2946,9 @@ export default function StreamChatPopover() {
           borderBottom: 1, 
           borderColor: 'divider',
           bgcolor: 'background.paper',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 2
+          position: 'sticky',
+          top: 0,
+          zIndex: 1
         }}>
               <Button
                 fullWidth
@@ -2064,7 +3021,7 @@ export default function StreamChatPopover() {
                 const channelName = isGroupChat ? ch.data?.name : null;
                 const channelImage = isGroupChat ? ch.data?.image : null;
 
-                // For direct messages, get the other user
+                // For DMs, show the other person's name and info
                 const otherUser = !isGroupChat && ch.state.members
                   ? Object.values(ch.state.members).find(
                       (m) => m.user_id !== chatClient?.userID
@@ -2080,9 +3037,28 @@ export default function StreamChatPopover() {
                   >
                     <ListItemAvatar>
                       {isGroupChat ? (
-                        <Avatar src={channelImage}>
-                          <GroupIcon />
-                        </Avatar>
+                        <AvatarGroup
+                          max={3}
+                          sx={{
+                            '& .MuiAvatar-root': {
+                              width: 24,
+                              height: 24,
+                              fontSize: '0.75rem',
+                              border: 'none'
+                            }
+                          }}
+                        >
+                          {Object.values(ch.data?.data?.members || {}).map((member: any, index: number) => (
+                            <Avatar
+                              key={index}
+                              src={member.image}
+                              alt={member.name}
+                              sx={{ width: 24, height: 24 }}
+                            >
+                              {member.name?.[0]}
+                            </Avatar>
+                          ))}
+                        </AvatarGroup>
                       ) : (
                         <Badge
                           variant="dot"
@@ -2092,26 +3068,24 @@ export default function StreamChatPopover() {
                             },
                           }}
                         >
-                          <Avatar src={otherUser?.image}>
+                          <Avatar src={channelImage}>
                             {(otherUser?.name || otherUser?.id)[0]?.toUpperCase()}
                           </Avatar>
                         </Badge>
+
                       )}
                     </ListItemAvatar>
                     <ListItemText
                       primary={
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Typography noWrap>
+                          {isGroupChat ? (
+                            <GroupIcon fontSize="small" color="action" />
+                          ) : (
+                            <PersonIcon fontSize="small" color="action" />
+                          )}
+                          <Typography>
                             {isGroupChat ? channelName : otherUser?.name || 'Unknown User'}
                           </Typography>
-                          {isGroupChat && (
-                            <Chip
-                              size="small"
-                              label="Group"
-                              variant="outlined"
-                              sx={{ height: 20 }}
-                            />
-                          )}
                         </Box>
                       }
                       secondary={
@@ -2204,14 +3178,14 @@ export default function StreamChatPopover() {
                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: pinnedMessages.length > 0 ? 1 : 0 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Avatar
-                          src={channel?.data?.image || selectedEmployee?.photoURL}
+                          src={channel?.data?.image || ''}
                           sx={{ width: 40, height: 40 }}
                         >
-                          {getChannelDisplayName()?.charAt(0) || '?'}
+                          {channel?.data?.type === 'team' ? <GroupIcon /> : getChannelAvatar()}
                         </Avatar>
                         <Box>
-                          <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-                            {getChannelDisplayName() || 'Chat'}
+                          <Typography variant="h6" sx={{ fontWeight: 500 }}>
+                            {getChannelDisplayName()}
                           </Typography>
                           {typingUsers && Object.keys(typingUsers).length > 0 && (
                             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
@@ -2234,6 +3208,12 @@ export default function StreamChatPopover() {
                             <PushPinIcon />
                           </Badge>
                         </IconButton>
+                        <IconButton onClick={() => handleStartCall(false)}>
+                          <CallIcon />
+                        </IconButton>
+                        <IconButton onClick={() => handleStartCall(true)}>
+                          <VideocamIcon />
+                        </IconButton>
                       </Box>
                     </Box>
 
@@ -2251,7 +3231,7 @@ export default function StreamChatPopover() {
                       >
                         <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                           <PushPinIcon sx={{ fontSize: 16, color: 'text.secondary', mr: 1 }} />
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          <Typography variant="caption" color="text.secondary">
                             Pinned Messages ({pinnedMessages.length})
                           </Typography>
                         </Box>
@@ -2295,18 +3275,7 @@ export default function StreamChatPopover() {
                                     • {formatMessageTime(msg.created_at)}
                                   </Typography>
                                 </Box>
-                                <Typography 
-                                  variant="body2" 
-                                  sx={{ 
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    display: '-webkit-box',
-                                    WebkitLineClamp: 2,
-                                    WebkitBoxOrient: 'vertical'
-                                  }}
-                                >
-                                  {msg.text}
-                                </Typography>
+                                <Typography>{msg.text}</Typography>
                               </Box>
                             </Box>
                           </Box>
@@ -2519,39 +3488,43 @@ export default function StreamChatPopover() {
                       <Box sx={{ mb: 2 }}>
                         {selectedFiles.map((file, index) => (
                           <Box
-                            key={index}
+                            key={file.name}
                             sx={{
                               display: 'flex',
                               alignItems: 'center',
-                              gap: 1,
-                              mb: 1,
+                              gap: 2,
                               p: 1,
-                              bgcolor: 'rgba(0, 0, 0, 0.04)',
+                              bgcolor: 'background.paper',
                               borderRadius: 1
                             }}
                           >
-                            {getFileIcon(file.type)}
+                            <Box sx={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {file.type?.startsWith('image/') ? (
+                                <img 
+                                  src={URL.createObjectURL(file)} 
+                                  alt={file.name}
+                                  style={{
+                                    width: '100%', 
+                                    height: '100%', 
+                                    objectFit: 'cover',
+                                    borderRadius: 4
+                                  }}
+                                />
+                              ) : (
+                                getFileIcon(file.type)
+                              )}
+                            </Box>
                             <Box sx={{ flex: 1, minWidth: 0 }}>
                               <Typography variant="body2" noWrap>{file.name}</Typography>
                               <Typography variant="caption" color="text.secondary">
                                 {formatFileSize(file.size)}
                               </Typography>
-                              {uploadProgress[file.name] !== undefined && (
-                                <LinearProgress 
-                                  variant="determinate" 
-                                  value={uploadProgress[file.name]} 
-                                  sx={{ mt: 0.5 }}
-                                />
-                              )}
                             </Box>
-                            {file.type.startsWith('image/') && (
+                            {file.type?.startsWith('image/') && (
                               <IconButton size="small" onClick={() => handleFilePreview(file)}>
                                 <VisibilityIcon />
                               </IconButton>
                             )}
-                            <IconButton size="small" onClick={() => removeSelectedFile(index)}>
-                              <CloseIcon />
-                            </IconButton>
                           </Box>
                         ))}
                       </Box>
@@ -2739,138 +3712,19 @@ export default function StreamChatPopover() {
         </Box>
       </Popover>
 
-      <NewChatDialog
-        open={newChatOpen}
-        onClose={() => setNewChatOpen(false)}
-        onSelect={handleEmployeeSelect}
-      />
+      <NewChatDialogComponent />
 
       <GroupChatDialog
         open={groupChatOpen}
         onClose={() => setGroupChatOpen(false)}
-        chatClient={chatClient}
-        onChannelCreated={(channel) => {
-          console.log('New channel created in dialog:', channel);
-          setChannel(channel);
-          // No need to manually update channels here as it will be handled by the channel.created event
-          setGroupChatOpen(false);
-        }}
+        onCreateGroup={handleCreateGroupChat}
       />
 
-      <Dialog 
-        open={showPreview} 
-        onClose={() => {
-          setShowPreview(false);
-          setPreviewFile(null);
-        }}
-        maxWidth="lg"
-        fullWidth
-      >
-        <DialogTitle sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          pr: 2,
-          borderBottom: 1,
-          borderColor: 'divider'
-        }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            {previewFile?.type?.includes('pdf') ? (
-              <PictureAsPdfIcon />
-            ) : previewFile?.type?.startsWith('image/') ? (
-              <ImageIcon />
-            ) : (
-              getFileIcon(previewFile?.type || '')
-            )}
-            <Typography variant="h6" component="div" sx={{ 
-              maxWidth: '500px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap'
-            }}>
-              {previewFile?.name}
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <IconButton
-              onClick={() => window.open(previewFile?.url, '_blank')}
-              size="small"
-              title="Download"
-            >
-              <DownloadIcon />
-            </IconButton>
-            <IconButton
-              onClick={() => {
-                setShowPreview(false);
-                setPreviewFile(null);
-              }}
-              size="small"
-            >
-              <CloseIcon />
-            </IconButton>
-          </Box>
-        </DialogTitle>
-        <DialogContent sx={{ 
-          minHeight: '60vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          p: 0
-        }}>
-          {previewFile?.type?.startsWith('image/') ? (
-            <img 
-              src={previewFile.url} 
-              alt={previewFile.name}
-              style={{ 
-                maxWidth: '100%',
-                maxHeight: '80vh',
-                objectFit: 'contain'
-              }} 
-            />
-          ) : previewFile?.type?.includes('pdf') ? (
-            <Box sx={{ width: '100%', height: '80vh' }}>
-              <iframe
-                src={`https://docs.google.com/viewer?url=${encodeURIComponent(previewFile.url)}&embedded=true`}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  border: 'none'
-                }}
-                onLoad={(e) => {
-                  // If Google Docs viewer fails, fall back to direct PDF viewing
-                  const iframe = e.target as HTMLIFrameElement;
-                  if (!iframe.contentWindow?.document.body.innerHTML) {
-                    iframe.src = previewFile.url;
-                  }
-                }}
-              />
-            </Box>
-          ) : (
-            <Box sx={{ 
-              display: 'flex', 
-              flexDirection: 'column', 
-              alignItems: 'center',
-              gap: 2,
-              p: 4,
-              textAlign: 'center'
-            }}>
-              <Box sx={{ fontSize: 80, color: 'text.secondary' }}>
-                {getFileIcon(previewFile?.type || '')}
-              </Box>
-              <Typography variant="h6">
-                {previewFile?.name}
-              </Typography>
-              <Button
-                variant="contained"
-                startIcon={<DownloadIcon />}
-                onClick={() => window.open(previewFile?.url, '_blank')}
-              >
-                Download File
-              </Button>
-            </Box>
-          )}
-        </DialogContent>
-      </Dialog>
+      <FilePreviewDialog
+        open={!!previewFile}
+        file={previewFile}
+        onClose={() => setPreviewFile(null)}
+      />
 
       <Dialog 
         open={Boolean(editGroupName)} 
@@ -2885,6 +3739,7 @@ export default function StreamChatPopover() {
             margin="dense"
             label="Group Name"
             fullWidth
+            variant="outlined"
             value={editGroupName}
             onChange={(e) => setEditGroupName(e.target.value)}
           />
@@ -3226,48 +4081,39 @@ export default function StreamChatPopover() {
       >
         <DialogTitle>Create New Chat</DialogTitle>
         <DialogContent>
-          {loadingUsers ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-              <CircularProgress />
-            </Box>
-          ) : (
-            <Autocomplete
-              multiple
-              options={Object.values(users).map((user: any) => user.id)}
-              getOptionLabel={(option) => {
-                const user = users[option];
-                return user?.name || user?.id || option;
-              }}
-              value={newChatUsers}
-              onChange={(_, newValue) => setNewChatUsers(newValue)}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  variant="outlined"
-                  label="Select Users"
-                  placeholder="Search users..."
-                  fullWidth
-                  sx={{ mt: 1 }}
+          <Autocomplete
+            multiple
+            options={Object.values(users).map((user: any) => user.id)}
+            getOptionLabel={(option) => {
+              const user = users[option];
+              return user?.name || user?.id || option;
+            }}
+            value={newChatUsers}
+            onChange={(_, newValue) => setNewChatUsers(newValue)}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                autoFocus
+                margin="dense"
+                label="Select Users"
+                fullWidth
+                variant="outlined"
+              />
+            )}
+            renderOption={(props, option) => (
+              <Box component="li" {...props}>
+                <ListItemAvatar>
+                  <Avatar src={users[option]?.image}>
+                    {users[option]?.name?.[0] || option[0]}
+                  </Avatar>
+                </ListItemAvatar>
+                <ListItemText 
+                  primary={users[option]?.name || option}
+                  secondary={option}
                 />
-              )}
-              renderOption={(props, option) => {
-                const user = users[option];
-                return (
-                  <li {...props}>
-                    <ListItemAvatar>
-                      <Avatar src={user?.image}>
-                        {user?.name?.[0] || option[0]}
-                      </Avatar>
-                    </ListItemAvatar>
-                    <ListItemText
-                      primary={user?.name || option}
-                      secondary={option}
-                    />
-                  </li>
-                );
-              }}
-            />
-          )}
+              </Box>
+            )}
+          />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowNewChatDialog(false)}>
@@ -3282,6 +4128,10 @@ export default function StreamChatPopover() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {CallDialogComponent()}
     </Box>
   );
-}
+};
+
+export default StreamChatPopover;

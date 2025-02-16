@@ -5,7 +5,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const router = express.Router();
-
 const apiKey = process.env.STREAM_API_KEY;
 const apiSecret = process.env.STREAM_API_SECRET;
 
@@ -18,26 +17,25 @@ const serverClient = StreamChat.getInstance(apiKey, apiSecret);
 // Generate Stream token
 router.post('/token', async (req, res) => {
   try {
-    const { userId, name, email, image } = req.body;
-    console.log('Token request received:', { userId, name, email });
-
-    // Validate required fields
+    const { userId, email, name, image } = req.body;
+    
     if (!userId || !email) {
-      console.log('Missing required fields:', { userId, email });
       return res.status(400).json({ error: 'userId and email are required' });
     }
 
-    // Create or update user in Stream
+    console.log('Generating token for user:', { userId, email, name });
+    
+    // Create or update user
     await serverClient.upsertUser({
       id: userId,
-      name: name || email.split('@')[0],
       email,
+      name: name || email.split('@')[0],
       image,
     });
 
-    // Create a token with unlimited expiry
+    // Generate token
     const token = serverClient.createToken(userId);
-    console.log('Generated token for:', userId);
+    console.log('Token generated successfully');
 
     res.json({ token });
   } catch (error) {
@@ -64,14 +62,12 @@ router.post('/create-chat', async (req, res) => {
         name: currentUser.name || currentUser.email.split('@')[0],
         email: currentUser.email,
         image: currentUser.image,
-        position: currentUser.position,
       },
       {
         id: otherUser.id,
         name: otherUser.name || otherUser.email.split('@')[0],
         email: otherUser.email,
         image: otherUser.image,
-        position: otherUser.position,
       },
     ]);
 
@@ -79,25 +75,25 @@ router.post('/create-chat', async (req, res) => {
     const sortedIds = [currentUser.id, otherUser.id].sort();
     const channelId = `chat_${sortedIds[0]}_${sortedIds[1]}`;
 
-    // Check if channel exists
-    try {
-      const channel = await serverClient.getChannel('messaging', channelId);
-      if (channel.id) {
-        console.log('Found existing channel:', channelId);
-        return res.json({ success: true, channelId });
+    // Create the channel
+    const channel = serverClient.channel('messaging', channelId, {
+      members: [currentUser.id, otherUser.id],
+      created_by: {
+        id: currentUser.id,
+        name: currentUser.name || currentUser.email.split('@')[0],
+        image: currentUser.image
+      },
+      data: {
+        config: {
+          commands: ['giphy']
+        }
       }
-    } catch {
-      // Channel doesn't exist, create it
-      console.log('Creating new channel:', channelId);
-      const channel = serverClient.channel('messaging', channelId, {
-        members: [currentUser.id, otherUser.id],
-        created_by: currentUser.id,
-        receiver: otherUser.id,
-      });
+    });
 
-      await channel.create();
-      return res.json({ success: true, channelId });
-    }
+    await channel.create();
+    console.log('Channel created:', channelId);
+    
+    res.json({ success: true, channelId });
   } catch (error) {
     console.error('Error creating chat:', error);
     res.status(500).json({ error: 'Failed to create chat' });
