@@ -8,82 +8,87 @@ import {
   Typography,
   Menu,
   MenuItem,
-  ListItemIcon,
-  ListItemText,
-  
-  DialogActions,
+  Avatar,
+  ListItemAvatar,
   TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  Tooltip,
+  Popover,
+  
+  Paper,
+  Chip,
+  Badge,
   Divider,
-} from '@mui/material';
-import {
   Dialog,
   DialogTitle,
   DialogContent,
-  Avatar,
+  DialogActions,
+  Tooltip,
+  CircularProgress,
+  Snackbar,
+  Alert,
   AvatarGroup,
   Collapse,
-  Paper,
-  CircularProgress,
   Grid,
   Tab,
   Tabs,
-  ListItemSecondaryAction,
-  ListItemAvatar,
   List,
   ListItem,
+  ListItemIcon,
+  ListItemText,
   Checkbox,
-  Badge,
   Drawer,
   LinearProgress,
   Switch,
-  Popover,
   Autocomplete,
-  Chip,
   InputAdornment,
   ListItemButton,
+  FormControl,
+  FormLabel,
+  FormGroup,
+  FormControlLabel,
+  InputLabel,
+  Select,
 } from '@mui/material';
 import {
-  Close as CloseIcon,
+  Chat as ChatIcon,
   Send as SendIcon,
+  Close as CloseIcon,
+  MoreVert as MoreVertIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  Reply as ReplyIcon,
+  PushPin as PushPinIcon,
+  InsertDriveFile as InsertDriveFileIcon,
+  Visibility as VisibilityIcon,
+  OpenInNew as OpenInNewIcon,
+  PictureAsPdf as PdfIcon,
+  VideoFile as VideoFileIcon,
+  AudioFile as AudioFileIcon,
+  InsertEmoticon as InsertEmoticonIcon,
+  ChatBubbleOutline as ChatBubbleOutlineIcon,
+} from '@mui/icons-material';
+import {
   Add as AddIcon,
   Search as SearchIcon,
   Group as GroupIcon,
-  PushPin as PushPinIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
   Call as CallIcon,
   Videocam as VideocamIcon,
-  CallEnd as CallEndIcon,
   Mic as MicIcon,
   MicOff as MicOffIcon,
   Videocam as VideoIcon,
   VideocamOff as VideoOffIcon,
-  MoreVert as MoreVertIcon,
-  Reply as ReplyIcon,
   Forward as ForwardIcon,
+  Settings as SettingsIcon,
   InsertEmoticon as EmojiIcon,
   AttachFile as AttachFileIcon,
-  InsertDriveFile as InsertDriveFileIcon,
-  Visibility as VisibilityIcon,
-  Settings as SettingsIcon,
-  PictureAsPdf as PdfIcon,
   Image as ImageIcon,
-  VideoFile as VideoFileIcon,
-  AudioFile as AudioFileIcon,
   Description as DescriptionIcon,
-  Chat as ChatIcon,
-  RadioButtonUnchecked as CircleOutlined,
   Archive as ArchiveIcon,
   Movie as MovieIcon,
   Download as DownloadIcon,
   ContentCopy as ContentCopyIcon,
   Person as PersonIcon,
+  RadioButtonUnchecked as CircleOutlined,
   AddReaction as AddReactionIcon,
-  ChatBubbleOutline as ChatBubbleOutlineIcon,
   PersonRemove as PersonRemoveIcon,
   Assignment as AssignmentIcon,
 } from '@mui/icons-material';
@@ -192,6 +197,23 @@ const REACTION_REVERSE_MAP = Object.entries(REACTION_MAP).reduce((acc, [key, val
   return acc;
 }, {} as { [key: string]: string });
 
+const sanitizeHtml = (html: string) => {
+  // First remove any script tags and their content
+  html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  
+  // Then handle common HTML entities
+  const entities: { [key: string]: string } = {
+    '&lt;': '<',
+    '&gt;': '>',
+    '&amp;': '&',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&nbsp;': ' '
+  };
+  
+  return html.replace(/&[^;]+;/g, (entity) => entities[entity] || entity);
+};
+
 const StreamChatPopover: React.FC = () => {
   const { user } = useAuth();
   const theme = useTheme();
@@ -200,7 +222,24 @@ const StreamChatPopover: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [loadingText, setLoadingText] = useState('Initializing chat...');
 
+  // Message state
   const [messages, setMessages] = useState<any[]>([]);
+  const [pinnedMessages, setPinnedMessages] = useState<any[]>([]);
+  const [messageMenuAnchor, setMessageMenuAnchor] = useState<null | HTMLElement>(null);
+  const [selectedMessage, setSelectedMessage] = useState<any>(null);
+  
+  // Forward message state
+  const [forwardDialogOpen, setForwardDialogOpen] = useState(false);
+  const [forwardMessage, setForwardMessage] = useState<any>(null);
+  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
+  const [availableChannels, setAvailableChannels] = useState<any[]>([]);
+  
+  // Thread state
+  const [showThread, setShowThread] = useState(false);
+  const [threadMessage, setThreadMessage] = useState<any>(null);
+  const [threadReplies, setThreadReplies] = useState<any[]>([]);
+  const [threadReply, setThreadReply] = useState('');
+  const [forwardComment, setForwardComment] = useState('');
 
   // All refs
   const channelsRef = React.useRef<Channel[]>([]);
@@ -251,22 +290,12 @@ const StreamChatPopover: React.FC = () => {
   const [outOfOfficeMessage, setOutOfOfficeMessage] = useState('');
   const [showOOODialog, setShowOOODialog] = useState(false);
   const [editingMessage, setEditingMessage] = useState<any>(null);
-  const [editText, setEditText] = useState('');
-  const [messageMenuAnchor, setMessageMenuAnchor] = useState<null | HTMLElement>(null);
-  const [selectedMessage, setSelectedMessage] = useState<any>(null);
-  const [showThread, setShowThread] = useState(false);
-  const [threadMessage, setThreadMessage] = useState<any>(null);
-  const [threadReplies, setThreadReplies] = useState<any[]>([]);
-  const [threadReply, setThreadReply] = useState('');
-  const [forwardMessage, setForwardMessage] = useState<any>(null);
-  const [forwardDialogOpen, setForwardDialogOpen] = useState(false);
-  const [forwardComment, setForwardComment] = useState('');
-  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
+  const [editedText, setEditedText] = useState('');
   const [showNewChatDialog, setShowNewChatDialog] = useState(false);
   const [newChatUsers, setNewChatUsers] = useState<string[]>([]);
   const [users, setUsers] = useState<{ [key: string]: any }>({});
   const [loadingUsers, setLoadingUsers] = useState(false);
-  const [pinnedMessages, setPinnedMessages] = useState<any[]>([]);
+ 
   const [showPinnedMessages, setShowPinnedMessages] = useState(false);
   const [isCallActive, setIsCallActive] = useState(false);
   const [isVideoCall, setIsVideoCall] = useState(false);
@@ -798,35 +827,82 @@ const StreamChatPopover: React.FC = () => {
   }, [chatClient]);
 
   // Add these functions
-  const handleEditMessage = (msg: any) => {
+  const handleEdit = (msg: any) => {
     setEditingMessage(msg);
-    setEditText(msg.text);
+    setEditedText(msg.text);
   };
 
-  const handleSaveEdit = async () => {
-    if (editingMessage && channel && editText.trim()) {
+  const handleEditSave = async () => {
+    if (!channel || !editingMessage || !editedText.trim() || !chatClient) return;
+
+    try {
+      // Optimistically update UI
+      setMessages(prevMessages =>
+        prevMessages.map(msg =>
+          msg.id === editingMessage.id
+            ? { ...msg, text: editedText }
+            : msg
+        )
+      );
+
+      // Update message on server
       try {
-        // Use partialUpdateMessage instead of updateMessage
-        await chatClient?.partialUpdateMessage(editingMessage.id, {
-          set: {
-            text: editText
-          }
+        await channel.partialUpdateMessage(editingMessage.id, {
+          set: { text: editedText }
         });
-        setEditingMessage(null);
-        setEditText('');
-      } catch (error) {
-        console.error('Error updating message:', error);
+      } catch (channelError) {
+        // Fallback to client update if channel update fails
+        const updatedMessage = await chatClient?.updateMessage({
+          id: editingMessage.id,
+          text: editedText,
+          user: editingMessage.user,
+        });
+        
+        if (!updatedMessage) {
+          throw new Error('Failed to update message');
+        }
       }
+
+      setEditingMessage(null);
+      setEditedText('');
+    } catch (error) {
+      console.error('Error updating message:', error);
+      // Revert optimistic update on error
+      setMessages(prevMessages => [...prevMessages]);
     }
   };
 
-  const handleDeleteMessage = async (msg: any) => {
-    if (channel && window.confirm('Are you sure you want to delete this message?')) {
-      try {
-        await chatClient?.deleteMessage(msg.id);
-      } catch (error) {
-        console.error('Error deleting message:', error);
-      }
+  const handleEditCancel = () => {
+    setEditingMessage(null);
+    setEditedText('');
+  };
+
+  const handleDelete = async (message: any) => {
+    if (!channel || !message || !chatClient) return;
+
+    try {
+      // Optimistically update UI
+      setMessages(prevMessages => 
+        prevMessages.filter(msg => msg.id !== message.id)
+      );
+
+      // Delete message on server using chatClient
+      await chatClient.deleteMessage(message.id);
+
+      // Close any open menus
+      setMessageMenuAnchor(null);
+      setSelectedMessage(null);
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      // Revert optimistic update on error
+      const originalMessages = channel.state.messages;
+      setMessages([...originalMessages]);
+      
+      // Show error notification
+      enqueueSnackbar('Failed to delete message', { 
+        variant: 'error',
+        autoHideDuration: 3000
+      });
     }
   };
 
@@ -902,11 +978,7 @@ const StreamChatPopover: React.FC = () => {
 
     try {
       const channelId = `chat_${Date.now()}`;
-      const members = [
-        ...newChatUsers.map(u => u.email.replace(/[.@]/g, '_')),
-        user.email.replace(/[.@]/g, '_')
-      ];
-
+      const members = [...newChatUsers.map(u => u.email.replace(/[.@]/g, '_')), user.email.replace(/[.@]/g, '_')];
       console.log('Creating new channel with members:', members);
 
       // Create the channel
@@ -1806,9 +1878,9 @@ const StreamChatPopover: React.FC = () => {
       // Optimistically update UI
       const newReaction = {
         type: reactionType,
-        user_id: chatClient.userID,
+        user_id: chatClient?.userID,
         user: {
-          id: chatClient.userID,
+          id: chatClient?.userID,
           name: user?.displayName || '',
           image: user?.photoURL
         },
@@ -1819,16 +1891,15 @@ const StreamChatPopover: React.FC = () => {
         prevMessages.map(msg => {
           if (msg.id === selectedMessage.id) {
             const updatedMsg = { ...msg };
-            const reactions = [...(updatedMsg.latest_reactions || [])];
-            const existingIndex = reactions.findIndex(r => 
-              r.type === reactionType && r.user_id === chatClient.userID
+            updatedMsg.latest_reactions = [...(updatedMsg.latest_reactions || [])];
+            const existingIndex = updatedMsg.latest_reactions.findIndex(r => 
+              r.type === reactionType && r.user_id === chatClient?.userID
             );
             
             if (existingIndex === -1) {
-              reactions.push(newReaction);
+              updatedMsg.latest_reactions.push(newReaction);
             }
             
-            updatedMsg.latest_reactions = reactions;
             return updatedMsg;
           }
           return msg;
@@ -1858,7 +1929,7 @@ const StreamChatPopover: React.FC = () => {
           if (msg.id === message.id) {
             const updatedMsg = { ...msg };
             updatedMsg.latest_reactions = (updatedMsg.latest_reactions || []).filter(
-              r => !(r.type === reactionType && r.user_id === chatClient.userID)
+              r => !(r.type === reactionType && r.user_id === chatClient?.userID)
             );
             return updatedMsg;
           }
@@ -1886,18 +1957,13 @@ const StreamChatPopover: React.FC = () => {
         prevMessages.map(msg => {
           if (msg.id === message_id) {
             const updatedMsg = { ...msg };
-            const reactions = Array.isArray(updatedMsg.latest_reactions) 
-              ? [...updatedMsg.latest_reactions] 
-              : [];
-
-            // Check if reaction already exists
-            const existingIndex = reactions.findIndex(r => 
+            updatedMsg.latest_reactions = [...(updatedMsg.latest_reactions || [])];
+            const existingIndex = updatedMsg.latest_reactions.findIndex(r => 
               r.type === reaction.type && r.user_id === user.id
             );
-
+            
             if (existingIndex === -1) {
-              // Add new reaction with full user data
-              reactions.push({
+              updatedMsg.latest_reactions.push({
                 ...reaction,
                 user: {
                   id: user.id,
@@ -1905,15 +1971,6 @@ const StreamChatPopover: React.FC = () => {
                   image: user.image
                 }
               });
-              updatedMsg.latest_reactions = reactions;
-              
-              // Update reaction counts if they exist
-              if (updatedMsg.reaction_counts) {
-                updatedMsg.reaction_counts = {
-                  ...updatedMsg.reaction_counts,
-                  [reaction.type]: (updatedMsg.reaction_counts[reaction.type] || 0) + 1
-                };
-              }
             }
             
             return updatedMsg;
@@ -1936,14 +1993,6 @@ const StreamChatPopover: React.FC = () => {
             updatedMsg.latest_reactions = (updatedMsg.latest_reactions || []).filter(
               r => !(r.type === reaction.type && r.user_id === user.id)
             );
-
-            // Update reaction counts if they exist
-            if (updatedMsg.reaction_counts && updatedMsg.reaction_counts[reaction.type]) {
-              updatedMsg.reaction_counts = {
-                ...updatedMsg.reaction_counts,
-                [reaction.type]: Math.max((updatedMsg.reaction_counts[reaction.type] || 1) - 1, 0)
-              };
-            }
 
             return updatedMsg;
           }
@@ -1976,7 +2025,7 @@ const StreamChatPopover: React.FC = () => {
   const renderReactions = (message: any, reactions: any[]) => {
     return reactions.map((reaction: any) => {
       const emoji = REACTION_MAP[reaction.type as keyof typeof REACTION_MAP] || reaction.type;
-      const isOwnReaction = reaction.user_id === chatClient.userID;
+      const isOwnReaction = reaction.user_id === chatClient?.userID;
       
       return (
         <Chip
@@ -1986,11 +2035,11 @@ const StreamChatPopover: React.FC = () => {
           onClick={() => isOwnReaction ? handleRemoveReaction(message, reaction.type) : null}
           sx={{ 
             height: 24,
-            bgcolor: message.user?.id === chatClient.userID ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.08)',
-            color: message.user?.id === chatClient.userID ? '#fff' : 'inherit',
+            bgcolor: message.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.08)',
+            color: message.user?.id === chatClient?.userID ? '#fff' : 'inherit',
             cursor: isOwnReaction ? 'pointer' : 'default',
             '&:hover': isOwnReaction ? {
-              bgcolor: message.user?.id === chatClient.userID ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.12)'
+              bgcolor: message.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.12)'
             } : undefined
           }}
         />
@@ -2035,31 +2084,128 @@ const StreamChatPopover: React.FC = () => {
   }, [channel]);
 
   const handleThreadClick = async (message: any) => {
+    console.log('=== THREAD CLICK START ===');
+    console.log('Original Message:', {
+      id: message.id,
+      text: message.text,
+      reply_count: message.reply_count,
+      thread_messages: message.thread_messages,
+      created_at: message.created_at
+    });
+    
+    // Set initial state to show thread panel
     setThreadMessage(message);
     setShowThread(true);
     setThreadReplies([]); // Reset replies when opening new thread
     
     try {
-      if (!channel) return;
+      if (!channel) {
+        console.warn('No channel available for thread');
+        return;
+      }
 
+      // Get latest message state from channel state
+      const threadMessage = channel.state.messages.find(
+        msg => msg.id === message.id
+      );
+
+      if (!threadMessage) {
+        console.error('Could not find message in channel state');
+        return;
+      }
+
+      console.log('Retrieved message from channel:', {
+        id: threadMessage.id,
+        text: threadMessage.text,
+        reply_count: threadMessage.reply_count,
+        thread_messages: threadMessage.thread_messages
+      });
+
+      // Update thread message with latest state
+      setThreadMessage(threadMessage);
+
+      console.log('Loading thread replies for message:', threadMessage.id);
       // Get replies for the thread
-      const response = await channel.getReplies(message.id, {
+      const response = await channel.getReplies(threadMessage.id, {
         limit: 25,
       });
 
+      console.log('Thread replies loaded:', {
+        messageCount: response?.messages?.length,
+        messages: response?.messages?.map(msg => ({
+          id: msg.id,
+          text: msg.text,
+          parent_id: msg.parent_id,
+          created_at: msg.created_at,
+          user: msg.user
+        }))
+      });
+
       if (response?.messages) {
+        console.log('Updating thread message and replies state');
+        // Update thread message with all replies
+        const updatedMessage = { ...threadMessage };
+        updatedMessage.thread_messages = response.messages;
+        updatedMessage.reply_count = response.messages.length;
+        console.log('Updated thread message:', {
+          id: updatedMessage.id,
+          reply_count: updatedMessage.reply_count,
+          thread_messages_count: updatedMessage.thread_messages.length
+        });
+        setThreadMessage(updatedMessage);
+        
+        // Set thread replies
         setThreadReplies(response.messages);
+        console.log('Thread replies state updated with', response.messages.length, 'replies');
+
+        // Update the message in the main messages list to keep it in sync
+        setMessages(prevMessages => 
+          prevMessages.map(msg => {
+            if (msg.id === threadMessage.id) {
+              return updatedMessage;
+            }
+            return msg;
+          })
+        );
+      } else {
+        console.log('No replies found for thread');
       }
 
       // Watch for new replies
-      const threadId = message.id;
+      const threadId = threadMessage.id;
+      console.log('Setting up message listener for thread:', threadId);
+      
       const handleNewMessage = (event: any) => {
+        console.log('New message event in thread:', {
+          type: event.type,
+          message: {
+            id: event.message?.id,
+            text: event.message?.text,
+            parent_id: event.message?.parent_id
+          }
+        });
+
         const { message: newMessage } = event;
         if (newMessage?.parent_id === threadId) {
+          console.log('Message belongs to current thread, updating state');
           setThreadReplies(prev => {
-            // Check if message already exists
             const exists = prev.some(msg => msg.id === newMessage.id);
             if (!exists) {
+              // Also update the thread message
+              setThreadMessage(prevMsg => {
+                if (!prevMsg) return prevMsg;
+                const updatedMsg = {
+                  ...prevMsg,
+                  reply_count: (prevMsg.reply_count || 0) + 1,
+                  thread_messages: [...(prevMsg.thread_messages || []), newMessage]
+                };
+                console.log('Thread message updated:', {
+                  id: updatedMsg.id,
+                  reply_count: updatedMsg.reply_count,
+                  thread_messages_count: updatedMsg.thread_messages.length
+                });
+                return updatedMsg;
+              });
               return [...prev, newMessage];
             }
             return prev;
@@ -2068,20 +2214,35 @@ const StreamChatPopover: React.FC = () => {
       };
 
       channel.on('message.new', handleNewMessage);
+      console.log('Message listener attached to channel');
 
-      // Cleanup function
       return () => {
         channel.off('message.new', handleNewMessage);
       };
     } catch (error) {
-      console.error('Error fetching thread replies:', error);
+      console.error('Error in thread handling:', error);
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
     }
+    console.log('=== THREAD CLICK END ===');
   };
 
   const handleSendThreadReply = async () => {
-    if (!channel || !threadMessage || !threadReply.trim()) return;
+    console.log('=== SEND THREAD REPLY START ===');
+    if (!channel || !threadMessage || !threadReply.trim()) {
+      console.warn('Cannot send reply:', {
+        hasChannel: !!channel,
+        hasThreadMessage: !!threadMessage,
+        replyLength: threadReply.trim().length
+      });
+      return;
+    }
 
     try {
+      console.log('Preparing thread reply for message:', threadMessage.id);
       const messageData = {
         text: threadReply,
         parent_id: threadMessage.id,
@@ -2092,32 +2253,90 @@ const StreamChatPopover: React.FC = () => {
           image: user?.photoURL
         }
       };
+      console.log('Thread reply data:', messageData);
 
+      console.log('Sending message to channel');
       const response = await channel.sendMessage(messageData);
+      console.log('Send message response:', {
+        message: {
+          id: response?.message?.id,
+          text: response?.message?.text,
+          parent_id: response?.message?.parent_id
+        }
+      });
 
       if (response?.message) {
+        console.log('Updating thread state with new reply');
+        // Update thread message first
         const updatedMessage = { ...threadMessage };
         updatedMessage.reply_count = (updatedMessage.reply_count || 0) + 1;
         updatedMessage.thread_messages = [...(updatedMessage.thread_messages || []), response.message];
         setThreadMessage(updatedMessage);
+        
+        // Then update thread replies
         setThreadReplies(prev => [...prev, response.message]);
+
+        // Update the message in the main messages list
+        setMessages(prevMessages => 
+          prevMessages.map(msg => {
+            if (msg.id === threadMessage.id) {
+              return updatedMessage;
+            }
+            return msg;
+          })
+        );
       }
       setThreadReply('');
+      console.log('Thread reply sent successfully');
     } catch (error) {
       console.error('Error sending thread reply:', error);
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
     }
+    console.log('=== SEND THREAD REPLY END ===');
   };
 
   // Cleanup thread watchers when closing thread
   useEffect(() => {
     if (!showThread) {
+      console.log('=== THREAD CLEANUP START ===');
+      console.log('Thread panel closed, cleaning up state');
       if (channel) {
+        console.log('Removing message listener from channel');
         channel.off('message.new');
       }
+      console.log('Resetting thread state');
       setThreadReplies([]);
       setThreadMessage(null);
+      console.log('=== THREAD CLEANUP END ===');
     }
   }, [showThread, channel]);
+
+  // Prevent channel reload from affecting thread state
+  useEffect(() => {
+    if (channel && threadMessage) {
+      // Get the current thread message from channel state
+      const currentThreadMessage = channel.state.messages.find(
+        msg => msg.id === threadMessage.id
+      );
+
+      if (!currentThreadMessage) {
+        console.error('Could not find thread message in channel state');
+        return;
+      }
+
+      // Update thread message with latest state
+      setThreadMessage(currentThreadMessage);
+
+      // Update thread replies
+      if (currentThreadMessage.thread_messages) {
+        setThreadReplies(currentThreadMessage.thread_messages);
+      }
+    }
+  }, [channel, threadMessage]);
 
   const reactionMenu = (
     <Popover
@@ -2449,15 +2668,17 @@ const StreamChatPopover: React.FC = () => {
     return (
       <Box>
         <Typography 
+          component="div"
           variant="body1"
           sx={{
             color: isCurrentUser ? 'common.white' : 'text.primary',
             whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word'
+            wordBreak: 'break-word',
+            '& p': { margin: 0 },
+            '& a': { color: 'inherit' }
           }}
-        >
-          <MessageContent content={message.text} />
-        </Typography>
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(message.text) }}
+        />
         {message.attachments?.length > 0 && (
           <Box sx={{ mt: 1 }}>
             {message.attachments.map((attachment, index) => (
@@ -2530,74 +2751,56 @@ const StreamChatPopover: React.FC = () => {
   };
 
   // Add pin/unpin message function
-  const handlePinMessage = async (message: any) => {
-    if (!channel) return;
+  const handlePin = async (message: any) => {
+    if (!channel || !message || !chatClient) return;
 
+    const isPinned = message.pinned;
+    
     try {
-      const isPinned = !message.pinned;
-      
-      // Use chatClient.updateMessage for pinning/unpinning
-      await chatClient.updateMessage({
-        ...message,
-        pinned: isPinned,
-        pinned_at: isPinned ? new Date().toISOString() : null,
-        pinned_by: isPinned ? {
-          id: chatClient.userID,
-          name: user?.displayName || '',
-          image: user?.photoURL
-        } : null
-      }, message.id, channel.cid);
-
-      // Update messages state optimistically
-      setMessages(prevMessages => 
-        prevMessages.map(msg => 
-          msg.id === message.id 
-            ? { 
-                ...msg, 
-                pinned: isPinned,
-                pinned_at: isPinned ? new Date().toISOString() : null,
-                pinned_by: isPinned ? {
-                  id: chatClient.userID,
-                  name: user?.displayName || '',
-                  image: user?.photoURL
-                } : null
-              }
+      // Optimistically update UI
+      setMessages(prevMessages =>
+        prevMessages.map(msg =>
+          msg.id === message.id
+            ? { ...msg, pinned: !isPinned, pinned_at: isPinned ? null : new Date().toISOString() }
             : msg
         )
       );
 
-      // Update pinned messages collection
+      // Update pinned messages list
       if (isPinned) {
-        setPinnedMessages(prev => [
-          ...prev, 
-          { 
-            ...message, 
-            pinned: true,
-            pinned_at: new Date().toISOString(),
-            pinned_by: {
-              id: chatClient.userID,
-              name: user?.displayName || '',
-              image: user?.photoURL
-            }
-          }
-        ]);
-      } else {
         setPinnedMessages(prev => prev.filter(msg => msg.id !== message.id));
+      } else {
+        setPinnedMessages(prev => [...prev, { 
+          ...message, 
+          pinned: true, 
+          pinned_at: new Date().toISOString()
+        }]);
       }
 
-      // Show success notification
-      enqueueSnackbar(`Message ${isPinned ? 'pinned' : 'unpinned'} successfully`, {
-        variant: 'success',
-        autoHideDuration: 2000
+      // Update on server using chatClient - only update pinned status and timestamp
+      await chatClient.partialUpdateMessage(message.id, {
+        set: {
+          pinned: !isPinned,
+          pinned_at: !isPinned ? new Date().toISOString() : null
+        }
       });
 
-      // Close message menu
       setMessageMenuAnchor(null);
+      enqueueSnackbar(`Message ${isPinned ? 'unpinned' : 'pinned'} successfully`, {
+        variant: 'success',
+        autoHideDuration: 3000
+      });
     } catch (error) {
       console.error('Error pinning/unpinning message:', error);
-      enqueueSnackbar('Failed to pin/unpin message', {
+      
+      // Revert optimistic updates
+      const originalMessages = channel.state.messages;
+      setMessages([...originalMessages]);
+      setPinnedMessages(originalMessages.filter(msg => msg.pinned));
+      
+      enqueueSnackbar(`Failed to ${isPinned ? 'unpin' : 'pin'} message`, {
         variant: 'error',
-        autoHideDuration: 2000
+        autoHideDuration: 3000
       });
     }
   };
@@ -3058,7 +3261,7 @@ const StreamChatPopover: React.FC = () => {
             justifyContent: 'space-between',
             p: 2,
             borderBottom: 1,
-            borderColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'divider'
+            borderColor: 'divider'
           }}
         >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -3318,7 +3521,7 @@ const StreamChatPopover: React.FC = () => {
                       src={member?.user?.image}
                       sx={{ border: '2px solid', borderColor: 'background.paper' }}
                     >
-                      {member?.user?.name?.[0]?.toUpperCase() || '?'}
+                      {member?.user?.name?.[0] || '?'}
                     </Avatar>
                   ))}
               </AvatarGroup>
@@ -3332,7 +3535,7 @@ const StreamChatPopover: React.FC = () => {
                   borderColor: 'background.paper'
                 }}
               >
-                {otherUser?.name?.[0]?.toUpperCase() || '?'}
+                {otherUser?.name?.[0] || '?'}
               </Avatar>
             )}
           </ListItemAvatar>
@@ -3363,12 +3566,7 @@ const StreamChatPopover: React.FC = () => {
               </Box>
             }
             secondary={
-              <Box sx={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center',
-                gap: 1
-              }}>
+              <Box component="span" sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
                 <Typography 
                   variant="body2" 
                   noWrap 
@@ -3403,6 +3601,103 @@ const StreamChatPopover: React.FC = () => {
         </ListItem>
       );
     });
+  };
+
+  const FilePreview = ({ attachment }: { attachment: any }) => {
+    const isImage = attachment.mime_type?.startsWith('image/');
+    const isPdf = attachment.mime_type === 'application/pdf';
+    const isVideo = attachment.mime_type?.startsWith('video/');
+    const isAudio = attachment.mime_type?.startsWith('audio/');
+
+    if (isImage) {
+      return (
+        <Box sx={{ 
+          position: 'relative',
+          width: '100%',
+          maxWidth: 300,
+          borderRadius: 1,
+          overflow: 'hidden',
+          '&:hover': {
+            '& .image-overlay': {
+              opacity: 1,
+            }
+          }
+        }}>
+          <img 
+            src={attachment.asset_url} 
+            alt={attachment.title}
+            style={{ 
+              maxWidth: '100%', 
+              maxHeight: 200, 
+              borderRadius: 4,
+              cursor: 'pointer'
+            }}
+          />
+          <Box
+            className="image-overlay"
+            sx={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              bgcolor: 'rgba(0,0,0,0.6)',
+              color: 'white',
+              p: 1,
+              opacity: 0,
+              transition: 'opacity 0.2s',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 1
+            }}
+            onClick={() => window.open(attachment.asset_url, '_blank')}
+          >
+            <OpenInNewIcon fontSize="small" />
+            <Typography variant="caption">
+              View Full Size
+            </Typography>
+          </Box>
+        </Box>
+      );
+    }
+
+    const getIcon = () => {
+      if (isPdf) return <PdfIcon sx={{ fontSize: '2rem', color: 'error.main' }} />;
+      if (isVideo) return <VideoFileIcon sx={{ fontSize: '2rem', color: 'primary.main' }} />;
+      if (isAudio) return <AudioFileIcon sx={{ fontSize: '2rem', color: 'secondary.main' }} />;
+      return <InsertDriveFileIcon sx={{ fontSize: '2rem', color: 'action.active' }} />;
+    };
+
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          p: 2,
+          bgcolor: 'background.paper',
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+          cursor: 'pointer',
+          transition: 'all 0.2s',
+          '&:hover': {
+            bgcolor: 'action.hover',
+          },
+        }}
+        onClick={() => window.open(attachment.asset_url, '_blank')}
+      >
+        {getIcon()}
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="body2" noWrap>{attachment.title}</Typography>
+          <Typography variant="caption" color="text.secondary">
+            {formatFileSize(attachment.file_size)}
+          </Typography>
+        </Box>
+        <OpenInNewIcon fontSize="small" color="action" />
+      </Box>
+    );
   };
 
   const handleCreateTask = async () => {
@@ -3550,11 +3845,8 @@ const StreamChatPopover: React.FC = () => {
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 1 }}>
           <Button onClick={handleTaskClose}>Cancel</Button>
           <Button 
-            variant="contained" 
-            onClick={async () => {
-              await handleCreateTask();
-              handleTaskClose();
-            }}
+            onClick={handleCreateTask}
+            variant="contained"
             disabled={!taskTitle.trim() || !taskDueDate}
           >
             Create Task
@@ -3564,99 +3856,77 @@ const StreamChatPopover: React.FC = () => {
     </Popover>
   );
 
-  const FilePreview = ({ attachment }: { attachment: any }) => {
-    const isImage = attachment.mime_type?.startsWith('image/');
-    const isPdf = attachment.mime_type === 'application/pdf';
-    const isVideo = attachment.mime_type?.startsWith('video/');
-    const isAudio = attachment.mime_type?.startsWith('audio/');
-
-    if (isImage) {
-      return (
-        <Box sx={{ 
-          position: 'relative',
-          width: '100%',
-          maxWidth: 300,
-          borderRadius: 1,
-          overflow: 'hidden',
-          '&:hover': {
-            '& .image-overlay': {
-              opacity: 1,
-            }
-          }
-        }}>
-          <img 
-            src={attachment.asset_url} 
-            alt={attachment.title || 'Image'} 
-            style={{
-              width: '100%',
-              height: 'auto',
-              maxHeight: 200,
-              objectFit: 'cover',
-              display: 'block',
-            }}
-          />
-          <Box
-            className="image-overlay"
-            sx={{
-              position: 'absolute',
-              bottom: -6,
-              right: -6,
-              bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : '#fff',
-              borderRadius: '50%',
-              width: 24,
-              height: 24,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: 0,
-              transition: 'opacity 0.2s',
-              cursor: 'pointer',
-            }}
-            onClick={() => window.open(attachment.asset_url, '_blank')}
-          >
-            <Typography color="white" variant="body2">
-              Click to view
-            </Typography>
-          </Box>
-        </Box>
-      );
+  const handleForward = async (message: any) => {
+    if (!chatClient) {
+      enqueueSnackbar('Chat client not initialized', { 
+        variant: 'error',
+        autoHideDuration: 3000
+      });
+      return;
     }
 
-    const getIcon = () => {
-      if (isPdf) return <PdfIcon sx={{ fontSize: '2rem' }} />;
-      if (isVideo) return <VideoFileIcon sx={{ fontSize: '2rem' }} />;
-      if (isAudio) return <AudioFileIcon sx={{ fontSize: '2rem' }} />;
-      return <InsertDriveFileIcon sx={{ fontSize: '2rem' }} />;
-    };
+    setForwardMessage(message);
+    setForwardDialogOpen(true);
+    setSelectedChannels([]);
 
-    return (
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 2,
-          p: 2,
-          bgcolor: 'background.paper',
-          borderRadius: 1,
-          border: '1px solid',
-          borderColor: 'divider',
-          cursor: 'pointer',
-          transition: 'all 0.2s',
-          '&:hover': {
-            bgcolor: 'action.hover',
-          },
-        }}
-        onClick={() => window.open(attachment.asset_url, '_blank')}
-      >
-        {getIcon()}
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="body2" noWrap>{attachment.title}</Typography>
-          <Typography variant="caption" color="text.secondary">
-            {formatFileSize(attachment.file_size)}
-          </Typography>
-        </Box>
-      </Box>
-    );
+    try {
+      // Fetch available channels for forwarding
+      const channels = await chatClient.queryChannels({ 
+        members: { $in: [chatClient.userID] },
+        id: { $ne: channel?.id }
+      });
+      
+      setAvailableChannels(channels);
+    } catch (error) {
+      console.error('Error fetching channels:', error);
+      enqueueSnackbar('Failed to load channels', { 
+        variant: 'error',
+        autoHideDuration: 3000
+      });
+    }
+  };
+
+  const handleForwardSubmit = async () => {
+    if (!chatClient || !forwardMessage || selectedChannels.length === 0) {
+      return;
+    }
+
+    try {
+      // Forward message to each selected channel
+      await Promise.all(
+        selectedChannels.map(async (channelId) => {
+          const targetChannel = chatClient.channel('messaging', channelId);
+          await targetChannel.sendMessage({
+            text: forwardMessage.text,
+            attachments: forwardMessage.attachments || [],
+            mentioned_users: [],
+            parent_id: null,
+            forwarded: true,
+            forwarded_from: {
+              message_id: forwardMessage.id,
+              channel_id: channel?.id,
+              user: forwardMessage.user,
+            },
+          });
+        })
+      );
+
+      enqueueSnackbar('Message forwarded successfully', { 
+        variant: 'success',
+        autoHideDuration: 3000
+      });
+
+      // Reset state
+      setForwardMessage(null);
+      setForwardDialogOpen(false);
+      setSelectedChannels([]);
+    } catch (error) {
+      console.error('Error forwarding message:', error);
+      enqueueSnackbar('Failed to forward message', { 
+        variant: 'error',
+        autoHideDuration: 3000
+      });
+    }
   };
 
   return (
@@ -3836,15 +4106,15 @@ const StreamChatPopover: React.FC = () => {
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Typography variant="h6">{getChannelDisplayName()}</Typography>
                         {channel?.data?.type === 'team' && (
-                          <AvatarGroup max={3} sx={{ ml: 1 }}>
+                          <AvatarGroup max={4} sx={{ ml: 1 }}>
                             {Object.values(channel.state?.members || {})
                               .map((member: any) => (
                                 <Avatar 
-                                  key={member.user_id} 
+                                  key={member.user_id}
                                   src={member.user?.image}
                                   sx={{ width: 24, height: 24 }}
                                 >
-                                  {member.user?.name?.[0] || '?'}
+                                  {member.user?.name?.[0]}
                                 </Avatar>
                               ))}
                           </AvatarGroup>
@@ -3926,14 +4196,14 @@ const StreamChatPopover: React.FC = () => {
                               }
                             }}
                           >
-                            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                              <Avatar 
-                                src={msg.user?.image} 
-                                sx={{ width: 24, height: 24 }}
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                              <Avatar
+                                src={msg.user?.image}
+                                sx={{ width: 32, height: 32 }}
                               >
-                                {msg.user?.name?.[0] || msg.user?.id[0]}
+                                {msg.user?.name?.[0]}
                               </Avatar>
-                              <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Box>
                                 <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, mb: 0.5 }}>
                                   <Typography variant="caption" sx={{ fontWeight: 500 }}>
                                     {msg.user?.name || msg.user?.id}
@@ -3952,7 +4222,7 @@ const StreamChatPopover: React.FC = () => {
                   </Box>
 
                   {/* Messages Area */}
-                  <Box sx={{ flex: 1, overflowY: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ flex: 1, overflow: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
                     {messages.map((msg, index) => (
                       <Box
                         key={msg.id}
@@ -3990,15 +4260,15 @@ const StreamChatPopover: React.FC = () => {
                         >
                           <IconButton
                             size="small"
-                            onClick={() => handleReactionClick(msg)}
+                            onClick={(e) => handleReactionClick(e, msg)}
                           >
-                            <EmojiIcon fontSize="small" />
+                            <InsertEmoticonIcon fontSize="small" />
                           </IconButton>
                           <IconButton
                             size="small"
-                            onClick={() => {
-                              setThreadMessage(msg);
-                              setShowThread(true);
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleThreadClick(msg);
                             }}
                           >
                             <ReplyIcon fontSize="small" />
@@ -4020,6 +4290,14 @@ const StreamChatPopover: React.FC = () => {
                               <IconButton
                                 size="small"
                                 onClick={() => handleDelete(msg)}
+                                sx={{ 
+                                  display: msg.user?.id === chatClient?.userID ? 'inline-flex' : 'none',
+                                  color: 'error.main',
+                                  '&:hover': {
+                                    bgcolor: 'error.light',
+                                    color: 'error.dark'
+                                  }
+                                }}
                               >
                                 <DeleteIcon fontSize="small" />
                               </IconButton>
@@ -4037,11 +4315,7 @@ const StreamChatPopover: React.FC = () => {
                           {!msg.user?.id === chatClient?.userID && (
                             <Avatar
                               src={msg.user?.image}
-                              sx={{ 
-                                width: 24, 
-                                height: 24,
-                                fontSize: '0.875rem'
-                              }}
+                              sx={{ width: 24, height: 24 }}
                             >
                               {msg.user?.name?.[0]}
                             </Avatar>
@@ -4055,11 +4329,7 @@ const StreamChatPopover: React.FC = () => {
                           {msg.user?.id === chatClient?.userID && (
                             <Avatar
                               src={msg.user?.image}
-                              sx={{ 
-                                width: 24, 
-                                height: 24,
-                                fontSize: '0.875rem'
-                              }}
+                              sx={{ width: 24, height: 24 }}
                             >
                               {msg.user?.name?.[0]}
                             </Avatar>
@@ -4071,7 +4341,7 @@ const StreamChatPopover: React.FC = () => {
                             <Box
                               sx={{
                                 bgcolor: msg.user?.id === chatClient?.userID ? 'primary.main' : 'grey.100',
-                                color: msg.user?.id === chatClient?.userID ? 'white' : 'text.primary',
+                                color: msg.user?.id === chatClient?.userID ? 'primary.contrastText' : 'text.primary',
                                 borderRadius: 2,
                                 px: 2,
                                 py: 1.5,
@@ -4094,32 +4364,95 @@ const StreamChatPopover: React.FC = () => {
                                 boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
                                 minWidth: '120px',
                               }}
-                              dangerouslySetInnerHTML={{ __html: msg.text }}
-                            />
-                          )}
-
-                          {msg.attachments && msg.attachments.length > 0 && (
-                            <Box sx={{ 
-                              display: 'flex', 
-                              flexDirection: 'column', 
-                              gap: 1,
-                              maxWidth: '85%',
-                              alignSelf: msg.user?.id === chatClient?.userID ? 'flex-end' : 'flex-start',
-                            }}>
-                              {msg.attachments.map((attachment: any, index: number) => (
-                                <Box
-                                  key={index}
-                                  sx={{
-                                    maxWidth: '100%',
-                                    bgcolor: msg.user?.id === chatClient?.userID ? 'primary.main' : 'grey.100',
-                                    color: msg.user?.id === chatClient?.userID ? 'white' : 'text.primary',
-                                    borderRadius: 2,
-                                    overflow: 'hidden',
-                                  }}
-                                >
-                                  <FilePreview attachment={attachment} />
+                            >
+                              {editingMessage?.id === msg.id ? (
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                  <TextField
+                                    fullWidth
+                                    multiline
+                                    value={editedText}
+                                    onChange={(e) => setEditedText(e.target.value)}
+                                    size="small"
+                                    autoFocus
+                                    sx={{
+                                      '& .MuiInputBase-root': {
+                                        bgcolor: 'background.paper',
+                                      },
+                                    }}
+                                  />
+                                  <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                                    <Button
+                                      size="small"
+                                      onClick={handleEditCancel}
+                                    >
+                                      Cancel
+                                    </Button>
+                                    <Button
+                                      size="small"
+                                      variant="contained"
+                                      onClick={handleEditSave}
+                                      disabled={!editedText.trim()}
+                                    >
+                                      Save
+                                    </Button>
+                                  </Box>
                                 </Box>
-                              ))}
+                              ) : (
+                                <>
+                                  <Typography 
+                                    component="div"
+                                    variant="body1"
+                                    sx={{
+                                      color: 'inherit',
+                                      whiteSpace: 'pre-wrap',
+                                      wordBreak: 'break-word',
+                                      '& p': { margin: 0 },
+                                      '& a': { color: 'inherit' }
+                                    }}
+                                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.text) }}
+                                  />
+                                  {msg.attachments && msg.attachments.length > 0 && (
+                                    <Box sx={{ mt: 1 }}>
+                                      {msg.attachments.map((attachment: any, index: number) => (
+                                        <FilePreview key={index} attachment={attachment} />
+                                      ))}
+                                    </Box>
+                                  )}
+                                </>
+                              )}
+                            </Box>
+                          )}
+                          {/* Thread Reply Counter */}
+                          {msg.reply_count > 0 && (
+                            <Box
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleThreadClick(msg);
+                              }}
+                              sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 0.5,
+                                mt: 0.5,
+                                cursor: 'pointer',
+                                color: 'text.secondary',
+                                alignSelf: msg.user?.id === chatClient?.userID ? 'flex-end' : 'flex-start',
+                                '&:hover': {
+                                  color: 'primary.main',
+                                  '& .MuiSvgIcon-root': {
+                                    transform: 'scale(1.1)',
+                                  }
+                                },
+                                transition: 'all 0.2s ease-in-out',
+                              }}
+                            >
+                              <ChatBubbleOutlineIcon sx={{ 
+                                fontSize: '0.9rem',
+                                transition: 'transform 0.2s ease-in-out'
+                              }} />
+                              <Typography variant="caption" sx={{ fontWeight: 500 }}>
+                                {msg.reply_count} {msg.reply_count === 1 ? 'reply' : 'replies'}
+                              </Typography>
                             </Box>
                           )}
                         </Box>
@@ -4150,9 +4483,11 @@ const StreamChatPopover: React.FC = () => {
                                 sx={{
                                   width: 48,
                                   height: 48,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : '#fff',
                                   borderRadius: 1,
-                                  overflow: 'hidden',
-                                  bgcolor: 'background.paper',
                                   border: '1px solid',
                                   borderColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : '#e9ecef',
                                   boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
@@ -4239,13 +4574,23 @@ const StreamChatPopover: React.FC = () => {
 
                 {/* Thread Panel */}
                 {showThread && (
-                  <Box sx={{ 
-                    width: '35%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    bgcolor: 'background.paper',
-                    minWidth: 300 // Minimum width for thread panel
-                  }}>
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      right: 0,
+                      top: 0,
+                      height: '100%',
+                      width: 320,
+                      transform: showThread ? 'translateX(0)' : 'translateX(100%)',
+                      transition: 'transform 0.3s ease-in-out',
+                      borderLeft: 1,
+                      borderColor: 'divider',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      bgcolor: 'background.paper',
+                      zIndex: 1200,
+                    }}
+                  >
                     {/* Thread Header */}
                     <Box sx={{ 
                       p: 2, 
@@ -4292,39 +4637,49 @@ const StreamChatPopover: React.FC = () => {
                     )}
 
                     {/* Thread Replies */}
-                    <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
-                      {threadMessage?.reply_count > 0 && threadMessage.thread_messages?.map((reply: any) => (
+                    <Box sx={{ 
+                      flex: 1, 
+                      overflow: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 2,
+                      p: 2
+                    }}>
+                      {threadReplies.map((reply: any) => (
                         <Box
                           key={reply.id}
                           sx={{
                             display: 'flex',
+                            flexDirection: 'column',
                             gap: 1,
-                            mb: 2,
                           }}
                         >
-                          <Avatar 
-                            src={reply.user?.image}
-                            sx={{ width: 32, height: 32 }}
-                          >
-                            {reply.user?.name?.[0]}
-                          </Avatar>
-                          <Box>
-                            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
-                              <Typography variant="subtitle2">
-                                {reply.user?.name || reply.user?.id}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {formatMessageTime(reply.created_at)}
-                              </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Avatar src={reply.user?.image} sx={{ width: 32, height: 32 }}>
+                              {reply.user?.name?.[0]}
+                            </Avatar>
+                            <Box>
+                              <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
+                                <Typography variant="subtitle2">
+                                  {reply.user?.name || reply.user?.id}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {formatMessageTime(reply.created_at)}
+                                </Typography>
+                              </Box>
+                              <Typography>{reply.text}</Typography>
                             </Box>
-                            <Typography>{reply.text}</Typography>
                           </Box>
                         </Box>
                       ))}
                     </Box>
 
                     {/* Thread Reply Input */}
-                    <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
+                    <Box sx={{ 
+                      p: 2, 
+                      borderTop: 1,
+                      borderColor: 'divider'
+                    }}>
                       <RichTextEditor
                         value={threadReply}
                         onChange={(value) => setThreadReply(value)}
@@ -4555,7 +4910,7 @@ const StreamChatPopover: React.FC = () => {
 
             <MenuItem 
               onClick={() => {
-                handleDeleteMessage(selectedMessage);
+                handleDelete(selectedMessage);
                 setMessageMenuAnchor(null);
               }}
               sx={{ color: 'error.main' }}
@@ -4570,7 +4925,7 @@ const StreamChatPopover: React.FC = () => {
 
         {/* Pin/Unpin option - available for all messages */}
         <MenuItem 
-          onClick={() => handlePinMessage(selectedMessage)}
+          onClick={() => handlePin(selectedMessage)}
         >
           <ListItemIcon>
             {selectedMessage?.pinned ? (
@@ -4654,11 +5009,12 @@ const StreamChatPopover: React.FC = () => {
                   <ListItem key={ch.id} disablePadding>
                     <ListItemButton
                       onClick={() => {
-                        setSelectedChannels(prev => 
-                          prev.includes(ch.id)
+                        setSelectedChannels(prev => {
+                          const isSelected = prev.includes(ch.id);
+                          return isSelected
                             ? prev.filter(id => id !== ch.id)
-                            : [...prev, ch.id]
-                        );
+                            : [...prev, ch.id];
+                        });
                       }}
                     >
                       <ListItemIcon>
@@ -4712,7 +5068,7 @@ const StreamChatPopover: React.FC = () => {
             Cancel
           </Button>
           <Button 
-            onClick={handleForwardMessage}
+            onClick={handleForwardSubmit}
             disabled={selectedChannels.length === 0}
             variant="contained"
           >
@@ -4782,122 +5138,120 @@ const StreamChatPopover: React.FC = () => {
       <TaskForm />
       
       {/* Thread Dialog */}
-      <Dialog 
-        open={showThread} 
-        onClose={() => setShowThread(false)} 
-        maxWidth="sm" 
-        fullWidth
+      <Box
         sx={{
-          '& .MuiDialog-paper': {
-            height: '80vh',
-            display: 'flex',
-            flexDirection: 'column',
-          },
+          position: 'absolute',
+          right: 0,
+          top: 0,
+          height: '100%',
+          width: 320,
+          transform: showThread ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform 0.3s ease-in-out',
+          borderLeft: 1,
+          borderColor: 'divider',
+          display: 'flex',
+          flexDirection: 'column',
+          bgcolor: 'background.paper',
+          zIndex: 1200,
         }}
       >
-        <DialogTitle sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between',
+        {/* Thread Header */}
+        <Box sx={{ 
+          p: 2, 
+          borderBottom: 1, 
+          borderColor: 'divider',
+          display: 'flex',
           alignItems: 'center',
-          p: 2,
-          borderBottom: '1px solid',
-          borderColor: 'divider'
+          justifyContent: 'space-between'
         }}>
-          <Typography variant="h6">Thread</Typography>
+          <Typography variant="subtitle1">Thread</Typography>
           <IconButton size="small" onClick={() => setShowThread(false)}>
             <CloseIcon />
           </IconButton>
-        </DialogTitle>
-        <DialogContent sx={{ 
-          p: 0,
+        </Box>
+
+        {/* Original Message */}
+        {threadMessage && (
+          <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+            <Box sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 1, 
+              mb: 1 
+            }}>
+              <Avatar
+                src={threadMessage.user?.image}
+                sx={{ width: 32, height: 32 }}
+              >
+                {threadMessage.user?.name?.[0]}
+              </Avatar>
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, mb: 0.5 }}>
+                  <Typography variant="subtitle2">
+                    {threadMessage.user?.name || threadMessage.user?.id}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {formatMessageTime(threadMessage.created_at)}
+                  </Typography>
+                </Box>
+                <Typography>{threadMessage.text}</Typography>
+              </Box>
+            </Box>
+          </Box>
+        )}
+
+        {/* Thread Replies */}
+        <Box sx={{ 
+          flex: 1, 
+          overflow: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          flex: 1,
-          overflow: 'hidden'
+          gap: 2,
+          p: 2
         }}>
-          {threadMessage && (
-            <>
-              <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-                <Box sx={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: 1, 
-                  mb: 1 
-                }}>
-                  <Avatar
-                    src={threadMessage.user?.image}
-                    sx={{ width: 24, height: 24 }}
-                  >
-                    {threadMessage.user?.name?.[0]}
-                  </Avatar>
-                  <Box>
-                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, mb: 0.5 }}>
-                      <Typography variant="subtitle2">
-                        {threadMessage.user?.name || threadMessage.user?.id}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {formatMessageTime(threadMessage.created_at)}
-                      </Typography>
-                    </Box>
-                    <Typography>{threadMessage.text}</Typography>
-                  </Box>
-                </Box>
-              </Box>
-              
-              <Box sx={{ 
-                flex: 1, 
-                overflow: 'auto',
+          {threadReplies.map((reply: any) => (
+            <Box
+              key={reply.id}
+              sx={{
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 2,
-                p: 2,
-              }}>
-                {threadMessage?.reply_count > 0 && threadMessage.thread_messages?.map((reply: any) => (
-                  <Box
-                    key={reply.id}
-                    sx={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 1,
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Avatar src={reply.user?.image} sx={{ width: 24, height: 24 }}>
-                        {reply.user?.name?.[0]}
-                      </Avatar>
-                      <Box>
-                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
-                          <Typography variant="subtitle2">
-                            {reply.user?.name || reply.user?.id}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {formatMessageTime(reply.created_at)}
-                          </Typography>
-                        </Box>
-                        <Typography>{reply.text}</Typography>
-                      </Box>
-                    </Box>
+                gap: 1,
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Avatar src={reply.user?.image} sx={{ width: 32, height: 32 }}>
+                  {reply.user?.name?.[0]}
+                </Avatar>
+                <Box>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
+                    <Typography variant="subtitle2">
+                      {reply.user?.name || reply.user?.id}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {formatMessageTime(reply.created_at)}
+                    </Typography>
                   </Box>
-                ))}
+                  <Typography>{reply.text}</Typography>
+                </Box>
               </Box>
-            </>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ 
+            </Box>
+          ))}
+        </Box>
+
+        {/* Thread Reply Input */}
+        <Box sx={{ 
           p: 2, 
-          borderTop: '1px solid',
+          borderTop: 1,
           borderColor: 'divider'
         }}>
-          <Box sx={{ width: '100%' }}>
-            <RichTextEditor
-              value={threadReply}
-              onChange={(value) => setThreadReply(value)}
-              onSubmit={handleSendThreadReply}
-              placeholder="Reply to thread..."
-            />
-          </Box>
-        </DialogActions>
-      </Dialog>
+          <RichTextEditor
+            value={threadReply}
+            onChange={(value) => setThreadReply(value)}
+            onSubmit={handleSendThreadReply}
+            placeholder="Reply to thread..."
+          />
+        </Box>
+      </Box>
     </Box>
   );
 };
