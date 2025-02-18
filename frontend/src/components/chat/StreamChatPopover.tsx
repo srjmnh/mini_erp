@@ -1,40 +1,50 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { StreamChat, Channel } from 'stream-chat';
 import { StreamVideoClient } from '@stream-io/video-client';
 import {
   Box,
+  Button,
+  IconButton,
   Typography,
   Menu,
   MenuItem,
   ListItemIcon,
   ListItemText,
+  
+  DialogActions,
+  TextField,
+  FormControl,
+  InputLabel,
+  Select,
+  Tooltip,
+  Divider,
+} from '@mui/material';
+import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions,
-  TextField,
+  Avatar,
+  AvatarGroup,
+  Collapse,
+  Paper,
+  CircularProgress,
+  Grid,
+  Tab,
+  Tabs,
+  ListItemSecondaryAction,
+  ListItemAvatar,
   List,
   ListItem,
-  ListItemAvatar,
-  Paper,
-  Divider,
   Checkbox,
   Badge,
-  Button,
   Drawer,
   LinearProgress,
   Switch,
   Popover,
-  CircularProgress,
   Autocomplete,
   Chip,
   InputAdornment,
   ListItemButton,
-  IconButton,
-  ListItemSecondaryAction,
-  Avatar,
-  AvatarGroup,
-  Collapse
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -57,10 +67,10 @@ import {
   Forward as ForwardIcon,
   InsertEmoticon as EmojiIcon,
   AttachFile as AttachFileIcon,
+  InsertDriveFile as InsertDriveFileIcon,
   Visibility as VisibilityIcon,
   Settings as SettingsIcon,
-  PictureAsPdf as PictureAsPdfIcon,
-  InsertDriveFile as InsertDriveFileIcon,
+  PictureAsPdf as PdfIcon,
   Image as ImageIcon,
   VideoFile as VideoFileIcon,
   AudioFile as AudioFileIcon,
@@ -73,14 +83,18 @@ import {
   ContentCopy as ContentCopyIcon,
   Person as PersonIcon,
   AddReaction as AddReactionIcon,
-  ChatBubbleOutline as ChatBubbleOutlineIcon
+  ChatBubbleOutline as ChatBubbleOutlineIcon,
+  PersonRemove as PersonRemoveIcon,
+  Assignment as AssignmentIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@mui/material/styles';
-import { useSnackbar } from 'notistack'; // Add this line
+import { useSnackbar } from 'notistack';
 import Message from './Message';
 import FileMessage from './FileMessage';
 import NewChatDialog from './NewChatDialog';
+import RichTextEditor from './RichTextEditor';
+import MessageContent from './MessageContent';
 import axios from 'axios';
 import { format, isToday, isYesterday } from 'date-fns';
 import { uploadChatFile } from '@/services/supabaseStorage';
@@ -88,6 +102,7 @@ import FilePreviewDialog from './FilePreviewDialog';
 import { keyframes } from '@mui/system';
 import { db } from '@/config/firebase';
 import { collection, getDocs } from 'firebase/firestore';
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 
 interface Employee {
   id: string;
@@ -121,12 +136,24 @@ const REACTION_MAP = {
   'rocket': '🚀'
 } as const;
 
-const REACTION_REVERSE_MAP = Object.entries(REACTION_MAP).reduce((acc, [key, value]) => {
-  acc[value] = key;
-  return acc;
-}, {} as { [key: string]: string });
+const getFileIcon = (fileType: string) => {
+  if (fileType?.includes('pdf')) {
+    return <PdfIcon color="error" />;
+  } else if (fileType?.startsWith('image/')) {
+    return <ImageIcon color="primary" />;
+  }
+  return <InsertDriveFileIcon color="action" />;
+};
 
-// Add this helper function at the top
+// Add this helper function near the top of the file
+const formatFileSize = (bytes: number) => {
+  if (!bytes) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+};
+
 const formatMessageTime = (created_at: string) => {
   const date = new Date(created_at);
   const now = new Date();
@@ -150,18 +177,47 @@ const formatMessageTime = (created_at: string) => {
   }
 };
 
-// Add this helper function at the top
 const isMessageEdited = (msg: any) => {
   return msg.updated_at && msg.created_at && 
     new Date(msg.updated_at).getTime() > new Date(msg.created_at).getTime() + 1000; // 1 second buffer
 };
+
+const stripHtmlTags = (html: string) => {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return doc.body.textContent || '';
+};
+
+const REACTION_REVERSE_MAP = Object.entries(REACTION_MAP).reduce((acc, [key, value]) => {
+  acc[value] = key;
+  return acc;
+}, {} as { [key: string]: string });
 
 const StreamChatPopover: React.FC = () => {
   const { user } = useAuth();
   const theme = useTheme();
   const { enqueueSnackbar } = useSnackbar();
 
-  // State hooks - group all state declarations together
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingText, setLoadingText] = useState('Initializing chat...');
+
+  const [messages, setMessages] = useState<any[]>([]);
+
+  // All refs
+  const channelsRef = React.useRef<Channel[]>([]);
+  const currentChannelRef = React.useRef<Channel | null>(null);
+  const messageInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to bottom effect
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [messageText, setMessageText] = useState('');
@@ -176,10 +232,8 @@ const StreamChatPopover: React.FC = () => {
   const [chatClient, setChatClient] = useState<StreamChat | null>(null);
   const [channel, setChannel] = useState<Channel | null>(null);
   const [loading, setLoading] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [messages, setMessages] = useState<any[]>([]);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [groupChatOpen, setGroupChatOpen] = useState(false);
   const [userStatus, setUserStatus] = useState<'online' | 'away' | 'busy'>('online');
@@ -221,14 +275,15 @@ const StreamChatPopover: React.FC = () => {
   const [isReceivingCall, setIsReceivingCall] = useState(false);
   const [videoClient, setVideoClient] = useState<StreamVideoClient | null>(null);
   const [call, setCall] = useState<any>(null);
+  const [showTaskDialog, setShowTaskDialog] = useState(false);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDescription, setTaskDescription] = useState('');
+  const [taskDueDate, setTaskDueDate] = useState<Date | null>(null);
+  const [taskPriority, setTaskPriority] = useState<'low' | 'medium' | 'high'>('medium');
 
-  // Refs
-  const channelsRef = React.useRef<Channel[]>([]);
-  const currentChannelRef = React.useRef<Channel | null>(null);
-  const messageInputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Add state for task popover
+  const [taskAnchorEl, setTaskAnchorEl] = useState<null | HTMLElement>(null);
 
-  // Define handleChannelSelect at the top level
   const handleChannelSelect = useCallback(async (selectedChannel: Channel) => {
     try {
       // Watch the channel first to ensure we have latest state
@@ -304,10 +359,6 @@ const StreamChatPopover: React.FC = () => {
 
   // Sync refs with state
   useEffect(() => {
-    channelsRef.current = channels;
-  }, [channels]);
-
-  useEffect(() => {
     currentChannelRef.current = channel;
   }, [channel]);
 
@@ -315,7 +366,6 @@ const StreamChatPopover: React.FC = () => {
   const updateChannelsState = React.useCallback((updater: (prev: Channel[]) => Channel[]) => {
     setChannels(prev => {
       const updated = updater(prev);
-      channelsRef.current = updated;
       return updated;
     });
   }, []);
@@ -1076,16 +1126,16 @@ const StreamChatPopover: React.FC = () => {
       // Create users through backend API
       for (const selectedUser of selectedUsers) {
         try {
-          const response = await fetch('http://localhost:3001/api/stream/create-user', {
+          const response = await fetch(`${import.meta.env.VITE_API_URL}/api/stream/create-user`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
               userId: selectedUser.email.replace(/[.@]/g, '_'),
-              name: selectedUser.displayName || selectedUser.email,
               email: selectedUser.email,
-              image: selectedUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedUser.displayName || selectedUser.email)}`
+              name: selectedUser.displayName || selectedUser.email,
+              image: selectedUser.photoURL,
             }),
           });
 
@@ -1128,7 +1178,7 @@ const StreamChatPopover: React.FC = () => {
       
       // Send initial message
       await newChannel.sendMessage({
-        text: `👋 ${user.displayName || user.email} created the group "${groupName}"`,
+        text: `${user.displayName || user.email} created the group "${groupName}"`,
         user: {
           id: user.email.replace(/[.@]/g, '_'),
           name: user.displayName || user.email
@@ -1311,6 +1361,7 @@ const StreamChatPopover: React.FC = () => {
 
       try {
         console.log('Initializing chat...');
+        
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/stream/token`, {
           method: 'POST',
           headers: {
@@ -1354,6 +1405,8 @@ const StreamChatPopover: React.FC = () => {
           chatClient.disconnectUser();
           setChatClient(null);
         }
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -1558,55 +1611,154 @@ const StreamChatPopover: React.FC = () => {
     return 'Multiple people are typing...';
   };
 
-  const handleGroupSettingsClick = (event: React.MouseEvent<HTMLElement>) => {
-    setGroupSettingsAnchorEl(event.currentTarget);
+  const handleGroupSettingsClick = () => {
+    setShowGroupSettings(true);
   };
 
   const handleGroupSettingsClose = () => {
-    setGroupSettingsAnchorEl(null);
+    setShowGroupSettings(false);
+    setSelectedMembers([]);
+    setActiveTab(0);
   };
+
+  // Group settings state
+  const [showGroupSettings, setShowGroupSettings] = useState(false);
+  const [groupNameEdit, setGroupNameEdit] = useState('');
+  const [groupFiles, setGroupFiles] = useState<Array<any>>([]);
+  const [groupMembers, setGroupMembers] = useState<Array<any>>([]);
+  const [activeTab, setActiveTab] = useState(0);
+
+  // Load group data when settings open
+  useEffect(() => {
+    if (showGroupSettings && channel) {
+      // Safely get members from channel state
+      const members = channel.state?.members || {};
+      const memberArray = Object.values(members).filter(Boolean);
+      setGroupMembers(memberArray);
+      
+      const loadFiles = async () => {
+        try {
+          const result = await channel.query({ messages: { limit: 100 } });
+          const files = result.messages
+            ?.filter(msg => msg?.attachments && msg.attachments.length > 0)
+            ?.flatMap(msg => msg.attachments)
+            .filter(Boolean) || [];
+          setGroupFiles(files);
+        } catch (error) {
+          console.error('Error loading group files:', error);
+          setGroupFiles([]);
+        }
+      };
+      loadFiles();
+      setGroupNameEdit(channel.data?.name || '');
+    }
+  }, [showGroupSettings, channel]);
+
+  // Memoize filtered employees to prevent unnecessary recalculations
+  const filteredEmployees = useMemo(() => {
+    if (!employees || !Array.isArray(employees)) return [];
+    if (!groupMembers || !Array.isArray(groupMembers)) return employees;
+
+    return employees.filter(emp => 
+      emp?.email && !groupMembers.some(member => 
+        member?.user_id === emp.email.replace(/[.@]/g, '_')
+      )
+    );
+  }, [employees, groupMembers]);
+
+  // Group settings handlers
+  const [tempGroupName, setTempGroupName] = useState('');
+
+  useEffect(() => {
+    if (showGroupSettings && channel) {
+      setTempGroupName(channel.data?.name || '');
+    }
+  }, [showGroupSettings, channel]);
 
   const handleUpdateGroupName = async () => {
-    if (!channel || !editGroupName.trim()) return;
-    
+    if (!channel || !tempGroupName.trim()) return;
+    if (tempGroupName === channel.data?.name) return;
+
     try {
-      await channel.updatePartial({
+      await channel.update({
+        name: tempGroupName.trim(),
         set: {
-          name: editGroupName.trim()
+          name: tempGroupName.trim()
         }
       });
-      handleGroupSettingsClose();
-      setEditGroupName('');
+      
+      // Update local channel data
+      setChannels(prevChannels => 
+        prevChannels.map(ch => 
+          ch.cid === channel.cid 
+            ? { ...ch, data: { ...ch.data, name: tempGroupName.trim() } }
+            : ch
+        )
+      );
+      
+      enqueueSnackbar('Group name updated successfully', { variant: 'success' });
     } catch (error) {
       console.error('Error updating group name:', error);
+      enqueueSnackbar('Failed to update group name', { variant: 'error' });
+      // Reset to original name on error
+      setTempGroupName(channel.data?.name || '');
     }
-  };
-
-  const handleManageMembers = () => {
-    setShowMemberManagement(true);
-    handleGroupSettingsClose();
   };
 
   const handleAddMembers = async () => {
     if (!channel || selectedMembers.length === 0) return;
 
     try {
-      await channel.addMembers(selectedMembers);
-      setShowMemberManagement(false);
+      // Format email addresses to valid Stream Chat user IDs
+      const formattedMembers = selectedMembers.map(email => email.replace(/[.@]/g, '_'));
+      
+      // Add members
+      await channel.addMembers(formattedMembers);
+      
+      // Clear selection state
       setSelectedMembers([]);
+      
+      // Refresh channel
+      await channel.watch();
+      
+      // Update group members from refreshed channel state
+      if (channel.state?.members) {
+        setGroupMembers(Object.values(channel.state.members));
+      }
+      
+      // Show success message
+      enqueueSnackbar('Members added successfully', { variant: 'success' });
     } catch (error) {
       console.error('Error adding members:', error);
+      enqueueSnackbar('Failed to add members', { variant: 'error' });
     }
   };
 
   const handleRemoveMember = async (memberId: string) => {
-    if (!channel) return;
-
+    if (!channel || !memberId) return;
+    
     try {
-      await channel.removeMember(memberId);
+      // Remove member
+      await channel.removeMembers([memberId]);
+      
+      // Refresh channel
+      await channel.watch();
+      
+      // Update group members from refreshed channel state
+      if (channel.state?.members) {
+        setGroupMembers(Object.values(channel.state.members));
+      }
+      
+      enqueueSnackbar('Member removed successfully', { variant: 'success' });
     } catch (error) {
       console.error('Error removing member:', error);
+      enqueueSnackbar('Failed to remove member', { variant: 'error' });
     }
+  };
+
+  const handleManageMembers = () => {
+    setShowMemberManagement(true);
+    setShowGroupSettings(false);
   };
 
   // Fetch employees data
@@ -1944,21 +2096,11 @@ const StreamChatPopover: React.FC = () => {
       const response = await channel.sendMessage(messageData);
 
       if (response?.message) {
-        setThreadReplies(prev => {
-          // Check if message already exists
-          const exists = prev.some(msg => msg.id === response.message.id);
-          if (!exists) {
-            return [...prev, response.message];
-          }
-          return prev;
-        });
-
-        // Update the reply count on the parent message
-        if (threadMessage) {
-          const updatedMessage = { ...threadMessage };
-          updatedMessage.reply_count = (updatedMessage.reply_count || 0) + 1;
-          setThreadMessage(updatedMessage);
-        }
+        const updatedMessage = { ...threadMessage };
+        updatedMessage.reply_count = (updatedMessage.reply_count || 0) + 1;
+        updatedMessage.thread_messages = [...(updatedMessage.thread_messages || []), response.message];
+        setThreadMessage(updatedMessage);
+        setThreadReplies(prev => [...prev, response.message]);
       }
       setThreadReply('');
     } catch (error) {
@@ -2014,35 +2156,6 @@ const StreamChatPopover: React.FC = () => {
     </Popover>
   );
 
-  const getFileIcon = (mimeType?: string) => {
-    if (!mimeType) return <InsertDriveFileIcon sx={{ fontSize: 40 }} />;
-    
-    if (mimeType.includes('pdf')) {
-      return <PictureAsPdfIcon sx={{ fontSize: 40, color: '#e94040' }} />;
-    }
-    if (mimeType.includes('image')) {
-      return <ImageIcon sx={{ fontSize: 40, color: '#4CAF50' }} />;
-    }
-    if (mimeType.includes('video')) {
-      return <VideoFileIcon sx={{ fontSize: 40, color: '#2196F3' }} />;
-    }
-    if (mimeType.includes('audio')) {
-      return <AudioFileIcon sx={{ fontSize: 40, color: '#9C27B0' }} />;
-    }
-    if (mimeType.includes('text')) {
-      return <DescriptionIcon sx={{ fontSize: 40, color: '#607D8B' }} />;
-    }
-    return <InsertDriveFileIcon sx={{ fontSize: 40, color: '#757575' }} />;
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
   const handleStartCall = async (isVideo: boolean = false) => {
     if (!videoClient || !channel || !user?.email) return;
 
@@ -2052,10 +2165,11 @@ const StreamChatPopover: React.FC = () => {
       console.log('Starting call...', { callId, isVideo });
       
       // Get channel members and format them as objects
-      const members = Object.entries(channel.state.members).map(([id, member]) => ({
-        user_id: id,
-        role: 'call_member'
-      }));
+      const members = Object.entries(channel.state?.members || {})
+        .map(([id, member]) => ({
+          user_id: id,
+          role: 'call_member'
+        }));
       console.log('Call members:', members);
 
       const newCall = videoClient.call('default', callId);
@@ -2229,7 +2343,7 @@ const StreamChatPopover: React.FC = () => {
     return () => {
       channel.off('message.new', handleNewMessage);
     };
-  }, [channel, videoClient, user, call]);
+  }, [channel, videoClient, user]);
 
   const getChannelAvatar = () => {
     if (!channel) return null;
@@ -2342,7 +2456,7 @@ const StreamChatPopover: React.FC = () => {
             wordBreak: 'break-word'
           }}
         >
-          {message.text}
+          <MessageContent content={message.text} />
         </Typography>
         {message.attachments?.length > 0 && (
           <Box sx={{ mt: 1 }}>
@@ -2374,7 +2488,7 @@ const StreamChatPopover: React.FC = () => {
                     />
                   </Box>
                 ) : (
-                  getFileIcon(attachment.mime_type)
+                  <InsertDriveFileIcon />
                 )}
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography variant="body2" noWrap>{attachment.title}</Typography>
@@ -2567,7 +2681,7 @@ const StreamChatPopover: React.FC = () => {
           setRemoteAudioLevel(Math.min(audioLevel * 200, 100));
         }
       } catch (error) {
-        console.error('Error updating audio levels:', error);
+      console.error('Error updating audio levels:', error);
       }
     };
 
@@ -2733,7 +2847,7 @@ const StreamChatPopover: React.FC = () => {
                         height: 60,
                         borderRadius: 1,
                         overflow: 'hidden',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.4)',
                         border: '2px solid rgba(255,255,255,0.8)'
                       }}
                     >
@@ -2815,7 +2929,7 @@ const StreamChatPopover: React.FC = () => {
               gap: 1.5,
               p: 1.5,
               bgcolor: 'background.paper',
-              borderTop: '1px solid',
+              borderTop: 1,
               borderColor: 'divider'
             }}
           >
@@ -2892,6 +3006,659 @@ const StreamChatPopover: React.FC = () => {
     );
   };
 
+  if (isLoading) {
+    return (
+      <Box
+        sx={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 3,
+          bgcolor: theme.palette.mode === 'dark' ? '#1a1a1a' : '#fff',
+          zIndex: 9999
+        }}
+      >
+        <CircularProgress size={48} color="primary" />
+        <Box sx={{ textAlign: 'center' }}>
+          <Typography variant="h6" color="primary" gutterBottom>
+            Initializing chat...
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Please wait while we set up your chat...
+          </Typography>
+        </Box>
+      </Box>
+    );
+  }
+
+  const GroupSettingsDialog = () => {
+    return (
+      <Dialog
+        open={showGroupSettings}
+        onClose={handleGroupSettingsClose}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            overflow: 'hidden'
+          }
+        }}
+      >
+        <DialogTitle
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            p: 2,
+            borderBottom: 1,
+            borderColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'divider'
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography variant="h6">Group Settings</Typography>
+            {channel?.data?.type === 'team' && (
+              <AvatarGroup max={4} sx={{ ml: 1 }}>
+                {groupMembers?.map((member: any) => (
+                  <Avatar 
+                    key={member.user_id}
+                    src={member.user?.image}
+                    sx={{ width: 24, height: 24 }}
+                  >
+                    {(member.user?.name || member.user_id)?.[0]?.toUpperCase() || '?'}
+                  </Avatar>
+                ))}
+              </AvatarGroup>
+            )}
+          </Box>
+          <IconButton onClick={handleGroupSettingsClose} size="small">
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <Tabs value={activeTab} onChange={(_, newValue) => setActiveTab(newValue)}>
+            <Tab label="General" />
+            <Tab label="Members" />
+            <Tab label="Files" />
+          </Tabs>
+        </Box>
+        <DialogContent sx={{ p: 0 }}>
+          {activeTab === 0 && (
+            <Box sx={{ p: 3 }}>
+              <Typography variant="subtitle1" gutterBottom>
+                Group Name
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+                <TextField
+                  fullWidth
+                  value={tempGroupName}
+                  onChange={(e) => setTempGroupName(e.target.value)}
+                  label="Group Name"
+                  placeholder="Enter group name"
+                  size="small"
+                />
+                <Button
+                  variant="contained"
+                  onClick={handleUpdateGroupName}
+                  disabled={!tempGroupName.trim() || tempGroupName === channel?.data?.name}
+                >
+                  Update
+                </Button>
+              </Box>
+            </Box>
+          )}
+          {activeTab === 1 && (
+            <Box sx={{ p: 3 }}>
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="subtitle1" gutterBottom>
+                  Add Members
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <Autocomplete
+                    multiple
+                    fullWidth
+                    options={filteredEmployees}
+                    getOptionLabel={(option) => option?.name || option?.email || ''}
+                    value={selectedMembers
+                      .map(email => filteredEmployees.find(emp => emp?.email === email))
+                      .filter(Boolean)}
+                    onChange={(_, newValue) => {
+                      setSelectedMembers(newValue.map(v => v?.email || '').filter(Boolean));
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        size="small"
+                        placeholder="Select members to add"
+                      />
+                    )}
+                    renderOption={(props, option) => (
+                      <Box component="li" {...props}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Avatar sx={{ width: 24, height: 24 }}>
+                            {option?.name?.[0] || option?.email?.[0] || '?'}
+                          </Avatar>
+                          <Box>
+                            <Typography variant="body2">{option?.name || option?.email || 'Unknown'}</Typography>
+                            {option?.name && option?.email && (
+                              <Typography variant="caption" color="text.secondary">
+                                {option.email}
+                              </Typography>
+                            )}
+                          </Box>
+                        </Box>
+                      </Box>
+                    )}
+                  />
+                  <Button
+                    variant="contained"
+                    onClick={handleAddMembers}
+                    disabled={selectedMembers.length === 0}
+                  >
+                    Add
+                  </Button>
+                </Box>
+              </Box>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" gutterBottom>
+                Current Members ({groupMembers?.length || 0})
+              </Typography>
+              <List sx={{ p: 0 }}>
+                {(groupMembers || []).map((member: any) => {
+                  if (!member) return null;
+                  return (
+                    <ListItem
+                      key={member.user_id || 'unknown'}
+                      secondaryAction={
+                        member.user_id !== chatClient?.userID && (
+                          <IconButton
+                            edge="end"
+                            onClick={() => handleRemoveMember(member.user_id)}
+                            size="small"
+                            color="error"
+                            disabled={!member.user_id}
+                          >
+                            <PersonRemoveIcon />
+                          </IconButton>
+                        )
+                      }
+                    >
+                      <ListItemAvatar>
+                        <Avatar src={member.user?.image}>
+                          {member.user?.name?.[0] || member.user_id?.[0] || '?'}
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={member.user?.name || member.user_id || 'Unknown Member'}
+                        secondary={member.user_id === chatClient?.userID ? 'You' : member.user?.email || 'No email'}
+                      />
+                    </ListItem>
+                  );
+                })}
+              </List>
+            </Box>
+          )}
+          {activeTab === 2 && (
+            <Box sx={{ p: 3 }}>
+              {groupFiles.length > 0 ? (
+                <Grid container spacing={2}>
+                  {groupFiles.map((file, index) => (
+                    <Grid item xs={12} sm={6} md={4} key={index}>
+                      <Paper
+                        sx={{
+                          p: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 2,
+                          cursor: 'pointer',
+                          '&:hover': {
+                            bgcolor: 'action.hover',
+                          },
+                          borderRadius: 1,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          overflow: 'hidden'
+                        }}
+                        onClick={() => window.open(file.asset_url, '_blank')}
+                      >
+                        {getFileIcon(file.mime_type)}
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Typography variant="body2" noWrap>{file.title}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {formatFileSize(file.file_size)}
+                          </Typography>
+                        </Box>
+                        <IconButton size="small">
+                          <DownloadIcon />
+                        </IconButton>
+                      </Paper>
+                    </Grid>
+                  ))}
+                </Grid>
+              ) : (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 2,
+                    p: 4
+                  }}
+                >
+                  <AttachFileIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                  <Typography color="text.secondary">
+                    No files shared in this group yet
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
+  // Helper function to get other user in DM
+  const getOtherUser = (ch: Channel) => {
+    if (!ch?.state?.members || !chatClient?.userID) return null;
+    return Object.values(ch.state.members).find(
+      (m) => m?.user_id !== chatClient.userID
+    )?.user;
+  };
+
+  const renderChatList = () => {
+    return sortChannels(channels).map((ch) => {
+      if (!ch) return null;
+
+      const isGroupChat = ch.data?.type === 'team';
+      const messages = ch.state?.messages || [];
+      const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+      const unreadCount = ch.state?.unread_count || 0;
+
+      // For group chats, use channel data
+      const channelName = isGroupChat ? ch.data?.name : null;
+      const channelImage = isGroupChat ? ch.data?.image : null;
+
+      // For DMs, show the other person's name and info
+      const otherUser = !isGroupChat ? getOtherUser(ch) : null;
+
+      return (
+        <ListItem
+          key={ch.id}
+          button
+          selected={channel?.id === ch.id}
+          onClick={() => handleChannelSelect(ch)}
+          sx={{
+            py: 1.5,
+            borderBottom: 1,
+            borderColor: 'divider',
+            '&:hover': { 
+              backgroundColor: 'action.hover',
+              '& .MuiAvatar-root': {
+                transform: 'scale(1.1)',
+                transition: 'transform 0.2s ease'
+              }
+            }
+          }}
+        >
+          <ListItemAvatar sx={{ minWidth: 56 }}>
+            {isGroupChat ? (
+              <AvatarGroup max={2} spacing="small" sx={{ '& .MuiAvatar-root': { width: 32, height: 32 } }}>
+                {Object.values(ch.state?.members || {})
+                  .slice(0, 2)
+                  .map((member: any) => (
+                    <Avatar 
+                      key={member?.user_id} 
+                      src={member?.user?.image}
+                      sx={{ border: '2px solid', borderColor: 'background.paper' }}
+                    >
+                      {member?.user?.name?.[0]?.toUpperCase() || '?'}
+                    </Avatar>
+                  ))}
+              </AvatarGroup>
+            ) : (
+              <Avatar 
+                src={otherUser?.image} 
+                sx={{ 
+                  width: 40, 
+                  height: 40,
+                  border: '2px solid',
+                  borderColor: 'background.paper'
+                }}
+              >
+                {otherUser?.name?.[0]?.toUpperCase() || '?'}
+              </Avatar>
+            )}
+          </ListItemAvatar>
+          <ListItemText
+            primary={
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography 
+                  variant="subtitle1" 
+                  noWrap 
+                  sx={{ 
+                    fontWeight: 500,
+                    color: unreadCount > 0 ? 'text.primary' : 'text.secondary'
+                  }}
+                >
+                  {isGroupChat ? channelName : otherUser?.name || 'Unknown'}
+                </Typography>
+                {lastMessage?.created_at && (
+                  <Typography 
+                    variant="caption"
+                    sx={{ 
+                      color: 'text.secondary',
+                      fontSize: '0.75rem'
+                    }}
+                  >
+                    {formatMessageTime(lastMessage.created_at)}
+                  </Typography>
+                )}
+              </Box>
+            }
+            secondary={
+              <Box sx={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                gap: 1
+              }}>
+                <Typography 
+                  variant="body2" 
+                  noWrap 
+                  sx={{ 
+                    color: unreadCount > 0 ? 'text.primary' : 'text.secondary',
+                    flex: 1,
+                    fontWeight: unreadCount > 0 ? 500 : 400
+                  }}
+                >
+                  {lastMessage?.text ? stripHtmlTags(lastMessage.text) : 'No messages yet'}
+                </Typography>
+                {unreadCount > 0 && (
+                  <Box sx={{ 
+                    bgcolor: 'primary.main', 
+                    color: 'primary.contrastText', 
+                    borderRadius: '50%',
+                    width: 20,
+                    height: 20,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.75rem',
+                    fontWeight: 500
+                  }}>
+                    {unreadCount}
+                  </Box>
+                )}
+              </Box>
+            }
+            sx={{ ml: 1 }}
+          />
+        </ListItem>
+      );
+    });
+  };
+
+  const handleCreateTask = async () => {
+    if (!taskTitle.trim() || !taskDueDate || !channel) return;
+
+    try {
+      // Get the other user's email for task assignment
+      const otherUser = getOtherUser(channel);
+      const assigneeEmail = otherUser?.email || '';
+
+      // Create task using the existing task API
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/stream/tasks/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user?.token}` // Add auth token
+        },
+        body: JSON.stringify({
+          title: taskTitle,
+          description: taskDescription,
+          dueDate: taskDueDate.toISOString(),
+          priority: taskPriority,
+          assignee: assigneeEmail,
+          assignedBy: user?.email,
+          status: 'pending',
+          type: 'chat_task',
+          chatId: channel.cid,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to create task');
+      }
+
+      const task = await response.json();
+
+      // Send a message in the chat about the task
+      await channel.sendMessage({
+        text: `📋 Created a new task: ${taskTitle}`,
+        taskId: task.id, // Custom field for task reference
+        custom: {
+          task: {
+            id: task.id,
+            title: taskTitle,
+            dueDate: taskDueDate.toISOString(),
+            priority: taskPriority,
+            status: 'pending'
+          }
+        }
+      });
+
+      // Reset form and close dialog
+      setTaskTitle('');
+      setTaskDescription('');
+      setTaskDueDate(null);
+      setTaskPriority('medium');
+      setShowTaskDialog(false);
+      
+      enqueueSnackbar('Task created successfully', { variant: 'success' });
+    } catch (error: any) {
+      console.error('Error creating task:', error);
+      enqueueSnackbar(error.message || 'Failed to create task', { 
+        variant: 'error',
+        autoHideDuration: 4000
+      });
+    }
+  };
+
+  const handleTaskClose = () => {
+    setTaskAnchorEl(null);
+    setTaskTitle('');
+    setTaskDescription('');
+    setTaskDueDate(null);
+    setTaskPriority('medium');
+  };
+
+  const TaskForm = () => (
+    <Popover
+      open={Boolean(taskAnchorEl)}
+      anchorEl={taskAnchorEl}
+      onClose={handleTaskClose}
+      anchorOrigin={{
+        vertical: 'bottom',
+        horizontal: 'right',
+      }}
+      transformOrigin={{
+        vertical: 'top',
+        horizontal: 'right',
+      }}
+    >
+      <Box sx={{ 
+        p: 3, 
+        width: 400,
+        maxWidth: '90vw',
+        display: 'flex', 
+        flexDirection: 'column', 
+        gap: 2 
+      }}>
+        <Typography variant="h6" sx={{ mb: 1 }}>Create Task</Typography>
+        <TextField
+          label="Title"
+          fullWidth
+          value={taskTitle}
+          onChange={(e) => setTaskTitle(e.target.value)}
+          size="small"
+        />
+        <TextField
+          label="Description"
+          fullWidth
+          multiline
+          rows={3}
+          value={taskDescription}
+          onChange={(e) => setTaskDescription(e.target.value)}
+          size="small"
+        />
+        <DateTimePicker
+          label="Due Date"
+          value={taskDueDate}
+          onChange={(newValue) => setTaskDueDate(newValue)}
+          slotProps={{
+            textField: {
+              fullWidth: true,
+              size: "small"
+            }
+          }}
+        />
+        <FormControl fullWidth size="small">
+          <InputLabel>Priority</InputLabel>
+          <Select
+            value={taskPriority}
+            onChange={(e) => setTaskPriority(e.target.value as 'low' | 'medium' | 'high')}
+            label="Priority"
+          >
+            <MenuItem value="low">Low</MenuItem>
+            <MenuItem value="medium">Medium</MenuItem>
+            <MenuItem value="high">High</MenuItem>
+          </Select>
+        </FormControl>
+        {channel && !channel.data?.type?.includes('team') && (
+          <Typography variant="body2" color="text.secondary">
+            Task will be assigned to: {getOtherUser(channel)?.email || 'Unknown'}
+          </Typography>
+        )}
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 1 }}>
+          <Button onClick={handleTaskClose}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            onClick={async () => {
+              await handleCreateTask();
+              handleTaskClose();
+            }}
+            disabled={!taskTitle.trim() || !taskDueDate}
+          >
+            Create Task
+          </Button>
+        </Box>
+      </Box>
+    </Popover>
+  );
+
+  const FilePreview = ({ attachment }: { attachment: any }) => {
+    const isImage = attachment.mime_type?.startsWith('image/');
+    const isPdf = attachment.mime_type === 'application/pdf';
+    const isVideo = attachment.mime_type?.startsWith('video/');
+    const isAudio = attachment.mime_type?.startsWith('audio/');
+
+    if (isImage) {
+      return (
+        <Box sx={{ 
+          position: 'relative',
+          width: '100%',
+          maxWidth: 300,
+          borderRadius: 1,
+          overflow: 'hidden',
+          '&:hover': {
+            '& .image-overlay': {
+              opacity: 1,
+            }
+          }
+        }}>
+          <img 
+            src={attachment.asset_url} 
+            alt={attachment.title || 'Image'} 
+            style={{
+              width: '100%',
+              height: 'auto',
+              maxHeight: 200,
+              objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+          <Box
+            className="image-overlay"
+            sx={{
+              position: 'absolute',
+              bottom: -6,
+              right: -6,
+              bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : '#fff',
+              borderRadius: '50%',
+              width: 24,
+              height: 24,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: 0,
+              transition: 'opacity 0.2s',
+              cursor: 'pointer',
+            }}
+            onClick={() => window.open(attachment.asset_url, '_blank')}
+          >
+            <Typography color="white" variant="body2">
+              Click to view
+            </Typography>
+          </Box>
+        </Box>
+      );
+    }
+
+    const getIcon = () => {
+      if (isPdf) return <PdfIcon sx={{ fontSize: '2rem' }} />;
+      if (isVideo) return <VideoFileIcon sx={{ fontSize: '2rem' }} />;
+      if (isAudio) return <AudioFileIcon sx={{ fontSize: '2rem' }} />;
+      return <InsertDriveFileIcon sx={{ fontSize: '2rem' }} />;
+    };
+
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          p: 2,
+          bgcolor: 'background.paper',
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+          cursor: 'pointer',
+          transition: 'all 0.2s',
+          '&:hover': {
+            bgcolor: 'action.hover',
+          },
+        }}
+        onClick={() => window.open(attachment.asset_url, '_blank')}
+      >
+        {getIcon()}
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="body2" noWrap>{attachment.title}</Typography>
+          <Typography variant="caption" color="text.secondary">
+            {formatFileSize(attachment.file_size)}
+          </Typography>
+        </Box>
+      </Box>
+    );
+  };
+
   return (
     <Box
       sx={{
@@ -2942,14 +3709,14 @@ const StreamChatPopover: React.FC = () => {
           <Box sx={{ width: 280, borderRight: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column' }}>
             {/* User status selector */}
             <Box sx={{ 
-          p: 2.5, 
-          borderBottom: 1, 
-          borderColor: 'divider',
-          bgcolor: 'background.paper',
-          position: 'sticky',
-          top: 0,
-          zIndex: 1
-        }}>
+              p: 2.5, 
+              borderBottom: 1, 
+              borderColor: 'divider',
+              bgcolor: 'background.paper',
+              position: 'sticky',
+              top: 0,
+              zIndex: 1
+            }}>
               <Button
                 fullWidth
                 onClick={handleStatusClick}
@@ -3011,117 +3778,7 @@ const StreamChatPopover: React.FC = () => {
 
             {/* Chat list */}
             <List sx={{ flex: 1, overflow: 'auto' }}>
-              {sortChannels(channels).map((ch) => {
-                const isGroupChat = ch.data?.type === 'team';
-                const messages = ch.state?.messages || [];
-                const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-                const unreadCount = ch.state?.unread_count || 0;
-
-                // For group chats, use channel data
-                const channelName = isGroupChat ? ch.data?.name : null;
-                const channelImage = isGroupChat ? ch.data?.image : null;
-
-                // For DMs, show the other person's name and info
-                const otherUser = !isGroupChat && ch.state.members
-                  ? Object.values(ch.state.members).find(
-                      (m) => m.user_id !== chatClient?.userID
-                    )?.user
-                  : null;
-
-                return (
-                  <ListItem
-                    key={ch.id}
-                    button
-                    selected={channel?.id === ch.id}
-                    onClick={() => handleChannelSelect(ch)}
-                  >
-                    <ListItemAvatar>
-                      {isGroupChat ? (
-                        <AvatarGroup
-                          max={3}
-                          sx={{
-                            '& .MuiAvatar-root': {
-                              width: 24,
-                              height: 24,
-                              fontSize: '0.75rem',
-                              border: 'none'
-                            }
-                          }}
-                        >
-                          {Object.values(ch.data?.data?.members || {}).map((member: any, index: number) => (
-                            <Avatar
-                              key={index}
-                              src={member.image}
-                              alt={member.name}
-                              sx={{ width: 24, height: 24 }}
-                            >
-                              {member.name?.[0]}
-                            </Avatar>
-                          ))}
-                        </AvatarGroup>
-                      ) : (
-                        <Badge
-                          variant="dot"
-                          sx={{
-                            '& .MuiBadge-badge': {
-                              backgroundColor: getStatusColor(otherUser?.status),
-                            },
-                          }}
-                        >
-                          <Avatar src={channelImage}>
-                            {(otherUser?.name || otherUser?.id)[0]?.toUpperCase()}
-                          </Avatar>
-                        </Badge>
-
-                      )}
-                    </ListItemAvatar>
-                    <ListItemText
-                      primary={
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          {isGroupChat ? (
-                            <GroupIcon fontSize="small" color="action" />
-                          ) : (
-                            <PersonIcon fontSize="small" color="action" />
-                          )}
-                          <Typography>
-                            {isGroupChat ? channelName : otherUser?.name || 'Unknown User'}
-                          </Typography>
-                        </Box>
-                      }
-                      secondary={
-                        <Box
-                          sx={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 1,
-                          }}
-                        >
-                          <Typography
-                            variant="body2"
-                            color="text.secondary"
-                            sx={{
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              flex: 1,
-                            }}
-                          >
-                            {lastMessage?.text || 'No messages yet'}
-                          </Typography>
-                          {unreadCount > 0 && (
-                            <Chip
-                              size="small"
-                              label={unreadCount}
-                              color="primary"
-                              sx={{ minWidth: 'auto' }}
-                            />
-                          )}
-                        </Box>
-                      }
-                    />
-                  </ListItem>
-                );
-              })}
+              {renderChatList()}
             </List>
 
             {/* Chat actions */}
@@ -3177,29 +3834,23 @@ const StreamChatPopover: React.FC = () => {
                     {/* Channel Info */}
                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: pinnedMessages.length > 0 ? 1 : 0 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Avatar
-                          src={channel?.data?.image || ''}
-                          sx={{ width: 40, height: 40 }}
-                        >
-                          {channel?.data?.type === 'team' ? <GroupIcon /> : getChannelAvatar()}
-                        </Avatar>
-                        <Box>
-                          <Typography variant="h6" sx={{ fontWeight: 500 }}>
-                            {getChannelDisplayName()}
-                          </Typography>
-                          {typingUsers && Object.keys(typingUsers).length > 0 && (
-                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                              {formatTypingIndicator()}
-                            </Typography>
-                          )}
-                        </Box>
+                        <Typography variant="h6">{getChannelDisplayName()}</Typography>
+                        {channel?.data?.type === 'team' && (
+                          <AvatarGroup max={3} sx={{ ml: 1 }}>
+                            {Object.values(channel.state?.members || {})
+                              .map((member: any) => (
+                                <Avatar 
+                                  key={member.user_id} 
+                                  src={member.user?.image}
+                                  sx={{ width: 24, height: 24 }}
+                                >
+                                  {member.user?.name?.[0] || '?'}
+                                </Avatar>
+                              ))}
+                          </AvatarGroup>
+                        )}
                       </Box>
                       <Box sx={{ display: 'flex', gap: 1 }}>
-                        {channel?.data?.type === 'team' && (
-                          <IconButton onClick={handleGroupSettingsClick}>
-                            <SettingsIcon />
-                          </IconButton>
-                        )}
                         <IconButton 
                           onClick={() => setShowPinnedMessages(!showPinnedMessages)}
                           color={showPinnedMessages ? "primary" : "default"}
@@ -3208,12 +3859,28 @@ const StreamChatPopover: React.FC = () => {
                             <PushPinIcon />
                           </Badge>
                         </IconButton>
-                        <IconButton onClick={() => handleStartCall(false)}>
-                          <CallIcon />
-                        </IconButton>
-                        <IconButton onClick={() => handleStartCall(true)}>
-                          <VideocamIcon />
-                        </IconButton>
+                        <Tooltip title="Voice Call">
+                          <IconButton onClick={() => handleStartCall(false)}>
+                            <CallIcon />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Video Call">
+                          <IconButton onClick={() => handleStartCall(true)}>
+                            <VideocamIcon />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Create Task">
+                          <IconButton onClick={(e) => setTaskAnchorEl(e.currentTarget)}>
+                            <AssignmentIcon />
+                          </IconButton>
+                        </Tooltip>
+                        {channel?.data?.type === 'team' && (
+                          <Tooltip title="Group Settings">
+                            <IconButton onClick={handleGroupSettingsClick}>
+                              <SettingsIcon />
+                            </IconButton>
+                        </Tooltip>
+                        )}
                       </Box>
                     </Box>
 
@@ -3271,8 +3938,8 @@ const StreamChatPopover: React.FC = () => {
                                   <Typography variant="caption" sx={{ fontWeight: 500 }}>
                                     {msg.user?.name || msg.user?.id}
                                   </Typography>
-                                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                    • {formatMessageTime(msg.created_at)}
+                                  <Typography variant="caption" color="text.secondary">
+                                    {formatMessageTime(msg.created_at)}
                                   </Typography>
                                 </Box>
                                 <Typography>{msg.text}</Typography>
@@ -3286,199 +3953,179 @@ const StreamChatPopover: React.FC = () => {
 
                   {/* Messages Area */}
                   <Box sx={{ flex: 1, overflowY: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    {messages.map((msg) => (
+                    {messages.map((msg, index) => (
                       <Box
                         key={msg.id}
                         sx={{
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: msg.user?.id === chatClient?.userID ? 'flex-end' : 'flex-start',
+                          maxWidth: '85%',
+                          width: '100%',
+                          alignSelf: msg.user?.id === chatClient?.userID ? 'flex-end' : 'flex-start',
+                          pl: msg.user?.id === chatClient?.userID ? 'auto' : 0,
+                          pr: msg.user?.id === chatClient?.userID ? 0 : 'auto',
                           position: 'relative',
-                          mx: 2,
-                          mb: 1,
                           '&:hover .message-actions': {
-                            opacity: 1
-                          }
+                            opacity: 1,
+                          },
                         }}
                       >
-                        {msg.user?.id === chatClient?.userID && (
+                        <Box
+                          className="message-actions"
+                          sx={{
+                            position: 'absolute',
+                            top: -28,
+                            right: msg.user?.id === chatClient?.userID ? 0 : 'auto',
+                            left: msg.user?.id === chatClient?.userID ? 'auto' : 0,
+                            display: 'flex',
+                            gap: 0.5,
+                            bgcolor: 'background.paper',
+                            borderRadius: 2,
+                            boxShadow: 2,
+                            opacity: 0,
+                            transition: 'opacity 0.2s',
+                            zIndex: 1,
+                          }}
+                        >
                           <IconButton
                             size="small"
-                            className="message-actions"
-                            onClick={(e) => {
-                              setSelectedMessage(msg);
-                              setMessageMenuAnchor(e.currentTarget);
-                            }}
-                            sx={{
-                              position: 'absolute',
-                              right: -32,
-                              top: 0,
-                              opacity: 0,
-                              transition: 'opacity 0.2s',
-                              color: 'text.secondary'
+                            onClick={() => handleReactionClick(msg)}
+                          >
+                            <EmojiIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton
+                            size="small"
+                            onClick={() => {
+                              setThreadMessage(msg);
+                              setShowThread(true);
                             }}
                           >
-                            <MoreVertIcon fontSize="small" />
+                            <ReplyIcon fontSize="small" />
                           </IconButton>
-                        )}
-                        
-                        <Box sx={{ 
-                          maxWidth: '70%',
-                          bgcolor: msg.user?.id === chatClient?.userID ? 'primary.main' : 'grey.100',
-                          color: msg.user?.id === chatClient?.userID ? 'white' : 'text.primary',
-                          borderRadius: 2,
-                          p: 1,
-                        }}>
-                          {(!msg.parent_id || msg.show_in_channel) && (
-                            <Box sx={{ 
-                              mb: 0.5, 
-                              display: 'flex', 
-                              justifyContent: 'space-between',
-                              alignItems: 'center'
-                            }}>
-                              <Typography 
-                                variant="body2" 
-                                sx={{ 
-                                  color: msg.user?.id === chatClient?.userID 
-                                    ? 'rgba(255, 255, 255, 0.8)' 
-                                    : 'rgba(0, 0, 0, 0.6)',
-                                  fontWeight: 500
-                                }}
-                              >
-                                {msg.user?.name || msg.user?.id}
-                              </Typography>
-                              <Typography 
-                                variant="caption"
-                                sx={{ 
-                                  color: msg.user?.id === chatClient?.userID 
-                                    ? 'rgba(255, 255, 255, 0.7)' 
-                                    : 'rgba(0, 0, 0, 0.5)',
-                                  ml: 1
-                                }}
-                              >
-                                {formatMessageTime(msg.created_at)}
-                              </Typography>
-                            </Box>
-                          )}
-                          {editingMessage?.id === msg.id ? (
-                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', minWidth: 200 }}>
-                              <TextField
-                                fullWidth
-                                multiline
-                                value={editText}
-                                onChange={(e) => setEditText(e.target.value)}
-                                size="small"
-                                autoFocus
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    handleSaveEdit();
-                                  } else if (e.key === 'Escape') {
-                                    setEditingMessage(null);
-                                    setEditText('');
-                                  }
-                                }}
-                                sx={{
-                                  '& .MuiOutlinedInput-root': {
-                                    bgcolor: 'background.paper'
-                                  }
-                                }}
-                              />
-                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                                <IconButton 
-                                  size="small" 
-                                  color="primary"
-                                  onClick={handleSaveEdit}
-                                >
-                                  <CheckIcon fontSize="small" />
-                                </IconButton>
-                                <IconButton 
-                                  size="small" 
-                                  color="error"
-                                  onClick={() => {
-                                    setEditingMessage(null);
-                                    setEditText('');
-                                  }}
-                                >
-                                  <CloseIcon fontSize="small" />
-                                </IconButton>
-                              </Box>
-                            </Box>
-                          ) : (
+                          <IconButton
+                            size="small"
+                            onClick={() => handleForward(msg)}
+                          >
+                            <ForwardIcon fontSize="small" />
+                          </IconButton>
+                          {msg.user?.id === chatClient?.userID && (
                             <>
-                              {renderMessage(msg)}
-                              
-                              {/* Message Actions */}
-                              <Box
-                                className="message-actions"
-                                sx={{
-                                  position: 'absolute',
-                                  top: -30,
-                                  right: msg.user?.id === chatClient?.userID ? 0 : 'auto',
-                                  left: msg.user?.id === chatClient?.userID ? 'auto' : 0,
-                                  display: 'flex',
-                                  gap: 0.5,
-                                  bgcolor: 'background.paper',
-                                  borderRadius: 1,
-                                  boxShadow: 1,
-                                  p: 0.5,
-                                  opacity: 0,
-                                  transition: 'opacity 0.2s',
-                                  zIndex: 1,
-                                }}
+                              <IconButton
+                                size="small"
+                                onClick={() => handleEdit(msg)}
                               >
-                                <IconButton
-                                  size="small"
-                                  onClick={(e) => handleReactionClick(e, msg)}
-                                >
-                                  <AddReactionIcon />
-                                </IconButton>
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleThreadClick(msg)}
-                                >
-                                  <ChatBubbleOutlineIcon />
-                                </IconButton>
-                              </Box>
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                onClick={() => handleDelete(msg)}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </>
+                          )}
+                          <IconButton
+                            size="small"
+                            onClick={() => handlePin(msg)}
+                          >
+                            <PushPinIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
 
-                              {/* Thread Reply Count */}
-                              {(msg.reply_count > 0 || messageUpdates[msg.id]) && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                          {!msg.user?.id === chatClient?.userID && (
+                            <Avatar
+                              src={msg.user?.image}
+                              sx={{ 
+                                width: 24, 
+                                height: 24,
+                                fontSize: '0.875rem'
+                              }}
+                            >
+                              {msg.user?.name?.[0]}
+                            </Avatar>
+                          )}
+                          <Typography variant="caption" color="text.secondary">
+                            {msg.user?.name}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {formatMessageTime(msg.created_at)}
+                          </Typography>
+                          {msg.user?.id === chatClient?.userID && (
+                            <Avatar
+                              src={msg.user?.image}
+                              sx={{ 
+                                width: 24, 
+                                height: 24,
+                                fontSize: '0.875rem'
+                              }}
+                            >
+                              {msg.user?.name?.[0]}
+                            </Avatar>
+                          )}
+                        </Box>
+
+                        <Box sx={{ flex: 1, overflow: 'auto' }}>
+                          {msg.text && (
+                            <Box
+                              sx={{
+                                bgcolor: msg.user?.id === chatClient?.userID ? 'primary.main' : 'grey.100',
+                                color: msg.user?.id === chatClient?.userID ? 'white' : 'text.primary',
+                                borderRadius: 2,
+                                px: 2,
+                                py: 1.5,
+                                position: 'relative',
+                                maxWidth: '85%',
+                                alignSelf: msg.user?.id === chatClient?.userID ? 'flex-end' : 'flex-start',
+                                '& a': {
+                                  color: msg.user?.id === chatClient?.userID ? 'white' : 'primary.main',
+                                },
+                                '& p': {
+                                  m: 0,
+                                  fontSize: '0.9375rem',
+                                  lineHeight: 1.6,
+                                },
+                                '& ul, & ol': {
+                                  m: 0,
+                                  pl: 2.5,
+                                },
+                                wordBreak: 'break-word',
+                                boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                                minWidth: '120px',
+                              }}
+                              dangerouslySetInnerHTML={{ __html: msg.text }}
+                            />
+                          )}
+
+                          {msg.attachments && msg.attachments.length > 0 && (
+                            <Box sx={{ 
+                              display: 'flex', 
+                              flexDirection: 'column', 
+                              gap: 1,
+                              maxWidth: '85%',
+                              alignSelf: msg.user?.id === chatClient?.userID ? 'flex-end' : 'flex-start',
+                            }}>
+                              {msg.attachments.map((attachment: any, index: number) => (
                                 <Box
-                                  onClick={() => handleThreadClick(msg)}
+                                  key={index}
                                   sx={{
-                                    mt: 0.5,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 0.5,
-                                    cursor: 'pointer',
-                                    bgcolor: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.08)',
-                                    color: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.7)',
-                                    borderRadius: 1,
-                                    px: 1,
-                                    py: 0.25,
-                                    '&:hover': {
-                                      bgcolor: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.12)',
-                                    }
+                                    maxWidth: '100%',
+                                    bgcolor: msg.user?.id === chatClient?.userID ? 'primary.main' : 'grey.100',
+                                    color: msg.user?.id === chatClient?.userID ? 'white' : 'text.primary',
+                                    borderRadius: 2,
+                                    overflow: 'hidden',
                                   }}
                                 >
-                                  <ChatBubbleOutlineIcon sx={{ fontSize: 16 }} />
-                                  <Typography variant="body2">
-                                    {(msg.reply_count || 0) + (messageUpdates[msg.id] || 0)} {((msg.reply_count || 0) + (messageUpdates[msg.id] || 0)) === 1 ? 'reply' : 'replies'}
-                                  </Typography>
+                                  <FilePreview attachment={attachment} />
                                 </Box>
-                              )}
-
-                              {/* Reactions */}
-                              {msg.latest_reactions && msg.latest_reactions.length > 0 && (
-                                <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
-                                  {renderReactions(msg, msg.latest_reactions)}
-                                </Box>
-                              )}
-                            </>
+                              ))}
+                            </Box>
                           )}
                         </Box>
                       </Box>
                     ))}
+                    <div ref={messagesEndRef} />
                   </Box>
 
                   {/* Message Input */}
@@ -3498,39 +4145,73 @@ const StreamChatPopover: React.FC = () => {
                               borderRadius: 1
                             }}
                           >
-                            <Box sx={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {file.type?.startsWith('image/') ? (
-                                <img 
-                                  src={URL.createObjectURL(file)} 
+                            {file.type?.startsWith('image/') ? (
+                              <Box
+                                sx={{
+                                  width: 48,
+                                  height: 48,
+                                  borderRadius: 1,
+                                  overflow: 'hidden',
+                                  bgcolor: 'background.paper',
+                                  border: '1px solid',
+                                  borderColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : '#e9ecef',
+                                  boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                                }}
+                              >
+                                <img
+                                  src={URL.createObjectURL(file)}
                                   alt={file.name}
                                   style={{
-                                    width: '100%', 
-                                    height: '100%', 
-                                    objectFit: 'cover',
-                                    borderRadius: 4
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'cover'
                                   }}
                                 />
-                              ) : (
-                                getFileIcon(file.type)
-                              )}
-                            </Box>
+                              </Box>
+                            ) : (
+                              <Box
+                                sx={{
+                                  width: 48,
+                                  height: 48,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : '#fff',
+                                  borderRadius: 1,
+                                  border: '1px solid',
+                                  borderColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : '#e9ecef',
+                                  boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                                }}
+                              >
+                                <InsertDriveFileIcon />
+                              </Box>
+                            )}
                             <Box sx={{ flex: 1, minWidth: 0 }}>
-                              <Typography variant="body2" noWrap>{file.name}</Typography>
-                              <Typography variant="caption" color="text.secondary">
+                              <Typography 
+                                variant="body2" 
+                                noWrap 
+                                sx={{ 
+                                  fontWeight: 500,
+                                  color: theme.palette.mode === 'dark' ? '#fff' : '#000'
+                                }}
+                              >
+                                {file.name}
+                              </Typography>
+                              <Typography 
+                                variant="caption" 
+                                sx={{ 
+                                  color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.7)' : 'text.secondary'
+                                }}
+                              >
                                 {formatFileSize(file.size)}
                               </Typography>
                             </Box>
-                            {file.type?.startsWith('image/') && (
-                              <IconButton size="small" onClick={() => handleFilePreview(file)}>
-                                <VisibilityIcon />
-                              </IconButton>
-                            )}
                           </Box>
                         ))}
                       </Box>
                     )}
 
-                    <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Box sx={{ display: 'flex', gap: 1, width: '100%' }}>
                       <input
                         type="file"
                         multiple
@@ -3545,25 +4226,12 @@ const StreamChatPopover: React.FC = () => {
                       >
                         <AttachFileIcon />
                       </IconButton>
-                      <TextField
-                        fullWidth
-                        multiline
-                        maxRows={4}
-                        placeholder="Type a message..."
+                      <RichTextEditor
                         value={messageText}
-                        onChange={handleMessageInputChange}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSendMessage();
-                          }
-                        }}
-                        onInput={handleTyping}
-                        sx={{
-                          '& .MuiOutlinedInput-root': {
-                            borderRadius: 2,
-                          },
-                        }}
+                        onChange={(value) => setMessageText(value)}
+                        onSubmit={handleSendMessage}
+                        placeholder="Type a message..."
+                        sx={{ width: '100%' }}
                       />
                     </Box>
                   </Box>
@@ -3602,19 +4270,19 @@ const StreamChatPopover: React.FC = () => {
                           gap: 1, 
                           mb: 1 
                         }}>
-                          <Avatar 
+                          <Avatar
                             src={threadMessage.user?.image}
                             sx={{ width: 32, height: 32 }}
                           >
-                            {threadMessage.user?.name?.[0] || threadMessage.user?.id[0]}
+                            {threadMessage.user?.name?.[0]}
                           </Avatar>
                           <Box>
-                            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, mb: 0.5 }}>
                               <Typography variant="subtitle2">
                                 {threadMessage.user?.name || threadMessage.user?.id}
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
-                                {new Date(threadMessage.created_at).toLocaleString()}
+                                {formatMessageTime(threadMessage.created_at)}
                               </Typography>
                             </Box>
                             <Typography>{threadMessage.text}</Typography>
@@ -3625,7 +4293,7 @@ const StreamChatPopover: React.FC = () => {
 
                     {/* Thread Replies */}
                     <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
-                      {Array.isArray(threadReplies) && threadReplies.map((reply: any) => (
+                      {threadMessage?.reply_count > 0 && threadMessage.thread_messages?.map((reply: any) => (
                         <Box
                           key={reply.id}
                           sx={{
@@ -3638,15 +4306,15 @@ const StreamChatPopover: React.FC = () => {
                             src={reply.user?.image}
                             sx={{ width: 32, height: 32 }}
                           >
-                            {reply.user?.name?.[0] || reply.user?.id[0]}
+                            {reply.user?.name?.[0]}
                           </Avatar>
                           <Box>
-                            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
                               <Typography variant="subtitle2">
                                 {reply.user?.name || reply.user?.id}
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
-                                {new Date(reply.created_at).toLocaleString()}
+                                {formatMessageTime(reply.created_at)}
                               </Typography>
                             </Box>
                             <Typography>{reply.text}</Typography>
@@ -3657,31 +4325,11 @@ const StreamChatPopover: React.FC = () => {
 
                     {/* Thread Reply Input */}
                     <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
-                      <TextField
-                        fullWidth
-                        size="small"
-                        placeholder="Reply to thread..."
+                      <RichTextEditor
                         value={threadReply}
-                        onChange={(e) => setThreadReply(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSendThreadReply();
-                          }
-                        }}
-                        InputProps={{
-                          endAdornment: (
-                            <InputAdornment position="end">
-                              <IconButton
-                                onClick={handleSendThreadReply}
-                                disabled={!threadReply.trim()}
-                                color="primary"
-                              >
-                                <SendIcon />
-                              </IconButton>
-                            </InputAdornment>
-                          ),
-                        }}
+                        onChange={(value) => setThreadReply(value)}
+                        onSubmit={handleSendThreadReply}
+                        placeholder="Reply to thread..."
                       />
                     </Box>
                   </Box>
@@ -3779,7 +4427,7 @@ const StreamChatPopover: React.FC = () => {
                   </ListItemAvatar>
                   <ListItemText 
                     primary={member.user.name || member.user.id}
-                    secondary={member.user.id === chatClient?.userID ? '(You)' : ''}
+                    secondary={member.user.id === chatClient?.userID ? '(You)' : member.user?.email || 'No email'}
                   />
                 </ListItem>
               ))}
@@ -4130,6 +4778,126 @@ const StreamChatPopover: React.FC = () => {
       </Dialog>
 
       {CallDialogComponent()}
+      <GroupSettingsDialog />
+      <TaskForm />
+      
+      {/* Thread Dialog */}
+      <Dialog 
+        open={showThread} 
+        onClose={() => setShowThread(false)} 
+        maxWidth="sm" 
+        fullWidth
+        sx={{
+          '& .MuiDialog-paper': {
+            height: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+          },
+        }}
+      >
+        <DialogTitle sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          p: 2,
+          borderBottom: '1px solid',
+          borderColor: 'divider'
+        }}>
+          <Typography variant="h6">Thread</Typography>
+          <IconButton size="small" onClick={() => setShowThread(false)}>
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ 
+          p: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          overflow: 'hidden'
+        }}>
+          {threadMessage && (
+            <>
+              <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: 1, 
+                  mb: 1 
+                }}>
+                  <Avatar
+                    src={threadMessage.user?.image}
+                    sx={{ width: 24, height: 24 }}
+                  >
+                    {threadMessage.user?.name?.[0]}
+                  </Avatar>
+                  <Box>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, mb: 0.5 }}>
+                      <Typography variant="subtitle2">
+                        {threadMessage.user?.name || threadMessage.user?.id}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {formatMessageTime(threadMessage.created_at)}
+                      </Typography>
+                    </Box>
+                    <Typography>{threadMessage.text}</Typography>
+                  </Box>
+                </Box>
+              </Box>
+              
+              <Box sx={{ 
+                flex: 1, 
+                overflow: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+                p: 2,
+              }}>
+                {threadMessage?.reply_count > 0 && threadMessage.thread_messages?.map((reply: any) => (
+                  <Box
+                    key={reply.id}
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 1,
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Avatar src={reply.user?.image} sx={{ width: 24, height: 24 }}>
+                        {reply.user?.name?.[0]}
+                      </Avatar>
+                      <Box>
+                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
+                          <Typography variant="subtitle2">
+                            {reply.user?.name || reply.user?.id}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {formatMessageTime(reply.created_at)}
+                          </Typography>
+                        </Box>
+                        <Typography>{reply.text}</Typography>
+                      </Box>
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ 
+          p: 2, 
+          borderTop: '1px solid',
+          borderColor: 'divider'
+        }}>
+          <Box sx={{ width: '100%' }}>
+            <RichTextEditor
+              value={threadReply}
+              onChange={(value) => setThreadReply(value)}
+              onSubmit={handleSendThreadReply}
+              placeholder="Reply to thread..."
+            />
+          </Box>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

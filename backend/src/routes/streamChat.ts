@@ -62,4 +62,53 @@ router.get('/users', async (req, res) => {
   }
 });
 
+// Task creation endpoint
+router.post('/tasks/create', async (req, res) => {
+  try {
+    const {
+      title,
+      description,
+      dueDate,
+      priority,
+      assignee,
+      assignedBy,
+      status,
+      type,
+      chatId
+    } = req.body;
+
+    // Validate required fields
+    if (!title || !dueDate || !assignee || !assignedBy) {
+      return res.status(400).json({
+        message: 'Missing required fields'
+      });
+    }
+
+    // Create task in your database
+    const task = {
+      id: Date.now().toString(),
+      title,
+      description,
+      dueDate,
+      priority,
+      assignee,
+      assignedBy,
+      status,
+      type,
+      chatId,
+      createdAt: new Date().toISOString()
+    };
+
+    // Here you would typically save the task to your database
+    // For now, we'll just return the task object
+    
+    res.status(201).json(task);
+  } catch (error) {
+    console.error('Error creating task:', error);
+    res.status(500).json({
+      message: 'Failed to create task'
+    });
+  }
+});
+
 export default router;
