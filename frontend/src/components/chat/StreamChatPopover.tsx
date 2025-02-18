@@ -34,7 +34,8 @@ import {
   ListItemSecondaryAction,
   Avatar,
   AvatarGroup,
-  Collapse
+  Collapse,
+  Tooltip
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -73,7 +74,13 @@ import {
   ContentCopy as ContentCopyIcon,
   Person as PersonIcon,
   AddReaction as AddReactionIcon,
-  ChatBubbleOutline as ChatBubbleOutlineIcon
+  ChatBubbleOutline as ChatBubbleOutlineIcon,
+  Forum as ForumIcon,
+  Cancel as CancelIcon,
+  Save as SaveIcon,
+  ArrowBack as ArrowBackIcon,
+  Check as CheckIcon,
+  Clear as ClearIcon
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@mui/material/styles';
@@ -88,6 +95,7 @@ import FilePreviewDialog from './FilePreviewDialog';
 import { keyframes } from '@mui/system';
 import { db } from '@/config/firebase';
 import { collection, getDocs } from 'firebase/firestore';
+import RichTextEditor from './RichTextEditor';
 
 interface Employee {
   id: string;
@@ -227,6 +235,7 @@ const StreamChatPopover: React.FC = () => {
   const currentChannelRef = React.useRef<Channel | null>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<any>(null);
 
   // Define handleChannelSelect at the top level
   const handleChannelSelect = useCallback(async (selectedChannel: Channel) => {
@@ -751,22 +760,22 @@ const StreamChatPopover: React.FC = () => {
   const handleEditMessage = (msg: any) => {
     setEditingMessage(msg);
     setEditText(msg.text);
+    editorRef.current?.focus();
   };
 
   const handleSaveEdit = async () => {
-    if (editingMessage && channel && editText.trim()) {
-      try {
-        // Use partialUpdateMessage instead of updateMessage
-        await chatClient?.partialUpdateMessage(editingMessage.id, {
-          set: {
-            text: editText
-          }
-        });
-        setEditingMessage(null);
-        setEditText('');
-      } catch (error) {
-        console.error('Error updating message:', error);
-      }
+    if (!channel || !editingMessage || !editText.trim()) return;
+
+    try {
+      await channel.updateMessage({
+        ...editingMessage,
+        text: editText,
+      });
+      setEditingMessage(null);
+      setEditText('');
+    } catch (error) {
+      console.error('Error updating message:', error);
+      enqueueSnackbar('Failed to update message', { variant: 'error' });
     }
   };
 
@@ -1085,7 +1094,7 @@ const StreamChatPopover: React.FC = () => {
               userId: selectedUser.email.replace(/[.@]/g, '_'),
               name: selectedUser.displayName || selectedUser.email,
               email: selectedUser.email,
-              image: selectedUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedUser.displayName || selectedUser.email)}`
+              image: selectedUser.photoURL,
             }),
           });
 
@@ -1311,6 +1320,8 @@ const StreamChatPopover: React.FC = () => {
 
       try {
         console.log('Initializing chat...');
+        
+        // Initialize chat client
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/stream/token`, {
           method: 'POST',
           headers: {
@@ -1335,7 +1346,6 @@ const StreamChatPopover: React.FC = () => {
           throw new Error('No token in response');
         }
 
-        // Initialize chat client
         const chatClient = StreamChat.getInstance(import.meta.env.VITE_STREAM_API_KEY!);
         await chatClient.connectUser(
           {
@@ -1351,7 +1361,7 @@ const StreamChatPopover: React.FC = () => {
       } catch (error) {
         console.error('Error initializing chat client:', error);
         if (chatClient) {
-          chatClient.disconnectUser();
+          await chatClient.disconnectUser();
           setChatClient(null);
         }
       }
@@ -1362,7 +1372,6 @@ const StreamChatPopover: React.FC = () => {
     return () => {
       if (chatClient) {
         chatClient.disconnectUser();
-        setChatClient(null);
       }
     };
   }, [user]);
@@ -1410,28 +1419,38 @@ const StreamChatPopover: React.FC = () => {
     };
   }, [chatClient?.tokenManager?.token, user]);
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
-    setSelectedFiles(prev => [...prev, ...files]);
-    event.target.value = ''; // Reset input
+  const handleFileSelect = async (files: FileList) => {
+    if (!channel) return;
+    
+    try {
+      setIsUploading(true);
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileUrl = await uploadChatFile(file);
+        
+        if (fileUrl) {
+          await channel.sendMessage({
+            text: `Shared a file: ${file.name}`,
+            attachments: [{
+              type: 'file',
+              asset_url: fileUrl,
+              title: file.name,
+              mime_type: file.type,
+              file_size: file.size,
+            }],
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      enqueueSnackbar('Failed to upload file', { variant: 'error' });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  const removeSelectedFile = (index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleFilePreview = (attachment: any) => {
-    setPreviewFile({
-      url: attachment.asset_url,
-      type: attachment.mime_type || '',
-      name: attachment.title || 'File'
-    });
-    setShowPreview(true);
-  };
-
-  const handlePreviewClose = () => {
-    setShowPreview(false);
-    setPreviewFile(null);
+  const handleEmojiClick = () => {
+    setShowEmojiPicker(true);
   };
 
   const handleTyping = useCallback(() => {
@@ -1723,104 +1742,6 @@ const StreamChatPopover: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (!channel) return;
-
-    const handleReactionNew = (event: any) => {
-      const { message_id, reaction, user } = event;
-      
-      // Update messages with new reaction
-      setMessages(prevMessages => 
-        prevMessages.map(msg => {
-          if (msg.id === message_id) {
-            const updatedMsg = { ...msg };
-            const reactions = Array.isArray(updatedMsg.latest_reactions) 
-              ? [...updatedMsg.latest_reactions] 
-              : [];
-
-            // Check if reaction already exists
-            const existingIndex = reactions.findIndex(r => 
-              r.type === reaction.type && r.user_id === user.id
-            );
-
-            if (existingIndex === -1) {
-              // Add new reaction with full user data
-              reactions.push({
-                ...reaction,
-                user: {
-                  id: user.id,
-                  name: user.name,
-                  image: user.image
-                }
-              });
-              updatedMsg.latest_reactions = reactions;
-              
-              // Update reaction counts if they exist
-              if (updatedMsg.reaction_counts) {
-                updatedMsg.reaction_counts = {
-                  ...updatedMsg.reaction_counts,
-                  [reaction.type]: (updatedMsg.reaction_counts[reaction.type] || 0) + 1
-                };
-              }
-            }
-            
-            return updatedMsg;
-          }
-          return msg;
-        })
-      );
-    };
-
-    const handleReactionDeleted = (event: any) => {
-      const { message_id, reaction, user } = event;
-      
-      // Update messages by removing the reaction
-      setMessages(prevMessages => 
-        prevMessages.map(msg => {
-          if (msg.id === message_id) {
-            const updatedMsg = { ...msg };
-            
-            // Filter out the deleted reaction
-            updatedMsg.latest_reactions = (updatedMsg.latest_reactions || []).filter(
-              r => !(r.type === reaction.type && r.user_id === user.id)
-            );
-
-            // Update reaction counts if they exist
-            if (updatedMsg.reaction_counts && updatedMsg.reaction_counts[reaction.type]) {
-              updatedMsg.reaction_counts = {
-                ...updatedMsg.reaction_counts,
-                [reaction.type]: Math.max((updatedMsg.reaction_counts[reaction.type] || 1) - 1, 0)
-              };
-            }
-
-            return updatedMsg;
-          }
-          return msg;
-        })
-      );
-    };
-
-    // Listen to both channel and client events
-    channel.on('reaction.new', handleReactionNew);
-    channel.on('reaction.deleted', handleReactionDeleted);
-
-    // Also watch the channel state
-    const handleChannelUpdated = () => {
-      if (channel.state && channel.state.messages) {
-        setMessages([...channel.state.messages]);
-      }
-    };
-
-    channel.on('message.updated', handleChannelUpdated);
-
-    return () => {
-      channel.off('reaction.new', handleReactionNew);
-      channel.off('reaction.deleted', handleReactionDeleted);
-      channel.off('message.updated', handleChannelUpdated);
-    };
-  }, [channel]);
-
-  // Update message rendering to handle multiple attachments
   const renderReactions = (message: any, reactions: any[]) => {
     return reactions.map((reaction: any) => {
       const emoji = REACTION_MAP[reaction.type as keyof typeof REACTION_MAP] || reaction.type;
@@ -1845,137 +1766,6 @@ const StreamChatPopover: React.FC = () => {
       );
     });
   };
-
-  const [messageUpdates, setMessageUpdates] = useState<{ [key: string]: number }>({});
-
-  useEffect(() => {
-    if (!channel) return;
-
-    const handleNewThreadReply = (event: any) => {
-      const { message } = event;
-      if (message.parent_id) {
-        // Update the reply count for the parent message
-        setMessageUpdates(prev => ({
-          ...prev,
-          [message.parent_id]: (prev[message.parent_id] || 0) + 1
-        }));
-      }
-    };
-
-    const handleThreadMessageDeleted = (event: any) => {
-      const { message } = event;
-      if (message.parent_id) {
-        // Decrease the reply count for the parent message
-        setMessageUpdates(prev => ({
-          ...prev,
-          [message.parent_id]: Math.max((prev[message.parent_id] || 0) - 1, 0)
-        }));
-      }
-    };
-
-    channel.on('message.new', handleNewThreadReply);
-    channel.on('message.deleted', handleThreadMessageDeleted);
-
-    return () => {
-      channel.off('message.new', handleNewThreadReply);
-      channel.off('message.deleted', handleThreadMessageDeleted);
-    };
-  }, [channel]);
-
-  const handleThreadClick = async (message: any) => {
-    setThreadMessage(message);
-    setShowThread(true);
-    setThreadReplies([]); // Reset replies when opening new thread
-    
-    try {
-      if (!channel) return;
-
-      // Get replies for the thread
-      const response = await channel.getReplies(message.id, {
-        limit: 25,
-      });
-
-      if (response?.messages) {
-        setThreadReplies(response.messages);
-      }
-
-      // Watch for new replies
-      const threadId = message.id;
-      const handleNewMessage = (event: any) => {
-        const { message: newMessage } = event;
-        if (newMessage?.parent_id === threadId) {
-          setThreadReplies(prev => {
-            // Check if message already exists
-            const exists = prev.some(msg => msg.id === newMessage.id);
-            if (!exists) {
-              return [...prev, newMessage];
-            }
-            return prev;
-          });
-        }
-      };
-
-      channel.on('message.new', handleNewMessage);
-
-      // Cleanup function
-      return () => {
-        channel.off('message.new', handleNewMessage);
-      };
-    } catch (error) {
-      console.error('Error fetching thread replies:', error);
-    }
-  };
-
-  const handleSendThreadReply = async () => {
-    if (!channel || !threadMessage || !threadReply.trim()) return;
-
-    try {
-      const messageData = {
-        text: threadReply,
-        parent_id: threadMessage.id,
-        show_in_channel: false,
-        user: {
-          id: user?.email?.replace(/[.@]/g, '_') || '',
-          name: user?.displayName || '',
-          image: user?.photoURL
-        }
-      };
-
-      const response = await channel.sendMessage(messageData);
-
-      if (response?.message) {
-        setThreadReplies(prev => {
-          // Check if message already exists
-          const exists = prev.some(msg => msg.id === response.message.id);
-          if (!exists) {
-            return [...prev, response.message];
-          }
-          return prev;
-        });
-
-        // Update the reply count on the parent message
-        if (threadMessage) {
-          const updatedMessage = { ...threadMessage };
-          updatedMessage.reply_count = (updatedMessage.reply_count || 0) + 1;
-          setThreadMessage(updatedMessage);
-        }
-      }
-      setThreadReply('');
-    } catch (error) {
-      console.error('Error sending thread reply:', error);
-    }
-  };
-
-  // Cleanup thread watchers when closing thread
-  useEffect(() => {
-    if (!showThread) {
-      if (channel) {
-        channel.off('message.new');
-      }
-      setThreadReplies([]);
-      setThreadMessage(null);
-    }
-  }, [showThread, channel]);
 
   const reactionMenu = (
     <Popover
@@ -2052,7 +1842,7 @@ const StreamChatPopover: React.FC = () => {
       console.log('Starting call...', { callId, isVideo });
       
       // Get channel members and format them as objects
-      const members = Object.entries(channel.state.members).map(([id, member]) => ({
+      const members = Object.entries(channel.state?.members).map(([id, member]) => ({
         user_id: id,
         role: 'call_member'
       }));
@@ -2229,7 +2019,7 @@ const StreamChatPopover: React.FC = () => {
     return () => {
       channel.off('message.new', handleNewMessage);
     };
-  }, [channel, videoClient, user, call]);
+  }, [channel, videoClient, user]);
 
   const getChannelAvatar = () => {
     if (!channel) return null;
@@ -2335,15 +2125,28 @@ const StreamChatPopover: React.FC = () => {
     return (
       <Box>
         <Typography 
+          dangerouslySetInnerHTML={{ __html: message.text }} 
           variant="body1"
+          component="div"
           sx={{
-            color: isCurrentUser ? 'common.white' : 'text.primary',
+            '& p': { 
+              margin: 0,
+              padding: 0,
+            },
+            '& ul, & ol': { 
+              margin: '0.5em 0', 
+              paddingLeft: '1.5em' 
+            },
+            '& code': { 
+              backgroundColor: 'rgba(0, 0, 0, 0.04)',
+              padding: '2px 4px',
+              borderRadius: '4px',
+              fontFamily: 'monospace'
+            },
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word'
           }}
-        >
-          {message.text}
-        </Typography>
+        />
         {message.attachments?.length > 0 && (
           <Box sx={{ mt: 1 }}>
             {message.attachments.map((attachment, index) => (
@@ -2892,6 +2695,273 @@ const StreamChatPopover: React.FC = () => {
     );
   };
 
+  const handleThreadClick = async (message: any) => {
+    setThreadMessage(message);
+    setShowThread(true);
+    setThreadReplies([]); // Reset replies when opening new thread
+    
+    try {
+      if (!channel) return;
+
+      // Get replies for the thread
+      const response = await channel.getReplies(message.id, {
+        limit: 25,
+      });
+
+      if (response?.messages) {
+        setThreadReplies(response.messages);
+      }
+
+      // Watch for new replies
+      const threadId = message.id;
+      const handleNewMessage = (event: any) => {
+        const { message: newMessage } = event;
+        if (newMessage?.parent_id === threadId) {
+          setThreadReplies(prev => {
+            // Check if message already exists
+            const exists = prev.some(msg => msg.id === newMessage.id);
+            if (!exists) {
+              return [...prev, newMessage];
+            }
+            return prev;
+          });
+        }
+      };
+
+      channel.on('message.new', handleNewMessage);
+
+      // Cleanup function
+      return () => {
+        channel.off('message.new', handleNewMessage);
+      };
+    } catch (error) {
+      console.error('Error fetching thread replies:', error);
+    }
+  };
+
+  const handleSendThreadReply = async () => {
+    if (!channel || !threadMessage || !threadReply.trim()) return;
+
+    try {
+      const messageData = {
+        text: threadReply,
+        parent_id: threadMessage.id,
+        show_in_channel: false,
+        user: {
+          id: user?.email?.replace(/[.@]/g, '_') || '',
+          name: user?.displayName || '',
+          image: user?.photoURL
+        }
+      };
+
+      const response = await channel.sendMessage(messageData);
+
+      if (response?.message) {
+        setThreadReplies(prev => {
+          // Check if message already exists
+          const exists = prev.some(msg => msg.id === response.message.id);
+          if (!exists) {
+            return [...prev, response.message];
+          }
+          return prev;
+        });
+
+        // Update the reply count on the parent message
+        if (threadMessage) {
+          const updatedMessage = { ...threadMessage };
+          updatedMessage.reply_count = (updatedMessage.reply_count || 0) + 1;
+          setThreadMessage(updatedMessage);
+        }
+      }
+      setThreadReply('');
+    } catch (error) {
+      console.error('Error sending thread reply:', error);
+    }
+  };
+
+  // Cleanup thread watchers when closing thread
+  useEffect(() => {
+    if (!showThread) {
+      if (channel) {
+        channel.off('message.new');
+      }
+      setThreadReplies([]);
+      setThreadMessage(null);
+    }
+  }, [showThread, channel]);
+
+  const [messageUpdates, setMessageUpdates] = useState<{ [key: string]: number }>({});
+
+  useEffect(() => {
+    if (!channel) return;
+
+    const handleNewThreadReply = (event: any) => {
+      const { message } = event;
+      if (message.parent_id) {
+        // Update the reply count for the parent message
+        setMessageUpdates(prev => ({
+          ...prev,
+          [message.parent_id]: (prev[message.parent_id] || 0) + 1
+        }));
+      }
+    };
+
+    const handleThreadMessageDeleted = (event: any) => {
+      const { message } = event;
+      if (message.parent_id) {
+        // Decrease the reply count for the parent message
+        setMessageUpdates(prev => ({
+          ...prev,
+          [message.parent_id]: Math.max((prev[message.parent_id] || 0) - 1, 0)
+        }));
+      }
+    };
+
+    channel.on('message.new', handleNewThreadReply);
+    channel.on('message.deleted', handleThreadMessageDeleted);
+
+    return () => {
+      channel.off('message.new', handleNewThreadReply);
+      channel.off('message.deleted', handleThreadMessageDeleted);
+    };
+  }, [channel]);
+
+  useEffect(() => {
+    if (!channel) return;
+
+    const handleNewMessage = (event: any) => {
+      const { message } = event;
+      
+      // Update channels state to trigger re-render with new order
+      setChannels(prevChannels => {
+        if (!prevChannels) return prevChannels;
+        
+        const updatedChannels = [...prevChannels];
+        const channelIndex = updatedChannels.findIndex(ch => ch.cid === message.cid);
+        
+        if (channelIndex !== -1) {
+          // Move channel to top
+          const channel = updatedChannels.splice(channelIndex, 1)[0];
+          updatedChannels.unshift(channel);
+        }
+        
+        return sortChannels(updatedChannels);
+      });
+    };
+
+    const handleChannelUpdated = (event: any) => {
+      const { channel: updatedChannel } = event;
+      
+      setChannels(prevChannels => {
+        if (!prevChannels) return prevChannels;
+        
+        return sortChannels(
+          prevChannels.map(ch => 
+            ch.cid === updatedChannel.cid ? updatedChannel : ch
+          )
+        );
+      });
+    };
+
+    // Listen for new messages and channel updates
+    chatClient.on('message.new', handleNewMessage);
+    chatClient.on('channel.updated', handleChannelUpdated);
+    chatClient.on('notification.message_new', handleNewMessage);
+
+    return () => {
+      chatClient.off('message.new', handleNewMessage);
+      chatClient.off('channel.updated', handleChannelUpdated);
+      chatClient.off('notification.message_new', handleNewMessage);
+    };
+  }, [chatClient]);
+
+  useEffect(() => {
+    if (!channel) return;
+
+    const handleReactionNew = (event: any) => {
+      const { message_id, reaction, user } = event;
+      
+      // Update messages with new reaction
+      setMessages(prevMessages => 
+        prevMessages.map(msg => {
+          if (msg.id === message_id) {
+            const updatedMsg = { ...msg };
+            const reactions = Array.isArray(updatedMsg.latest_reactions) 
+              ? [...updatedMsg.latest_reactions] 
+              : [];
+
+            // Check if reaction already exists
+            const existingIndex = reactions.findIndex(r => 
+              r.type === reaction.type && r.user_id === user.id
+            );
+
+            if (existingIndex === -1) {
+              // Add new reaction with full user data
+              reactions.push({
+                ...reaction,
+                user: {
+                  id: user.id,
+                  name: user.name,
+                  image: user.image
+                }
+              });
+              updatedMsg.latest_reactions = reactions;
+              
+              // Update reaction counts if they exist
+              if (updatedMsg.reaction_counts) {
+                updatedMsg.reaction_counts = {
+                  ...updatedMsg.reaction_counts,
+                  [reaction.type]: (updatedMsg.reaction_counts[reaction.type] || 0) + 1
+                };
+              }
+            }
+            
+            return updatedMsg;
+          }
+          return msg;
+        })
+      );
+    };
+
+    const handleReactionDeleted = (event: any) => {
+      const { message_id, reaction, user } = event;
+      
+      // Update messages by removing the reaction
+      setMessages(prevMessages => 
+        prevMessages.map(msg => {
+          if (msg.id === message_id) {
+            const updatedMsg = { ...msg };
+            
+            // Filter out the deleted reaction
+            updatedMsg.latest_reactions = (updatedMsg.latest_reactions || []).filter(
+              r => !(r.type === reaction.type && r.user_id === user.id)
+            );
+
+            // Update reaction counts if they exist
+            if (updatedMsg.reaction_counts && updatedMsg.reaction_counts[reaction.type]) {
+              updatedMsg.reaction_counts = {
+                ...updatedMsg.reaction_counts,
+                [reaction.type]: Math.max((updatedMsg.reaction_counts[reaction.type] || 1) - 1, 0)
+              };
+            }
+
+            return updatedMsg;
+          }
+          return msg;
+        })
+      );
+    };
+
+    // Listen to both channel and client events
+    channel.on('reaction.new', handleReactionNew);
+    channel.on('reaction.deleted', handleReactionDeleted);
+
+    return () => {
+      channel.off('reaction.new', handleReactionNew);
+      channel.off('reaction.deleted', handleReactionDeleted);
+    };
+  }, [channel]);
+
   return (
     <Box
       sx={{
@@ -3089,36 +3159,41 @@ const StreamChatPopover: React.FC = () => {
                         </Box>
                       }
                       secondary={
-                        <Box
-                          sx={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 1,
+                        <Box 
+                          sx={{ 
+                            '& p': { margin: 0, padding: 0 },
+                            '& ul, & ol': { margin: '0.5em 0', paddingLeft: '1.5em' },
+                            '& code': { 
+                              backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                              padding: '2px 4px',
+                              borderRadius: '4px',
+                              fontFamily: 'monospace'
+                            },
+                            color: 'text.secondary'
                           }}
                         >
                           <Typography
                             variant="body2"
-                            color="text.secondary"
+                            component="div"
+                            dangerouslySetInnerHTML={{ __html: lastMessage?.text || '' }}
                             sx={{
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
                               flex: 1,
                             }}
-                          >
-                            {lastMessage?.text || 'No messages yet'}
-                          </Typography>
-                          {unreadCount > 0 && (
-                            <Chip
-                              size="small"
-                              label={unreadCount}
-                              color="primary"
-                              sx={{ minWidth: 'auto' }}
-                            />
-                          )}
+                          />
                         </Box>
                       }
                     />
+                    {unreadCount > 0 && (
+                      <Chip
+                        size="small"
+                        label={unreadCount}
+                        color="primary"
+                        sx={{ minWidth: 'auto' }}
+                      />
+                    )}
                   </ListItem>
                 );
               })}
@@ -3261,18 +3336,18 @@ const StreamChatPopover: React.FC = () => {
                           >
                             <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
                               <Avatar 
-                                src={msg.user?.image} 
+                                src={msg.user?.image}
                                 sx={{ width: 24, height: 24 }}
                               >
                                 {msg.user?.name?.[0] || msg.user?.id[0]}
                               </Avatar>
-                              <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Box>
                                 <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, mb: 0.5 }}>
-                                  <Typography variant="caption" sx={{ fontWeight: 500 }}>
+                                  <Typography variant="subtitle2">
                                     {msg.user?.name || msg.user?.id}
                                   </Typography>
-                                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                    • {formatMessageTime(msg.created_at)}
+                                  <Typography variant="caption" color="text.secondary">
+                                    {new Date(msg.created_at).toLocaleString()}
                                   </Typography>
                                 </Box>
                                 <Typography>{msg.text}</Typography>
@@ -3291,190 +3366,233 @@ const StreamChatPopover: React.FC = () => {
                         key={msg.id}
                         sx={{
                           display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: msg.user?.id === chatClient?.userID ? 'flex-end' : 'flex-start',
+                          flexDirection: msg.user?.id === chatClient?.userID ? 'row-reverse' : 'row',
+                          alignItems: 'flex-start',
+                          gap: 1,
                           position: 'relative',
-                          mx: 2,
-                          mb: 1,
+                          maxWidth: '100%',
+                          mb: 2,
+                          px: 2,
                           '&:hover .message-actions': {
-                            opacity: 1
-                          }
+                            opacity: 1,
+                          },
                         }}
                       >
-                        {msg.user?.id === chatClient?.userID && (
-                          <IconButton
-                            size="small"
-                            className="message-actions"
-                            onClick={(e) => {
-                              setSelectedMessage(msg);
-                              setMessageMenuAnchor(e.currentTarget);
-                            }}
+                        <Avatar
+                          src={msg.user?.image}
+                          sx={{
+                            width: 32,
+                            height: 32,
+                            mt: 1,
+                          }}
+                        >
+                          {msg.user?.name?.[0] || msg.user?.id[0]}
+                        </Avatar>
+                        <Box
+                          sx={{
+                            maxWidth: '70%',
+                            minWidth: '100px',
+                            position: 'relative',
+                          }}
+                        >
+                          <Box
                             sx={{
-                              position: 'absolute',
-                              right: -32,
-                              top: 0,
-                              opacity: 0,
-                              transition: 'opacity 0.2s',
-                              color: 'text.secondary'
+                              bgcolor: msg.user?.id === chatClient?.userID ? 'primary.main' : 'grey.100',
+                              color: msg.user?.id === chatClient?.userID ? 'white' : 'text.primary',
+                              borderRadius: 2,
+                              p: 1.5,
+                              width: 'fit-content',
+                              maxWidth: '100%',
+                              wordBreak: 'break-word',
+                              '& p': {
+                                margin: 0,
+                                padding: 0,
+                              },
                             }}
                           >
-                            <MoreVertIcon fontSize="small" />
-                          </IconButton>
-                        )}
-                        
-                        <Box sx={{ 
-                          maxWidth: '70%',
-                          bgcolor: msg.user?.id === chatClient?.userID ? 'primary.main' : 'grey.100',
-                          color: msg.user?.id === chatClient?.userID ? 'white' : 'text.primary',
-                          borderRadius: 2,
-                          p: 1,
-                        }}>
-                          {(!msg.parent_id || msg.show_in_channel) && (
-                            <Box sx={{ 
-                              mb: 0.5, 
-                              display: 'flex', 
-                              justifyContent: 'space-between',
-                              alignItems: 'center'
-                            }}>
-                              <Typography 
-                                variant="body2" 
-                                sx={{ 
-                                  color: msg.user?.id === chatClient?.userID 
-                                    ? 'rgba(255, 255, 255, 0.8)' 
-                                    : 'rgba(0, 0, 0, 0.6)',
-                                  fontWeight: 500
-                                }}
-                              >
-                                {msg.user?.name || msg.user?.id}
-                              </Typography>
-                              <Typography 
-                                variant="caption"
-                                sx={{ 
-                                  color: msg.user?.id === chatClient?.userID 
-                                    ? 'rgba(255, 255, 255, 0.7)' 
-                                    : 'rgba(0, 0, 0, 0.5)',
-                                  ml: 1
-                                }}
-                              >
-                                {formatMessageTime(msg.created_at)}
-                              </Typography>
-                            </Box>
-                          )}
-                          {editingMessage?.id === msg.id ? (
-                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', minWidth: 200 }}>
-                              <TextField
-                                fullWidth
-                                multiline
-                                value={editText}
-                                onChange={(e) => setEditText(e.target.value)}
-                                size="small"
-                                autoFocus
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    handleSaveEdit();
-                                  } else if (e.key === 'Escape') {
-                                    setEditingMessage(null);
-                                    setEditText('');
-                                  }
-                                }}
-                                sx={{
-                                  '& .MuiOutlinedInput-root': {
-                                    bgcolor: 'background.paper'
-                                  }
-                                }}
-                              />
-                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                                <IconButton 
-                                  size="small" 
-                                  color="primary"
-                                  onClick={handleSaveEdit}
-                                >
-                                  <CheckIcon fontSize="small" />
-                                </IconButton>
-                                <IconButton 
-                                  size="small" 
-                                  color="error"
-                                  onClick={() => {
-                                    setEditingMessage(null);
-                                    setEditText('');
-                                  }}
-                                >
-                                  <CloseIcon fontSize="small" />
-                                </IconButton>
+                            {(!msg.parent_id || msg.show_in_channel) && (
+                              <Box sx={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                gap: 1, 
+                                mb: 0.5,
+                                opacity: 0.8,
+                                fontSize: '0.85rem'
+                              }}>
+                                <Typography variant="caption" sx={{ fontWeight: 500 }}>
+                                  {msg.user?.name || msg.user?.id}
+                                </Typography>
+                                <Typography variant="caption" color="inherit">
+                                  • {formatMessageTime(msg.created_at)}
+                                </Typography>
                               </Box>
-                            </Box>
-                          ) : (
-                            <>
-                              {renderMessage(msg)}
-                              
-                              {/* Message Actions */}
+                            )}
+                            {renderMessage(msg)}
+                            {/* Thread Reply Count */}
+                            {(msg.reply_count > 0 || messageUpdates[msg.id]) && (
                               <Box
-                                className="message-actions"
+                                onClick={() => handleThreadClick(msg)}
                                 sx={{
-                                  position: 'absolute',
-                                  top: -30,
-                                  right: msg.user?.id === chatClient?.userID ? 0 : 'auto',
-                                  left: msg.user?.id === chatClient?.userID ? 'auto' : 0,
-                                  display: 'flex',
+                                  mt: 1,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
                                   gap: 0.5,
-                                  bgcolor: 'background.paper',
+                                  cursor: 'pointer',
+                                  bgcolor: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.08)',
+                                  color: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.7)',
                                   borderRadius: 1,
-                                  boxShadow: 1,
-                                  p: 0.5,
-                                  opacity: 0,
-                                  transition: 'opacity 0.2s',
-                                  zIndex: 1,
+                                  px: 1,
+                                  py: 0.25,
+                                  fontSize: '0.85rem',
+                                  '&:hover': {
+                                    bgcolor: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.12)'
+                                  },
                                 }}
                               >
-                                <IconButton
-                                  size="small"
-                                  onClick={(e) => handleReactionClick(e, msg)}
-                                >
-                                  <AddReactionIcon />
-                                </IconButton>
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleThreadClick(msg)}
-                                >
-                                  <ChatBubbleOutlineIcon />
-                                </IconButton>
+                                <ChatBubbleOutlineIcon sx={{ fontSize: 16 }} />
+                                <Typography variant="body2">
+                                  {(msg.reply_count || 0) + (messageUpdates[msg.id] || 0)} {((msg.reply_count || 0) + (messageUpdates[msg.id] || 0)) === 1 ? 'reply' : 'replies'}
+                                </Typography>
                               </Box>
+                            )}
+                            {/* Reactions */}
+                            {msg.latest_reactions && msg.latest_reactions.length > 0 && (
+                              <Box sx={{ display: 'flex', gap: 0.5, mt: 1, flexWrap: 'wrap' }}>
+                                {renderReactions(msg, msg.latest_reactions)}
+                              </Box>
+                            )}
+                            {/* Edited indicator */}
+                            {isMessageEdited(msg) && (
+                              <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                                (edited)
+                              </Typography>
+                            )}
+                          </Box>
 
-                              {/* Thread Reply Count */}
-                              {(msg.reply_count > 0 || messageUpdates[msg.id]) && (
-                                <Box
-                                  onClick={() => handleThreadClick(msg)}
+                          {/* Message Actions */}
+                          <Box
+                            className="message-actions"
+                            sx={{
+                              position: 'absolute',
+                              top: -30,
+                              right: msg.user?.id === chatClient?.userID ? 0 : 'auto',
+                              left: msg.user?.id === chatClient?.userID ? 'auto' : 0,
+                              display: 'flex',
+                              gap: 0.5,
+                              bgcolor: 'background.paper',
+                              borderRadius: 1,
+                              boxShadow: 1,
+                              p: 0.5,
+                              opacity: 0,
+                              transition: 'opacity 0.2s',
+                              zIndex: 1,
+                            }}
+                          >
+                            <IconButton
+                              size="small"
+                              onClick={(e) => handleReactionClick(e, msg)}
+                              sx={{
+                                color: msg.user?.id === chatClient?.userID ? 'common.white' : 'text.secondary',
+                                opacity: 0.7,
+                                '&:hover': {
+                                  opacity: 1,
+                                  bgcolor: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.04)'
+                                }
+                              }}
+                            >
+                              <AddReactionIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleThreadClick(msg)}
+                              sx={{
+                                color: msg.user?.id === chatClient?.userID ? 'common.white' : 'text.secondary',
+                                opacity: 0.7,
+                                '&:hover': {
+                                  opacity: 1,
+                                  bgcolor: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.04)'
+                                }
+                              }}
+                            >
+                              <ChatBubbleOutlineIcon fontSize="small" />
+                              {msg.reply_count > 0 && (
+                                <Typography
+                                  variant="caption"
                                   sx={{
-                                    mt: 0.5,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 0.5,
-                                    cursor: 'pointer',
-                                    bgcolor: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.08)',
-                                    color: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.7)',
-                                    borderRadius: 1,
-                                    px: 1,
-                                    py: 0.25,
-                                    '&:hover': {
-                                      bgcolor: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.12)',
-                                    }
+                                    ml: 0.5,
+                                    color: msg.user?.id === chatClient?.userID ? 'common.white' : 'text.secondary'
                                   }}
                                 >
-                                  <ChatBubbleOutlineIcon sx={{ fontSize: 16 }} />
-                                  <Typography variant="body2">
-                                    {(msg.reply_count || 0) + (messageUpdates[msg.id] || 0)} {((msg.reply_count || 0) + (messageUpdates[msg.id] || 0)) === 1 ? 'reply' : 'replies'}
-                                  </Typography>
-                                </Box>
+                                  {msg.reply_count}
+                                </Typography>
                               )}
+                            </IconButton>
+                            {msg.user?.id === user?.email?.replace(/[.@]/g, '_') && (
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setMessageMenuAnchor(e.currentTarget);
+                                  setSelectedMessage(msg);
+                                }}
+                                sx={{
+                                  color: msg.user?.id === chatClient?.userID ? 'common.white' : 'text.secondary',
+                                  opacity: 0.7,
+                                  '&:hover': {
+                                    opacity: 1,
+                                    bgcolor: msg.user?.id === chatClient?.userID ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.04)'
+                                  }
+                                }}
+                              >
+                                <MoreVertIcon fontSize="small" />
+                              </IconButton>
+                            )}
+                          </Box>
 
-                              {/* Reactions */}
-                              {msg.latest_reactions && msg.latest_reactions.length > 0 && (
-                                <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
-                                  {renderReactions(msg, msg.latest_reactions)}
-                                </Box>
-                              )}
-                            </>
+                          {/* Message Menu */}
+                          <Menu
+                            anchorEl={messageMenuAnchor}
+                            open={Boolean(messageMenuAnchor)}
+                            onClose={() => {
+                              setMessageMenuAnchor(null);
+                              setSelectedMessage(null);
+                            }}
+                          >
+                            <MenuItem
+                              onClick={() => {
+                                if (selectedMessage) {
+                                  handleEditMessage(selectedMessage);
+                                }
+                                setMessageMenuAnchor(null);
+                                setSelectedMessage(null);
+                              }}
+                            >
+                              <ListItemIcon>
+                                <EditIcon fontSize="small" />
+                              </ListItemIcon>
+                              <ListItemText>Edit Message</ListItemText>
+                            </MenuItem>
+                            <MenuItem
+                              onClick={() => {
+                                if (selectedMessage) {
+                                  handleDeleteMessage(selectedMessage);
+                                }
+                                setMessageMenuAnchor(null);
+                                setSelectedMessage(null);
+                              }}
+                            >
+                              <ListItemIcon>
+                                <DeleteIcon fontSize="small" />
+                              </ListItemIcon>
+                              <ListItemText>Delete Message</ListItemText>
+                            </MenuItem>
+                          </Menu>
+
+                          {/* Reactions */}
+                          {msg.latest_reactions && msg.latest_reactions.length > 0 && (
+                            <Box sx={{ mt: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                              {renderReactions(msg, msg.latest_reactions)}
+                            </Box>
                           )}
                         </Box>
                       </Box>
@@ -3482,90 +3600,110 @@ const StreamChatPopover: React.FC = () => {
                   </Box>
 
                   {/* Message Input */}
-                  <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
-                    {/* Selected Files Preview */}
-                    {selectedFiles.length > 0 && (
-                      <Box sx={{ mb: 2 }}>
-                        {selectedFiles.map((file, index) => (
-                          <Box
-                            key={file.name}
-                            sx={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 2,
-                              p: 1,
-                              bgcolor: 'background.paper',
-                              borderRadius: 1
-                            }}
-                          >
-                            <Box sx={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {file.type?.startsWith('image/') ? (
-                                <img 
-                                  src={URL.createObjectURL(file)} 
-                                  alt={file.name}
-                                  style={{
-                                    width: '100%', 
-                                    height: '100%', 
-                                    objectFit: 'cover',
-                                    borderRadius: 4
-                                  }}
-                                />
-                              ) : (
-                                getFileIcon(file.type)
-                              )}
-                            </Box>
-                            <Box sx={{ flex: 1, minWidth: 0 }}>
-                              <Typography variant="body2" noWrap>{file.name}</Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {formatFileSize(file.size)}
-                              </Typography>
-                            </Box>
-                            {file.type?.startsWith('image/') && (
-                              <IconButton size="small" onClick={() => handleFilePreview(file)}>
-                                <VisibilityIcon />
-                              </IconButton>
-                            )}
-                          </Box>
-                        ))}
+                  <Box sx={{ 
+                    p: 2, 
+                    borderTop: 1, 
+                    borderColor: 'divider',
+                    bgcolor: 'background.paper',
+                    position: 'sticky',
+                    bottom: 0,
+                    zIndex: 1,
+                    width: '100%'
+                  }}>
+                    {editingMessage && (
+                      <Box sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Editing message
+                        </Typography>
+                        <Button size="small" onClick={() => {
+                          setEditingMessage(null);
+                          setEditText('');
+                        }}>
+                          Cancel
+                        </Button>
                       </Box>
                     )}
-
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <input
-                        type="file"
-                        multiple
-                        onChange={handleFileSelect}
-                        style={{ display: 'none' }}
-                        ref={fileInputRef}
-                      />
-                      <IconButton 
-                        size="small" 
-                        onClick={() => fileInputRef.current?.click()}
-                        sx={{ alignSelf: 'flex-end' }}
-                      >
-                        <AttachFileIcon />
-                      </IconButton>
-                      <TextField
-                        fullWidth
-                        multiline
-                        maxRows={4}
-                        placeholder="Type a message..."
-                        value={messageText}
-                        onChange={handleMessageInputChange}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSendMessage();
-                          }
-                        }}
-                        onInput={handleTyping}
-                        sx={{
-                          '& .MuiOutlinedInput-root': {
-                            borderRadius: 2,
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', width: '100%' }}>
+                      <Box sx={{ 
+                        flex: 1,
+                        border: 1,
+                        borderColor: 'divider',
+                        borderRadius: 1,
+                        minHeight: 56,
+                        bgcolor: 'background.paper',
+                        '& .ProseMirror': {
+                          minHeight: 56,
+                          p: 1,
+                          '&:focus': {
+                            outline: 'none',
+                            borderColor: 'primary.main',
                           },
-                        }}
-                      />
+                          '& p': {
+                            margin: 0,
+                            minHeight: '24px'
+                          }
+                        }
+                      }}>
+                        <RichTextEditor
+                          ref={editorRef}
+                          initialContent={editingMessage ? editText : messageText}
+                          onUpdate={(html) => {
+                            if (editingMessage) {
+                              setEditText(html);
+                            } else {
+                              setMessageText(html);
+                            }
+                          }}
+                          placeholder={editingMessage ? "Edit your message..." : "Type a message..."}
+                        />
+                      </Box>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <IconButton 
+                          color="primary"
+                          onClick={editingMessage ? handleSaveEdit : handleSendMessage}
+                          disabled={!(editingMessage ? editText : messageText).trim()}
+                        >
+                          <SendIcon />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => {
+                            const fileInput = document.createElement('input');
+                            fileInput.type = 'file';
+                            fileInput.multiple = true;
+                            fileInput.accept = '*/*';
+                            fileInput.onchange = (e) => {
+                              const files = (e.target as HTMLInputElement).files;
+                              if (files) {
+                                setSelectedFiles(Array.from(files));
+                              }
+                            };
+                            fileInput.click();
+                          }}
+                        >
+                          <AttachFileIcon />
+                        </IconButton>
+                      </Box>
                     </Box>
+                    {selectedFiles.length > 0 && (
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Selected files:
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 0.5 }}>
+                          {selectedFiles.map((file, index) => (
+                            <Chip
+                              key={index}
+                              label={file.name}
+                              onDelete={() => {
+                                setSelectedFiles(files => files.filter((_, i) => i !== index));
+                              }}
+                              size="small"
+                            />
+                          ))}
+                        </Box>
+                      </Box>
+                    )}
                   </Box>
                 </Box>
 
@@ -3609,7 +3747,7 @@ const StreamChatPopover: React.FC = () => {
                             {threadMessage.user?.name?.[0] || threadMessage.user?.id[0]}
                           </Avatar>
                           <Box>
-                            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
                               <Typography variant="subtitle2">
                                 {threadMessage.user?.name || threadMessage.user?.id}
                               </Typography>
@@ -3641,7 +3779,7 @@ const StreamChatPopover: React.FC = () => {
                             {reply.user?.name?.[0] || reply.user?.id[0]}
                           </Avatar>
                           <Box>
-                            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, mb: 0.5 }}>
                               <Typography variant="subtitle2">
                                 {reply.user?.name || reply.user?.id}
                               </Typography>
@@ -3649,7 +3787,26 @@ const StreamChatPopover: React.FC = () => {
                                 {new Date(reply.created_at).toLocaleString()}
                               </Typography>
                             </Box>
-                            <Typography>{reply.text}</Typography>
+                            <Box 
+                              sx={{ 
+                                '& p': { margin: 0, padding: 0 },
+                                '& ul, & ol': { margin: '0.5em 0', paddingLeft: '1.5em' },
+                                '& code': { 
+                                  backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                                  padding: '2px 4px',
+                                  borderRadius: '4px',
+                                  fontFamily: 'monospace'
+                                },
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word'
+                              }}
+                            >
+                              <Typography
+                                variant="body1"
+                                component="div"
+                                dangerouslySetInnerHTML={{ __html: reply.text }}
+                              />
+                            </Box>
                           </Box>
                         </Box>
                       ))}
@@ -3657,31 +3814,14 @@ const StreamChatPopover: React.FC = () => {
 
                     {/* Thread Reply Input */}
                     <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
-                      <TextField
-                        fullWidth
-                        size="small"
-                        placeholder="Reply to thread..."
+                      <RichTextEditor
                         value={threadReply}
-                        onChange={(e) => setThreadReply(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSendThreadReply();
-                          }
-                        }}
-                        InputProps={{
-                          endAdornment: (
-                            <InputAdornment position="end">
-                              <IconButton
-                                onClick={handleSendThreadReply}
-                                disabled={!threadReply.trim()}
-                                color="primary"
-                              >
-                                <SendIcon />
-                              </IconButton>
-                            </InputAdornment>
-                          ),
-                        }}
+                        onChange={setThreadReply}
+                        onSubmit={handleSendThreadReply}
+                        placeholder="Reply to thread..."
+                        onFileSelect={handleFileSelect}
+                        onEmojiClick={handleEmojiClick}
+                        sx={{ width: '100%' }}
                       />
                     </Box>
                   </Box>
@@ -3860,7 +4000,10 @@ const StreamChatPopover: React.FC = () => {
       <Menu
         anchorEl={messageMenuAnchor}
         open={Boolean(messageMenuAnchor)}
-        onClose={() => setMessageMenuAnchor(null)}
+        onClose={() => {
+          setMessageMenuAnchor(null);
+          setSelectedMessage(null);
+        }}
       >
         {/* Forward option - available for all messages */}
         <MenuItem 
@@ -4035,7 +4178,7 @@ const StreamChatPopover: React.FC = () => {
                           </Box>
                         }
                         secondary={
-                          <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <Typography variant="caption" component="span">
                               {isGroup ? `${members.length} members` : 'Direct Message'}
                             </Typography>
