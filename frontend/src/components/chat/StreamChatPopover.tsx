@@ -197,7 +197,9 @@ const REACTION_REVERSE_MAP = Object.entries(REACTION_MAP).reduce((acc, [key, val
   return acc;
 }, {} as { [key: string]: string });
 
-const sanitizeHtml = (html: string) => {
+const sanitizeHtml = (html: string | undefined) => {
+  if (!html) return '';
+  
   // First remove any script tags and their content
   html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
   
@@ -1055,12 +1057,14 @@ const StreamChatPopover: React.FC = () => {
         currentUser: {
           id: currentUserId,
           email: user.email,
-          name: user.displayName || user.email.split('@')[0],
+          name: user.displayName || user.email,
+          image: user.photoURL,
         },
         otherUser: {
           id: otherUserId,
           email: selectedNewChatUser.email,
-          name: selectedNewChatUser.name || selectedNewChatUser.email.split('@')[0],
+          name: selectedNewChatUser.name || selectedNewChatUser.email,
+          image: selectedNewChatUser.photoURL,
         }
       });
 
@@ -2659,7 +2663,7 @@ const StreamChatPopover: React.FC = () => {
                 Forwarded message from {headerPart}
               </Typography>
             </Box>
-            <Typography>{messagePart}</Typography>
+            <Typography dangerouslySetInnerHTML={{ __html: sanitizeHtml(messagePart) }} />
           </Paper>
         </Box>
       );
@@ -3274,7 +3278,7 @@ const StreamChatPopover: React.FC = () => {
                     src={member.user?.image}
                     sx={{ width: 24, height: 24 }}
                   >
-                    {(member.user?.name || member.user_id)?.[0]?.toUpperCase() || '?'}
+                    {member.user?.name?.[0]}
                   </Avatar>
                 ))}
               </AvatarGroup>
@@ -4175,6 +4179,17 @@ const StreamChatPopover: React.FC = () => {
                         {pinnedMessages.map((msg) => (
                           <Box 
                             key={msg.id}
+                            onClick={() => {
+                              const messageElement = document.getElementById(`message-${msg.id}`);
+                              if (messageElement) {
+                                messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                messageElement.style.backgroundColor = 'rgba(144, 202, 249, 0.2)';
+                                setTimeout(() => {
+                                  messageElement.style.backgroundColor = '';
+                                }, 2000);
+                              }
+                              setShowPinnedMessages(false); // Optionally close pinned messages panel
+                            }}
                             sx={{ 
                               p: 1,
                               mb: 0.5,
@@ -4185,34 +4200,32 @@ const StreamChatPopover: React.FC = () => {
                                 bgcolor: 'action.hover'
                               }
                             }}
-                            onClick={() => {
-                              const messageElement = document.getElementById(`message-${msg.id}`);
-                              if (messageElement) {
-                                messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                messageElement.style.backgroundColor = 'rgba(144, 202, 249, 0.2)';
-                                setTimeout(() => {
-                                  messageElement.style.backgroundColor = '';
-                                }, 2000);
-                              }
-                            }}
                           >
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                              <Avatar
-                                src={msg.user?.image}
-                                sx={{ width: 32, height: 32 }}
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Avatar 
+                                src={msg.user?.image} 
+                                sx={{ width: 24, height: 24 }}
                               >
                                 {msg.user?.name?.[0]}
                               </Avatar>
-                              <Box>
+                              <Box sx={{ flex: 1, minWidth: 0 }}>
                                 <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, mb: 0.5 }}>
-                                  <Typography variant="caption" sx={{ fontWeight: 500 }}>
+                                  <Typography variant="body2" noWrap>
                                     {msg.user?.name || msg.user?.id}
                                   </Typography>
                                   <Typography variant="caption" color="text.secondary">
                                     {formatMessageTime(msg.created_at)}
                                   </Typography>
                                 </Box>
-                                <Typography>{msg.text}</Typography>
+                                <Typography 
+                                  variant="body2" 
+                                  noWrap
+                                  dangerouslySetInnerHTML={{ __html: msg.text || '' }}
+                                  sx={{ 
+                                    color: 'text.secondary',
+                                    '& p': { margin: 0 }
+                                  }}
+                                />
                               </Box>
                             </Box>
                           </Box>
@@ -4226,6 +4239,7 @@ const StreamChatPopover: React.FC = () => {
                     {messages.map((msg, index) => (
                       <Box
                         key={msg.id}
+                        id={`message-${msg.id}`}
                         sx={{
                           display: 'flex',
                           flexDirection: 'column',
@@ -4414,7 +4428,109 @@ const StreamChatPopover: React.FC = () => {
                                   {msg.attachments && msg.attachments.length > 0 && (
                                     <Box sx={{ mt: 1 }}>
                                       {msg.attachments.map((attachment: any, index: number) => (
-                                        <FilePreview key={index} attachment={attachment} />
+                                        <Box
+                                          key={index}
+                                          onClick={() => handleFilePreview(attachment)}
+                                          sx={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: 1.5,
+                                            p: 1.5,
+                                            mt: index > 0 ? 1 : 0,
+                                            borderRadius: 1.5,
+                                            cursor: 'pointer',
+                                            backgroundColor: 'background.paper',
+                                            boxShadow: 1,
+                                            border: '1px solid',
+                                            borderColor: 'divider',
+                                            transition: 'all 0.2s ease-in-out',
+                                            '&:hover': {
+                                              backgroundColor: 'action.hover',
+                                              transform: 'translateY(-1px)',
+                                              boxShadow: 2
+                                            }
+                                          }}
+                                        >
+                                          {attachment.mime_type?.startsWith('image/') ? (
+                                            <Box 
+                                              sx={{ 
+                                                position: 'relative',
+                                                width: 48,
+                                                height: 48,
+                                                borderRadius: 1,
+                                                overflow: 'hidden',
+                                                border: '1px solid',
+                                                borderColor: 'divider',
+                                                bgcolor: 'background.default'
+                                              }}
+                                            >
+                                              <img 
+                                                src={attachment.asset_url} 
+                                                alt={attachment.title}
+                                                style={{ 
+                                                  width: '100%',
+                                                  height: '100%',
+                                                  objectFit: 'cover'
+                                                }}
+                                              />
+                                            </Box>
+                                          ) : (
+                                            <Box 
+                                              sx={{ 
+                                                width: 48,
+                                                height: 48,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                borderRadius: 1,
+                                                bgcolor: 'primary.main',
+                                                color: 'primary.contrastText'
+                                              }}
+                                            >
+                                              <InsertDriveFileIcon sx={{ fontSize: 28 }} />
+                                            </Box>
+                                          )}
+                                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                                            <Typography 
+                                              variant="body1"
+                                              noWrap
+                                              sx={{ 
+                                                fontWeight: 500,
+                                                color: 'text.primary'
+                                              }}
+                                            >
+                                              {attachment.title}
+                                            </Typography>
+                                            <Typography 
+                                              variant="caption"
+                                              sx={{ 
+                                                color: 'text.secondary',
+                                                display: 'block',
+                                                mt: 0.25
+                                              }}
+                                            >
+                                              {formatFileSize(attachment.file_size)}
+                                            </Typography>
+                                          </Box>
+                                          {attachment.mime_type?.startsWith('image/') && (
+                                            <IconButton 
+                                              size="small" 
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleFilePreview(attachment);
+                                              }}
+                                              sx={{
+                                                color: 'action.active',
+                                                '&:hover': {
+                                                  color: 'primary.main',
+                                                  bgcolor: 'action.hover'
+                                                }
+                                              }}
+                                            >
+                                              <VisibilityIcon fontSize="small" />
+                                            </IconButton>
+                                          )}
+                                        </Box>
                                       ))}
                                     </Box>
                                   )}
@@ -4630,7 +4746,7 @@ const StreamChatPopover: React.FC = () => {
                                 {formatMessageTime(threadMessage.created_at)}
                               </Typography>
                             </Box>
-                            <Typography>{threadMessage.text}</Typography>
+                            <Typography dangerouslySetInnerHTML={{ __html: sanitizeHtml(threadMessage.text) }} />
                           </Box>
                         </Box>
                       </Box>
@@ -4667,7 +4783,7 @@ const StreamChatPopover: React.FC = () => {
                                   {formatMessageTime(reply.created_at)}
                                 </Typography>
                               </Box>
-                              <Typography>{reply.text}</Typography>
+                              <Typography dangerouslySetInnerHTML={{ __html: sanitizeHtml(reply.text) }} />
                             </Box>
                           </Box>
                         </Box>
@@ -4958,7 +5074,7 @@ const StreamChatPopover: React.FC = () => {
               Original Message:
             </Typography>
             <Paper variant="outlined" sx={{ p: 1.5, bgcolor: 'grey.50' }}>
-              <Typography>{forwardMessage?.text}</Typography>
+              <Typography dangerouslySetInnerHTML={{ __html: sanitizeHtml(forwardMessage?.text) }} />
               {forwardMessage?.attachments?.length > 0 && (
                 <Box sx={{ mt: 1 }}>
                   <Typography variant="caption" color="text.secondary">
@@ -5194,7 +5310,7 @@ const StreamChatPopover: React.FC = () => {
                     {formatMessageTime(threadMessage.created_at)}
                   </Typography>
                 </Box>
-                <Typography>{threadMessage.text}</Typography>
+                <Typography dangerouslySetInnerHTML={{ __html: sanitizeHtml(threadMessage.text) }} />
               </Box>
             </Box>
           </Box>
@@ -5231,7 +5347,7 @@ const StreamChatPopover: React.FC = () => {
                       {formatMessageTime(reply.created_at)}
                     </Typography>
                   </Box>
-                  <Typography>{reply.text}</Typography>
+                  <Typography dangerouslySetInnerHTML={{ __html: sanitizeHtml(reply.text) }} />
                 </Box>
               </Box>
             </Box>

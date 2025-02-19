@@ -9,22 +9,23 @@ import {
   FormatListNumbered,
   FormatQuote,
   Code,
-  Send as SendIcon,
-  AttachFile as AttachFileIcon
+  Send as SendIcon
 } from '@mui/icons-material';
 
 interface RichTextEditorProps {
   onSubmit: (value: string) => void;
-  onAttachmentClick?: () => void;
   value?: string;
   onChange?: (value: string) => void;
+  placeholder?: string;
+  sx?: any;
 }
 
 const RichTextEditor: React.FC<RichTextEditorProps> = ({ 
   onSubmit, 
-  onAttachmentClick,
   value,
-  onChange 
+  onChange,
+  placeholder,
+  sx = {} 
 }) => {
   const editor = useEditor({
     extensions: [StarterKit],
@@ -32,6 +33,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
     editorProps: {
       attributes: {
         class: 'focus:outline-none w-full',
+        placeholder: placeholder,
       },
     },
     onUpdate: ({ editor }) => {
@@ -42,6 +44,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   const handleSubmit = useCallback(() => {
     if (!editor) return;
     const htmlContent = editor.getHTML();
+    if (htmlContent === '<p></p>') return; // Don't submit empty messages
     onSubmit(htmlContent);
     editor.commands.clearContent();
   }, [editor, onSubmit]);
@@ -80,7 +83,8 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
           '& p': {
             margin: 0,
           }
-        }
+        },
+        ...sx
       }}
     >
       <Box sx={{ 
@@ -104,7 +108,6 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
               <FormatBold fontSize="small" />
             </IconButton>
           </Tooltip>
-          
           <Tooltip title="Italic">
             <IconButton 
               size="small"
@@ -114,7 +117,6 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
               <FormatItalic fontSize="small" />
             </IconButton>
           </Tooltip>
-
           <Tooltip title="Bullet List">
             <IconButton 
               size="small"
@@ -124,7 +126,6 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
               <FormatListBulleted fontSize="small" />
             </IconButton>
           </Tooltip>
-
           <Tooltip title="Numbered List">
             <IconButton 
               size="small"
@@ -134,46 +135,40 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
               <FormatListNumbered fontSize="small" />
             </IconButton>
           </Tooltip>
-        </Box>
-
-        <Box sx={{ display: 'flex', gap: 0.5 }}>
-          <Tooltip title="Attach File">
+          <Tooltip title="Quote">
             <IconButton 
               size="small"
-              onClick={onAttachmentClick}
-              sx={{ color: 'text.secondary' }}
+              onClick={() => editor.chain().focus().toggleBlockquote().run()}
+              color={editor.isActive('blockquote') ? 'primary' : 'default'}
             >
-              <AttachFileIcon fontSize="small" />
+              <FormatQuote fontSize="small" />
             </IconButton>
           </Tooltip>
-          
-          <Tooltip title="Send">
+          <Tooltip title="Code">
             <IconButton 
-              size="small" 
-              color="primary"
-              onClick={handleSubmit}
-              sx={{
-                bgcolor: 'primary.main',
-                color: 'white',
-                '&:hover': {
-                  bgcolor: 'primary.dark',
-                },
-              }}
+              size="small"
+              onClick={() => editor.chain().focus().toggleCode().run()}
+              color={editor.isActive('code') ? 'primary' : 'default'}
             >
-              <SendIcon fontSize="small" />
+              <Code fontSize="small" />
             </IconButton>
           </Tooltip>
         </Box>
+        <Tooltip title="Send (Enter)">
+          <IconButton 
+            size="small"
+            onClick={handleSubmit}
+            color="primary"
+          >
+            <SendIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
       </Box>
-
-      <Box sx={{ 
-        flex: 1,
-        width: '100%',
-      }}>
-        <EditorContent 
-          editor={editor} 
-          onKeyDown={handleKeyDown}
-        />
+      <Box 
+        sx={{ flex: 1 }}
+        onKeyDown={handleKeyDown}
+      >
+        <EditorContent editor={editor} />
       </Box>
     </Paper>
   );
