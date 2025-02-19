@@ -12,7 +12,6 @@ import {
   ListItemAvatar,
   TextField,
   Popover,
-  
   Paper,
   Chip,
   Badge,
@@ -47,6 +46,7 @@ import {
   FormControlLabel,
   InputLabel,
   Select,
+  Stack,
 } from '@mui/material';
 import {
   Chat as ChatIcon,
@@ -108,6 +108,7 @@ import { keyframes } from '@mui/system';
 import { db } from '@/config/firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
+import NotificationManager from './NotificationManager';
 
 interface Employee {
   id: string;
@@ -314,6 +315,16 @@ const StreamChatPopover: React.FC = () => {
 
   // Add state for task popover
   const [taskAnchorEl, setTaskAnchorEl] = useState<null | HTMLElement>(null);
+
+  const [notificationAnchorEl, setNotificationAnchorEl] = useState<null | HTMLElement>(null);
+  const [notificationMessage, setNotificationMessage] = useState<{
+    id: string;
+    text: string;
+    user: any;
+    channelId: string;
+  } | null>(null);
+
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const handleChannelSelect = useCallback(async (selectedChannel: Channel) => {
     try {
@@ -910,43 +921,61 @@ const StreamChatPopover: React.FC = () => {
 
   // Add forward message handler
   const handleForwardMessage = async () => {
-    if (!forwardMessage || selectedChannels.length === 0) return;
+    if (!chatClient || !forwardMessage || selectedChannels.length === 0) return;
 
     try {
-      const sourceChannel = channels.find(ch => ch.id === channel?.id);
-      const sourceChatName = sourceChannel ? getChannelDisplayName() : 'Unknown Chat';
-      const senderName = forwardMessage.user?.name || forwardMessage.user?.id || 'Unknown User';
-      const messageTime = formatMessageTime(forwardMessage.created_at);
+      // First validate all channels exist
+      for (const channelId of selectedChannels) {
+        try {
+          // Determine channel type based on ID format
+          const channelType = channelId.startsWith('team-') ? 'team' : 'messaging';
+          const targetChannel = chatClient.channel(channelType, channelId);
+          await targetChannel.watch(); // This will throw if channel doesn't exist
+        } catch (error) {
+          throw new Error(`Channel no longer exists: ${channelId}`);
+        }
+      }
 
-      const forwardedText = `${forwardComment ? `${forwardComment}\n\n` : ''}Forwarded message from ${senderName} in ${sourceChatName} (${messageTime}):\n―――――――――――――――\n${forwardMessage.text}`;
-
+      // Now forward to all channels
       await Promise.all(
         selectedChannels.map(async (channelId) => {
-          const targetChannel = channels.find((ch) => ch.id === channelId);
-          if (!targetChannel) return;
-
-          const messageData = {
-            text: forwardedText,
-            attachments: forwardMessage.attachments,
+          // Determine channel type based on ID format
+          const channelType = channelId.startsWith('team-') ? 'team' : 'messaging';
+          const targetChannel = chatClient.channel(channelType, channelId);
+          
+          await targetChannel.sendMessage({
+            text: forwardMessage.text,
+            attachments: forwardMessage.attachments || [],
             mentioned_users: [],
-            user: {
-              id: user?.email?.replace(/[.@]/g, '_') || '',
-              name: user?.displayName || '',
-              image: user?.photoURL
-            }
-          };
-
-          await targetChannel.sendMessage(messageData);
+            parent_id: null,
+            forwarded: true,
+            forwarded_from: {
+              message_id: forwardMessage.id,
+              channel_id: channel?.id,
+              user: forwardMessage.user,
+            },
+          });
         })
       );
 
-      loadChannels();
-      setForwardDialogOpen(false);
+      enqueueSnackbar('Message forwarded successfully', { 
+        variant: 'success',
+        autoHideDuration: 3000
+      });
+
+      // Reset state
       setForwardMessage(null);
-      setForwardComment('');
+      setForwardDialogOpen(false);
       setSelectedChannels([]);
     } catch (error) {
       console.error('Error forwarding message:', error);
+      enqueueSnackbar(
+        error instanceof Error ? error.message : 'Failed to forward message', 
+        { 
+          variant: 'error',
+          autoHideDuration: 3000
+        }
+      );
     }
   };
 
@@ -1004,20 +1033,29 @@ const StreamChatPopover: React.FC = () => {
 
       const forwardedText = `${forwardComment ? `${forwardComment}\n\n` : ''}Forwarded message from ${senderName} in ${sourceChatName} (${messageTime}):\n―――――――――――――――\n${forwardMessage.text}`;
 
-      const messageData = {
-        text: forwardedText,
-        attachments: forwardMessage.attachments,
-        mentioned_users: [],
-        user: {
-          id: user.email.replace(/[.@]/g, '_'),
-          name: user.displayName || user.email,
-          image: user.photoURL
-        }
-      };
+      await Promise.all(
+        selectedChannels.map(async (channelId) => {
+          // Determine channel type based on ID format
+          const channelType = channelId.startsWith('team-') ? 'team' : 'messaging';
+          const targetChannel = channels.find((ch) => ch.id === channelId);
+          if (!targetChannel) return;
 
-      await newChannel.sendMessage(messageData);
-      
-      setShowNewChatDialog(false);
+          const messageData = {
+            text: forwardedText,
+            attachments: forwardMessage.attachments,
+            mentioned_users: [],
+            user: {
+              id: user.email.replace(/[.@]/g, '_'),
+              name: user.displayName || user.email,
+              image: user.photoURL
+            }
+          };
+
+          await targetChannel.sendMessage(messageData);
+        })
+      );
+
+      loadChannels();
       setForwardDialogOpen(false);
       setForwardMessage(null);
       setForwardComment('');
@@ -1053,40 +1091,17 @@ const StreamChatPopover: React.FC = () => {
       const currentUserId = user.email.replace(/[.@]/g, '_');
       const otherUserId = selectedNewChatUser.email.replace(/[.@]/g, '_');
 
-      console.log('Creating chat with users:', {
-        currentUser: {
-          id: currentUserId,
-          email: user.email,
-          name: user.displayName || user.email,
-          image: user.photoURL,
-        },
-        otherUser: {
-          id: otherUserId,
-          email: selectedNewChatUser.email,
-          name: selectedNewChatUser.name || selectedNewChatUser.email,
-          image: selectedNewChatUser.photoURL,
-        }
-      });
-
       // Create the users via backend
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/stream/create-chat`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/stream/create-user`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          currentUser: {
-            id: currentUserId,
-            email: user.email,
-            name: user.displayName || user.email.split('@')[0],
-            image: user.photoURL,
-          },
-          otherUser: {
-            id: otherUserId,
-            email: selectedNewChatUser.email,
-            name: selectedNewChatUser.name || selectedNewChatUser.email.split('@')[0],
-            image: selectedNewChatUser.photoURL,
-          },
+          userId: otherUserId,
+          email: selectedNewChatUser.email,
+          name: selectedNewChatUser.name || selectedNewChatUser.email,
+          image: selectedNewChatUser.photoURL,
         }),
       });
 
@@ -1991,13 +2006,12 @@ const StreamChatPopover: React.FC = () => {
       setMessages(prevMessages => 
         prevMessages.map(msg => {
           if (msg.id === message_id) {
-            const updatedMsg = { ...msg };
-            
-            // Filter out the deleted reaction
-            updatedMsg.latest_reactions = (updatedMsg.latest_reactions || []).filter(
-              r => !(r.type === reaction.type && r.user_id === user.id)
-            );
-
+            const updatedMsg = {
+              ...msg,
+              latest_reactions: (updatedMsg.latest_reactions || []).filter(
+                r => !(r.type === reaction.type && r.user_id === user.id)
+              ),
+            };
             return updatedMsg;
           }
           return msg;
@@ -2379,6 +2393,178 @@ const StreamChatPopover: React.FC = () => {
     </Popover>
   );
 
+  const [quickReplyOpen, setQuickReplyOpen] = useState(false);
+  const [quickReplyText, setQuickReplyText] = useState('');
+
+  useEffect(() => {
+    if (!chatClient || !user?.email) return;
+
+    const handleNewMessage = (event: any) => {
+      console.log('New message event:', event);
+      
+      const { message, cid, type } = event;
+      
+      // Validate event
+      if (!message || !cid || type !== 'message.new') {
+        console.log('Invalid message event:', event);
+        return;
+      }
+      
+      // Don't count own messages
+      if (message.user?.id === chatClient?.userID) {
+        console.log('Own message, skipping notification');
+        return;
+      }
+      
+      // Get channel from client
+      const eventChannel = chatClient.channel('messaging', cid.split(':')[1]);
+      
+      // Don't count if chat is open and this channel is active
+      if (Boolean(anchorEl) && eventChannel.id === channel?.id) {
+        console.log('Chat open and active channel, skipping notification');
+        return;
+      }
+
+      console.log('Incrementing unread count');
+      setUnreadCount(prev => prev + 1);
+      
+      // Update channels list to show latest message
+      loadChannels();
+    };
+
+    chatClient.on('message.new', handleNewMessage);
+
+    return () => {
+      chatClient.off('message.new', handleNewMessage);
+    };
+  }, [chatClient, user, channel, channels, anchorEl, enqueueSnackbar]);
+
+  useEffect(() => {
+    if (anchorEl) {
+      setUnreadCount(0);
+      setNotificationMessage(null);
+    }
+  }, [anchorEl]);
+
+  // Handle unread messages
+  useEffect(() => {
+    if (!chatClient || !user?.email) return;
+
+    const handleNewMessage = (event: any) => {
+      const { message, cid, type } = event;
+      
+      // Validate event
+      if (!message || !cid || type !== 'message.new') {
+        console.log('Invalid message event:', event);
+        return;
+      }
+      
+      // Don't count own messages
+      if (message.user?.id === chatClient.userID) return;
+      
+      // Don't count if chat is open and this channel is active
+      if (Boolean(anchorEl) && cid === channel?.id) return;
+
+      // Increment unread count
+      setUnreadCount(prev => prev + 1);
+    };
+
+    // Reset unread count when opening chat
+    if (anchorEl) {
+      setUnreadCount(0);
+    }
+
+    chatClient.on('message.new', handleNewMessage);
+
+    return () => {
+      chatClient.off('message.new', handleNewMessage);
+    };
+  }, [chatClient, user, channel, anchorEl]);
+
+  // Notification listener
+  useEffect(() => {
+    if (!chatClient || !user?.email) {
+      console.log('Chat client or user not ready for notifications');
+      return;
+    }
+
+    console.log('Setting up notification listener');
+    const handleNotification = (event: any) => {
+      try {
+        console.log('Notification event:', event);
+        
+        if (!event?.message || !event?.channel) {
+          console.error('Invalid notification event:', event);
+          return;
+        }
+
+        const { message, channel: eventChannel } = event;
+        
+        if (!message.user?.id || !eventChannel?.id) {
+          console.error('Missing required notification data:', { message, eventChannel });
+          return;
+        }
+        
+        // Don't show notification for own messages
+        if (message.user.id === chatClient?.userID) {
+          console.log('Own message, skipping notification');
+          return;
+        }
+        
+        // Don't show notification if the chat is open and this channel is active
+        if (Boolean(anchorEl) && eventChannel.id === channel?.id) {
+          console.log('Chat open and active channel, skipping notification');
+          return;
+        }
+
+        console.log('Showing notification for:', {
+          text: message.text,
+          user: message.user.name,
+          channel: eventChannel.id
+        });
+
+        // Update unread count
+        setUnreadCount(prev => prev + 1);
+
+        // Show notification
+        setNotificationMessage({
+          id: message.id,
+          text: message.text || '',
+          user: message.user,
+          channelId: eventChannel.id
+        });
+
+        // Set notification anchor to chat button
+        const chatButton = document.getElementById('chat-button');
+        console.log('Chat button found:', Boolean(chatButton));
+        
+        if (chatButton) {
+          setNotificationAnchorEl(chatButton);
+
+          // Auto hide after 5 seconds
+          setTimeout(() => {
+            console.log('Auto-hiding notification');
+            setNotificationAnchorEl(null);
+            setNotificationMessage(null);
+          }, 5000);
+        }
+      } catch (error) {
+        console.error('Error handling notification:', error);
+        console.error('Event data:', event);
+      }
+    };
+
+    // Add notification listener
+    const notificationChannel = 'notification.message.new';
+    console.log('Adding notification listener for:', notificationChannel);
+    chatClient.on(notificationChannel, handleNotification);
+
+    return () => {
+      console.log('Cleaning up notification listener');
+      chatClient.off(notificationChannel, handleNotification);
+    };
+  }, [chatClient, user]);
+
   const handleStartCall = async (isVideo: boolean = false) => {
     if (!videoClient || !channel || !user?.email) return;
 
@@ -2699,21 +2885,12 @@ const StreamChatPopover: React.FC = () => {
                   mt: 1,
                 }}
               >
-                {attachment.mime_type?.startsWith('image/') ? (
-                  <Box sx={{ position: 'relative' }}>
-                    <img 
-                      src={attachment.asset_url} 
-                      alt={attachment.title}
-                      style={{ 
-                        maxWidth: '100%', 
-                        maxHeight: 200, 
-                        borderRadius: 4,
-                        cursor: 'pointer'
-                      }}
-                    />
-                  </Box>
+                {attachment.mime_type?.includes('pdf') ? (
+                  <PdfIcon color="error" />
+                ) : attachment.mime_type?.startsWith('image/') ? (
+                  <ImageIcon color="primary" />
                 ) : (
-                  <InsertDriveFileIcon />
+                  <InsertDriveFileIcon color="action" />
                 )}
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography variant="body2" noWrap>{attachment.title}</Typography>
@@ -3331,7 +3508,7 @@ const StreamChatPopover: React.FC = () => {
                     multiple
                     fullWidth
                     options={filteredEmployees}
-                    getOptionLabel={(option) => option?.name || option?.email || ''}
+                    getOptionLabel={(option) => option?.name || option?.email}
                     value={selectedMembers
                       .map(email => filteredEmployees.find(emp => emp?.email === email))
                       .filter(Boolean)}
@@ -3398,7 +3575,7 @@ const StreamChatPopover: React.FC = () => {
                     >
                       <ListItemAvatar>
                         <Avatar src={member.user?.image}>
-                          {member.user?.name?.[0] || member.user_id?.[0] || '?'}
+                          {member.user?.name?.[0]}
                         </Avatar>
                       </ListItemAvatar>
                       <ListItemText
@@ -3545,7 +3722,7 @@ const StreamChatPopover: React.FC = () => {
           </ListItemAvatar>
           <ListItemText
             primary={
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Typography 
                   variant="subtitle1" 
                   noWrap 
@@ -3570,7 +3747,7 @@ const StreamChatPopover: React.FC = () => {
               </Box>
             }
             secondary={
-              <Box component="span" sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
+              <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Typography 
                   variant="body2" 
                   noWrap 
@@ -3899,7 +4076,13 @@ const StreamChatPopover: React.FC = () => {
       // Forward message to each selected channel
       await Promise.all(
         selectedChannels.map(async (channelId) => {
-          const targetChannel = chatClient.channel('messaging', channelId);
+          // Get the actual channel from our channels list to determine its type
+          const existingChannel = channels.find(ch => ch.id === channelId);
+          if (!existingChannel) {
+            throw new Error(`Channel ${channelId} not found`);
+          }
+
+          const targetChannel = chatClient.channel(existingChannel.type || 'messaging', channelId);
           await targetChannel.sendMessage({
             text: forwardMessage.text,
             attachments: forwardMessage.attachments || [],
@@ -3926,7 +4109,50 @@ const StreamChatPopover: React.FC = () => {
       setSelectedChannels([]);
     } catch (error) {
       console.error('Error forwarding message:', error);
-      enqueueSnackbar('Failed to forward message', { 
+      enqueueSnackbar(
+        error instanceof Error ? error.message : 'Failed to forward message', 
+        { 
+          variant: 'error',
+          autoHideDuration: 3000
+        }
+      );
+    }
+  };
+
+  const handleQuickReply = async () => {
+    if (!channel || !quickReplyText.trim()) return;
+
+    try {
+      // Send message with attachments but without pinned parameter
+      const message = await channel.sendMessage({
+        text: quickReplyText,
+        user: {
+          id: user?.email?.replace(/[.@]/g, '_') || '',
+          name: user?.displayName || '',
+          image: user?.photoURL
+        }
+      });
+
+      // Check if message was sent successfully
+      if (message) {
+        // Refresh channels to update order
+        loadChannels();
+
+        // Update channel in list to reflect new message
+        updateChannelInList(channel, true);
+
+        // Clear states
+        setQuickReplyText('');
+        setQuickReplyOpen(false);
+      } else {
+        enqueueSnackbar('Failed to send message', { 
+          variant: 'error',
+          autoHideDuration: 3000
+        });
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      enqueueSnackbar('Failed to send message', { 
         variant: 'error',
         autoHideDuration: 3000
       });
@@ -3937,12 +4163,13 @@ const StreamChatPopover: React.FC = () => {
     <Box
       sx={{
         position: 'fixed',
-        bottom: '20px',
-        right: '80px',
-        zIndex: 1200,
+        bottom: 16,
+        right: 16,
+        zIndex: 1000,
       }}
     >
       <IconButton
+        id="chat-button"
         onClick={(e) => setAnchorEl(e.currentTarget)}
         sx={{
           backgroundColor: 'background.paper',
@@ -3952,11 +4179,98 @@ const StreamChatPopover: React.FC = () => {
           },
         }}
       >
-        <Badge color="error" variant="dot" invisible={!hasUnreadMessages}>
+        <Badge 
+          badgeContent={unreadCount} 
+          color="error"
+          sx={{
+            '& .MuiBadge-badge': {
+              right: -3,
+              top: 3,
+            }
+          }}
+        >
           <ChatIcon />
         </Badge>
       </IconButton>
-
+      
+      {/* Notification */}
+      <Popover
+        open={Boolean(notificationAnchorEl)}
+        anchorEl={notificationAnchorEl}
+        onClose={() => {
+          setNotificationAnchorEl(null);
+          setNotificationMessage(null);
+        }}
+        anchorOrigin={{
+          vertical: 'top',
+          horizontal: 'right',
+        }}
+        transformOrigin={{
+          vertical: 'bottom',
+          horizontal: 'right',
+        }}
+        sx={{
+          '& .MuiPopover-paper': {
+            marginBottom: 2,
+            marginRight: 2,
+            maxWidth: 300,
+            p: 2,
+            boxShadow: 4,
+            borderRadius: 2
+          }
+        }}
+      >
+        {notificationMessage && (
+          <>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              {notificationMessage.user.name || notificationMessage.user.id}
+            </Typography>
+            <Typography 
+              variant="body2" 
+              sx={{ mt: 0.5, color: 'text.secondary' }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(notificationMessage.text) }} 
+            />
+            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+              <Button 
+                size="small" 
+                variant="contained"
+                onClick={() => {
+                  const chatButton = document.getElementById('chat-button');
+                  if (chatButton) {
+                    setAnchorEl(chatButton);
+                    const eventChannel = channels.find(ch => ch.id === notificationMessage.channelId);
+                    if (eventChannel) {
+                      setChannel(eventChannel);
+                      setQuickReplyOpen(true);
+                    }
+                    setNotificationAnchorEl(null);
+                  }
+                }}
+              >
+                Reply
+              </Button>
+              <Button 
+                size="small" 
+                variant="outlined"
+                onClick={() => {
+                  const chatButton = document.getElementById('chat-button');
+                  if (chatButton) {
+                    setAnchorEl(chatButton);
+                    const eventChannel = channels.find(ch => ch.id === notificationMessage.channelId);
+                    if (eventChannel) {
+                      setChannel(eventChannel);
+                    }
+                    setNotificationAnchorEl(null);
+                  }
+                }}
+              >
+                Open
+              </Button>
+            </Stack>
+          </>
+        )}
+      </Popover>
+      
       <Popover
         open={Boolean(anchorEl)}
         anchorEl={anchorEl}
@@ -4202,30 +4516,22 @@ const StreamChatPopover: React.FC = () => {
                             }}
                           >
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Avatar 
-                                src={msg.user?.image} 
-                                sx={{ width: 24, height: 24 }}
+                              <Avatar
+                                src={msg.user?.image}
+                                sx={{ width: 32, height: 32 }}
                               >
                                 {msg.user?.name?.[0]}
                               </Avatar>
-                              <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Box>
                                 <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, mb: 0.5 }}>
-                                  <Typography variant="body2" noWrap>
+                                  <Typography variant="subtitle2">
                                     {msg.user?.name || msg.user?.id}
                                   </Typography>
                                   <Typography variant="caption" color="text.secondary">
                                     {formatMessageTime(msg.created_at)}
                                   </Typography>
                                 </Box>
-                                <Typography 
-                                  variant="body2" 
-                                  noWrap
-                                  dangerouslySetInnerHTML={{ __html: msg.text || '' }}
-                                  sx={{ 
-                                    color: 'text.secondary',
-                                    '& p': { margin: 0 }
-                                  }}
-                                />
+                                <Typography dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.text) }} />
                               </Box>
                             </Box>
                           </Box>
@@ -5113,6 +5419,7 @@ const StreamChatPopover: React.FC = () => {
               {getRecentChannels().map((ch) => {
                 const isGroup = ch.data?.type === 'team';
                 const members = Object.values(ch.state?.members || {})
+                  .slice(0, 2)
                   .map((member: any) => member.user?.name || member.user?.id)
                   .filter(name => name !== user?.displayName)
                   .join(', ');
@@ -5193,7 +5500,7 @@ const StreamChatPopover: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog
+      <Dialog 
         open={showNewChatDialog}
         onClose={() => setShowNewChatDialog(false)}
         maxWidth="sm"
@@ -5239,7 +5546,7 @@ const StreamChatPopover: React.FC = () => {
           <Button onClick={() => setShowNewChatDialog(false)}>
             Cancel
           </Button>
-          <Button
+          <Button 
             onClick={handleCreateNewChatAndForward}
             disabled={newChatUsers.length === 0}
             variant="contained"

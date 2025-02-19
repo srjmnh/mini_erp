@@ -31,6 +31,7 @@ import { ProjectProvider } from './contexts/ProjectContext';
 import { SupabaseProvider } from './contexts/SupabaseContext';
 import { SnackbarProvider } from './contexts/SnackbarContext';
 import { ChatProvider } from './contexts/ChatContext';
+import NotificationManager from './components/chat/NotificationManager';
 
 import theme from './theme';
 import StreamChatPopover from '@/components/chat/StreamChatPopover';
@@ -95,7 +96,21 @@ function App() {
                             />
                           </Routes>
                         </Router>
-                        <StreamChatPopover />
+                        {/* Floating buttons container */}
+                        <Box
+                          sx={{
+                            position: 'fixed',
+                            bottom: 16,
+                            right: 16,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 2,
+                            zIndex: 1300,
+                          }}
+                        >
+                          <StreamChatPopover />
+                          <NotificationManager />
+                        </Box>
                       </ChatProvider>
                     </ProjectProvider>
                   </FirestoreProvider>
