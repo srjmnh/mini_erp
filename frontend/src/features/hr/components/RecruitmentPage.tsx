@@ -1,8 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSnackbar } from 'notistack';
 import CardMembershipIcon from '@mui/icons-material/CardMembership';
 import BadgeIcon from '@mui/icons-material/Badge';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import SaveIcon from '@mui/icons-material/Save';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import LightbulbIcon from '@mui/icons-material/Lightbulb';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import StarIcon from '@mui/icons-material/Star';
+import SchoolIcon from '@mui/icons-material/School';
+import WarningIcon from '@mui/icons-material/Warning';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import PersonIcon from '@mui/icons-material/Person';
+import { alpha } from '@mui/material/styles';
+import {
+  Timeline,
+  TimelineItem,
+  TimelineSeparator,
+  TimelineConnector,
+  TimelineDot,
+  TimelineContent,
+} from '@mui/lab';
 import {
   Box,
   Paper,
@@ -32,12 +52,16 @@ import {
   CardContent,
   CardActions,
   Stack,
+  CircularProgress,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  Person as PersonIcon,
   Event as EventIcon,
   Description as DescriptionIcon,
   FileUpload as FileUploadIcon,
@@ -48,12 +72,13 @@ import {
   Work as WorkIcon,
   Phone as PhoneIcon,
   CalendarToday as CalendarTodayIcon,
+  Psychology as PsychologyIcon,
 } from '@mui/icons-material';
 import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, getDoc, Timestamp } from 'firebase/firestore';
 import { supabase } from '@/config/supabase';
-import { useUser } from '../../../contexts/UserContext';
 import { db } from '@/config/firebase';
-import { useSnackbar } from '@/contexts/SnackbarContext';
+import CVAnalysis from './CVAnalysis';
+import { analyzeCVWithAI, CVAnalysisResult } from '@/services/cvAnalysis'; // Fix import path for CV analysis
 
 interface JobPosting {
   id: string;
@@ -170,6 +195,38 @@ const DocumentPreviewDialog: React.FC<DocumentPreviewDialogProps> = ({
   onClose,
   document
 }) => {
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const { enqueueSnackbar } = useSnackbar();
+
+  useEffect(() => {
+    const getSignedUrl = async () => {
+      if (!document) return;
+      
+      try {
+        setLoading(true);
+        // Get the file path by removing the Supabase URL prefix
+        const filePath = document.url.replace(/^.*candidate-documents\//, '');
+        
+        const { data, error } = await supabase.storage
+          .from('candidate-documents')
+          .createSignedUrl(filePath, 60);
+
+        if (error) throw error;
+        setSignedUrl(data.signedUrl);
+      } catch (error) {
+        console.error('Error getting signed URL:', error);
+        enqueueSnackbar('Error loading document preview', { variant: 'error' });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (document) {
+      getSignedUrl();
+    }
+  }, [document]);
+
   if (!document) return null;
 
   return (
@@ -183,34 +240,32 @@ const DocumentPreviewDialog: React.FC<DocumentPreviewDialogProps> = ({
         </Box>
       </DialogTitle>
       <DialogContent>
-        <Box sx={{ height: '70vh', width: '100%', overflow: 'auto' }}>
-          {document.url.toLowerCase().endsWith('.pdf') ? (
-            <iframe
-              src={`${document.url}#view=FitH`}
-              width="100%"
-              height="100%"
-              style={{ border: 'none' }}
-            />
+        <Box sx={{ height: '70vh', width: '100%', overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          {loading ? (
+            <CircularProgress />
+          ) : signedUrl ? (
+            document.url.toLowerCase().endsWith('.pdf') ? (
+              <iframe
+                src={`${signedUrl}#view=FitH`}
+                width="100%"
+                height="100%"
+                style={{ border: 'none' }}
+              />
+            ) : (
+              <img
+                src={signedUrl}
+                alt={document.name}
+                style={{ maxWidth: '100%', height: 'auto' }}
+              />
+            )
           ) : (
-            <img
-              src={document.url}
-              alt={document.name}
-              style={{ maxWidth: '100%', height: 'auto' }}
-            />
+            <Typography color="error">Failed to load document preview</Typography>
           )}
         </Box>
       </DialogContent>
     </Dialog>
   );
 };
-
-interface DocumentUploadDialogProps {
-  open: boolean;
-  onClose: () => void;
-  onUpload: (document: Omit<CandidateDocument, 'id'>) => void;
-}
-
-import { uploadCandidateDocument } from '@/services/supabaseStorage';
 
 const DocumentUploadDialog: React.FC<DocumentUploadDialogProps> = ({
   open,
@@ -311,6 +366,7 @@ const DocumentUploadDialog: React.FC<DocumentUploadDialogProps> = ({
 
 const RecruitmentPage: React.FC = () => {
   const { user, userRole } = useAuth();
+  const { enqueueSnackbar } = useSnackbar();
   console.log('Current user:', user);
   const isHR = userRole === 'hr' || userRole === 'HR0';
   const [activeTab, setActiveTab] = useState(0);
@@ -331,6 +387,15 @@ const RecruitmentPage: React.FC = () => {
   const [selectedDocument, setSelectedDocument] = useState<CandidateDocument | null>(null);
   const [selectedCandidateForDoc, setSelectedCandidateForDoc] = useState<string | null>(null);
   
+  // CV Analysis state
+  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
+  const [analysisResults, setAnalysisResults] = useState<Record<string, any>>({});
+  const [analyzing, setAnalyzing] = useState<Record<string, boolean>>({});
+  const [analysisDialogOpen, setAnalysisDialogOpen] = useState(false);
+
+  // Add state for saved analyses
+  const [savedAnalyses, setSavedAnalyses] = useState<{[key: string]: boolean}>({});
+
   const [interviewForm, setInterviewForm] = useState({
     candidateId: '',
     interviewerId: 'none', // Initialize with 'none' to match select default
@@ -431,7 +496,7 @@ const RecruitmentPage: React.FC = () => {
       return employeesList; // Return the list for immediate use
     } catch (error) {
       console.error('Error fetching employees:', error);
-      showSnackbar('Error fetching employees', 'error');
+      enqueueSnackbar('Error fetching employees', 'error');
       return [];
     }
   };
@@ -447,7 +512,7 @@ const RecruitmentPage: React.FC = () => {
       setDepartments(departmentsList);
     } catch (error) {
       console.error('Error fetching departments:', error);
-      showSnackbar('Error fetching departments', 'error');
+      enqueueSnackbar('Error fetching departments', 'error');
     }
   };
 
@@ -476,7 +541,7 @@ const RecruitmentPage: React.FC = () => {
       setJobPostings(jobs);
     } catch (error) {
       console.error('Error fetching job postings:', error);
-      showSnackbar('Error fetching job postings', 'error');
+      enqueueSnackbar('Error fetching job postings', 'error');
     }
   };
 
@@ -493,13 +558,13 @@ const RecruitmentPage: React.FC = () => {
 
         if (!employeeSnapshot.empty) {
           const employeeData = employeeSnapshot.docs[0].data();
+          
           // Get department-specific job postings
           const jobsRef = collection(db, 'jobPostings');
           const jobsQuery = query(jobsRef, where('department', '==', employeeData.department));
           const jobsSnapshot = await getDocs(jobsQuery);
           const departmentJobIds = jobsSnapshot.docs.map(doc => doc.id);
           
-          // Only apply 'in' filter if we have job IDs
           if (departmentJobIds.length > 0) {
             candidatesQuery = query(candidatesRef, where('jobPostingId', 'in', departmentJobIds));
           } else {
@@ -532,7 +597,7 @@ const RecruitmentPage: React.FC = () => {
       setCandidates(candidates);
     } catch (error) {
       console.error('Error fetching candidates:', error);
-      enqueueSnackbar('Error fetching candidates', { variant: 'error' });
+      enqueueSnackbar('Error fetching candidates', 'error');
     }
   };
 
@@ -582,7 +647,7 @@ const RecruitmentPage: React.FC = () => {
       setOnboardingTasks(tasks);
     } catch (error) {
       console.error('Error fetching onboarding tasks:', error);
-      showSnackbar('Error fetching onboarding tasks', 'error');
+      enqueueSnackbar('Error fetching onboarding tasks', 'error');
     }
   };
 
@@ -711,10 +776,10 @@ const RecruitmentPage: React.FC = () => {
       const notificationResults = await Promise.all(notificationPromises);
       console.log('Created notifications with IDs:', notificationResults.map(doc => doc.id));
 
-      showSnackbar('Event added to calendar', 'success');
+      enqueueSnackbar('Event added to calendar', 'success');
     } catch (error) {
       console.error('Error adding event to calendar:', error);
-      showSnackbar('Error adding event to calendar', 'error');
+      enqueueSnackbar('Error adding event to calendar', 'error');
     }
   };
 
@@ -728,14 +793,14 @@ const RecruitmentPage: React.FC = () => {
           candidateId: interviewForm.candidateId, 
           dateTime: interviewForm.dateTime 
         });
-        showSnackbar('Please fill in all required fields', 'error');
+        enqueueSnackbar('Please fill in all required fields', 'error');
         return;
       }
       
       // Validate interviewer is selected
       if (!interviewForm.interviewerId || interviewForm.interviewerId === 'none') {
         console.warn('Invalid interviewer:', interviewForm.interviewerId);
-        showSnackbar('Please select an interviewer', 'error');
+        enqueueSnackbar('Please select an interviewer', 'error');
         return;
       }
       
@@ -746,7 +811,7 @@ const RecruitmentPage: React.FC = () => {
           interviewerId: interviewForm.interviewerId,
           availableEmployees: employees.map(e => ({ id: e.id, name: e.name }))
         });
-        showSnackbar('Selected interviewer not found', 'error');
+        enqueueSnackbar('Selected interviewer not found', 'error');
         return;
       }
       console.log('Found interviewer:', selectedInterviewer);
@@ -773,7 +838,7 @@ const RecruitmentPage: React.FC = () => {
             if (jobPostingDoc.exists()) {
               const jobPostingData = jobPostingDoc.data();
               if (jobPostingData.department !== employeeData.department) {
-                showSnackbar('You can only manage interviews for your department', 'error');
+                enqueueSnackbar('You can only manage interviews for your department', 'error');
                 return;
               }
             }
@@ -793,7 +858,7 @@ const RecruitmentPage: React.FC = () => {
           console.log('Adding calendar event for updated interview');
           await addEventToCalendar({ ...updatedInterview, id: selectedInterview.id });
         }
-        showSnackbar('Interview updated successfully', 'success');
+        enqueueSnackbar('Interview updated successfully', 'success');
       } else {
         console.log('Creating new interview');
         const newInterview = {
@@ -811,13 +876,13 @@ const RecruitmentPage: React.FC = () => {
           console.log('Adding calendar event for new interview');
           await addEventToCalendar({ ...newInterview, id: docRef.id });
         }
-        showSnackbar('Interview scheduled successfully', 'success');
+        enqueueSnackbar('Interview scheduled successfully', 'success');
       }
       setIsInterviewDialogOpen(false);
       fetchInterviews();
     } catch (error) {
       console.error('Error saving interview:', error);
-      showSnackbar('Error saving interview', 'error');
+      enqueueSnackbar('Error saving interview', 'error');
     }
   };
 
@@ -845,7 +910,7 @@ const RecruitmentPage: React.FC = () => {
             if (jobPostingDoc.exists()) {
               const jobPostingData = jobPostingDoc.data();
               if (jobPostingData.department !== employeeData.department) {
-                showSnackbar('You can only manage tasks for your department', 'error');
+                enqueueSnackbar('You can only manage tasks for your department', 'error');
                 return;
               }
             }
@@ -858,41 +923,41 @@ const RecruitmentPage: React.FC = () => {
           ...taskForm,
           updatedAt: new Date().toISOString()
         });
-        showSnackbar('Task updated successfully', 'success');
+        enqueueSnackbar('Task updated successfully', 'success');
       } else {
         await addDoc(collection(db, 'onboardingTasks'), {
           ...taskForm,
           createdAt: new Date().toISOString(),
         });
-        showSnackbar('Task created successfully', 'success');
+        enqueueSnackbar('Task created successfully', 'success');
       }
       setIsOnboardingDialogOpen(false);
       fetchOnboardingTasks();
     } catch (error) {
       console.error('Error saving task:', error);
-      showSnackbar('Error saving task', 'error');
+      enqueueSnackbar('Error saving task', 'error');
     }
   };
 
   const handleDeleteInterview = async (interviewId: string) => {
     try {
       await deleteDoc(doc(db, 'interviews', interviewId));
-      showSnackbar('Interview deleted successfully', 'success');
+      enqueueSnackbar('Interview deleted successfully', 'success');
       fetchInterviews();
     } catch (error) {
       console.error('Error deleting interview:', error);
-      showSnackbar('Error deleting interview', 'error');
+      enqueueSnackbar('Error deleting interview', 'error');
     }
   };
 
   const handleDeleteTask = async (taskId: string) => {
     try {
       await deleteDoc(doc(db, 'onboardingTasks', taskId));
-      showSnackbar('Task deleted successfully', 'success');
+      enqueueSnackbar('Task deleted successfully', 'success');
       fetchOnboardingTasks();
     } catch (error) {
       console.error('Error deleting task:', error);
-      showSnackbar('Error deleting task', 'error');
+      enqueueSnackbar('Error deleting task', 'error');
     }
   };
 
@@ -942,7 +1007,7 @@ const RecruitmentPage: React.FC = () => {
       setInterviews(interviews);
     } catch (error) {
       console.error('Error fetching interviews:', error);
-      enqueueSnackbar('Error fetching interviews', { variant: 'error' });
+      enqueueSnackbar('Error fetching interviews', 'error');
     }
   };
 
@@ -954,7 +1019,7 @@ const RecruitmentPage: React.FC = () => {
           ...jobForm,
           updatedAt: new Date().toISOString()
         });
-        showSnackbar('Job posting updated successfully', 'success');
+        enqueueSnackbar('Job posting updated successfully', 'success');
       } else {
         // Create new job
         await addDoc(collection(db, 'jobPostings'), {
@@ -962,24 +1027,24 @@ const RecruitmentPage: React.FC = () => {
           postedDate: new Date().toISOString(),
           status: 'open'
         });
-        showSnackbar('Job posting created successfully', 'success');
+        enqueueSnackbar('Job posting created successfully', 'success');
       }
       setIsJobDialogOpen(false);
       fetchJobPostings();
     } catch (error) {
       console.error('Error saving job posting:', error);
-      showSnackbar('Error saving job posting', 'error');
+      enqueueSnackbar('Error saving job posting', 'error');
     }
   };
 
   const handleDeleteJob = async (jobId: string) => {
     try {
       await deleteDoc(doc(db, 'jobPostings', jobId));
-      showSnackbar('Job posting deleted successfully', 'success');
+      enqueueSnackbar('Job posting deleted successfully', 'success');
       fetchJobPostings();
     } catch (error) {
       console.error('Error deleting job posting:', error);
-      showSnackbar('Error deleting job posting', 'error');
+      enqueueSnackbar('Error deleting job posting', 'error');
     }
   };
 
@@ -1016,42 +1081,42 @@ const RecruitmentPage: React.FC = () => {
           ...candidateForm,
           updatedAt: new Date().toISOString()
         });
-        showSnackbar('Candidate updated successfully', 'success');
+        enqueueSnackbar('Candidate updated successfully', 'success');
       } else {
         // Create new candidate
         await addDoc(collection(db, 'candidates'), {
           ...candidateForm,
           appliedDate: new Date().toISOString(),
         });
-        showSnackbar('Candidate added successfully', 'success');
+        enqueueSnackbar('Candidate added successfully', 'success');
       }
       setIsCandidateDialogOpen(false);
       fetchCandidates();
     } catch (error) {
       console.error('Error saving candidate:', error);
-      showSnackbar('Error saving candidate', 'error');
+      enqueueSnackbar('Error saving candidate', 'error');
     }
   };
 
   const handleDeleteDocument = async (candidateId: string, documentId: string) => {
     try {
       await deleteDoc(doc(db, 'candidates', candidateId, 'documents', documentId));
-      showSnackbar('Document deleted successfully', 'success');
+      enqueueSnackbar('Document deleted successfully', 'success');
       fetchCandidates();
     } catch (error) {
       console.error('Error deleting document:', error);
-      showSnackbar('Error deleting document', 'error');
+      enqueueSnackbar('Error deleting document', 'error');
     }
   };
 
   const handleDeleteCandidate = async (candidateId: string) => {
     try {
       await deleteDoc(doc(db, 'candidates', candidateId));
-      showSnackbar('Candidate deleted successfully', 'success');
+      enqueueSnackbar('Candidate deleted successfully', 'success');
       fetchCandidates();
     } catch (error) {
       console.error('Error deleting candidate:', error);
-      showSnackbar('Error deleting candidate', 'error');
+      enqueueSnackbar('Error deleting candidate', 'error');
     }
   };
 
@@ -1065,6 +1130,72 @@ const RecruitmentPage: React.FC = () => {
       rejected: 'error'
     };
     return statusColors[status] || 'default';
+  };
+
+  const handleAnalyzeCV = async (candidate: Candidate, jobPosting: JobPosting) => {
+    console.log('Starting CV analysis for candidate:', candidate.id);
+    
+    if (!candidate.resumeUrl && !candidate.documents?.some(doc => doc.category === 'resume')) {
+      enqueueSnackbar('No resume found for analysis', { variant: 'error' });
+      return;
+    }
+
+    setAnalyzing(prev => ({ ...prev, [candidate.id]: true }));
+
+    try {
+      const resumeDoc = candidate.documents?.find(doc => doc.category === 'resume');
+      const resumeUrl = resumeDoc?.url || candidate.resumeUrl;
+      
+      if (!resumeUrl) {
+        throw new Error('No resume URL found');
+      }
+
+      console.log('Analyzing resume from URL:', resumeUrl);
+      const result = await analyzeCVWithAI(resumeUrl, jobPosting.description);
+      console.log('Analysis result:', result);
+      
+      setAnalysisResults(prev => ({ ...prev, [candidate.id]: result }));
+      handleShowAnalysisDialog(candidate.id);
+    } catch (error) {
+      console.error('Error analyzing CV:', error);
+      enqueueSnackbar('Error analyzing CV', { variant: 'error' });
+    } finally {
+      setAnalyzing(prev => ({ ...prev, [candidate.id]: false }));
+    }
+  };
+
+  const handleShowAnalysisDialog = (candidateId: string) => {
+    console.log('Opening analysis dialog for candidate:', candidateId);
+    console.log('Current analysis results:', analysisResults[candidateId]);
+    setSelectedAnalysisId(candidateId);
+    setAnalysisDialogOpen(true);
+  };
+
+  const handleCloseAnalysisDialog = () => {
+    console.log('Closing analysis dialog');
+    setSelectedAnalysisId(null);
+    setAnalysisDialogOpen(false);
+  };
+
+  const handleSaveAnalysis = async (candidateId: string, results: any) => {
+    try {
+      const analysisRef = collection(db, 'candidateAnalysis');
+      await addDoc(analysisRef, {
+        candidateId,
+        results,
+        timestamp: Timestamp.now(),
+      });
+      setSavedAnalyses(prev => ({ ...prev, [candidateId]: true }));
+      enqueueSnackbar('Analysis saved successfully!', { variant: 'success' });
+    } catch (error) {
+      console.error('Error saving analysis:', error);
+      enqueueSnackbar('Error saving analysis', { variant: 'error' });
+    }
+  };
+
+  const handleReAnalyze = async (candidateId: string, jobPosting: JobPosting) => {
+    handleCloseAnalysisDialog();
+    await handleAnalyzeCV(candidates.find(c => c.id === candidateId)!, jobPosting);
   };
 
   const renderCandidates = () => (
@@ -1165,7 +1296,6 @@ const RecruitmentPage: React.FC = () => {
                         {candidate.documents.map((doc) => (
                           <Tooltip key={doc.id} title={`${doc.name} (${doc.category})`}>
                             <IconButton
-                              size="small"
                               onClick={() => {
                                 setSelectedDocument(doc);
                                 setDocumentPreviewOpen(true);
@@ -1219,6 +1349,29 @@ const RecruitmentPage: React.FC = () => {
                 >
                   Delete
                 </Button>
+                <Button
+                  variant="outlined"
+                  color="info"
+                  onClick={() => {
+                    if (analyzing[candidate.id]) return;
+                    if (analysisResults[candidate.id]) {
+                      handleShowAnalysisDialog(candidate.id);
+                    } else {
+                      handleAnalyzeCV(candidate, jobPostings.find(job => job.id === candidate.jobPostingId)!);
+                    }
+                  }}
+                  disabled={analyzing[candidate.id]}
+                  startIcon={analyzing[candidate.id] ? 
+                    <CircularProgress size={20} /> : 
+                    analysisResults[candidate.id] ? 
+                      <VisibilityIcon /> : 
+                      <PsychologyIcon />
+                  }
+                >
+                  {analyzing[candidate.id] ? 'Analyzing...' : 
+                   analysisResults[candidate.id] ? 'Show Results' : 'AI Analysis'
+                  }
+                </Button>
               </CardActions>
             </Card>
           </Grid>
@@ -1226,8 +1379,8 @@ const RecruitmentPage: React.FC = () => {
       </Grid>
 
       {/* Document Preview Dialog */}
-      <Dialog
-        open={documentPreviewOpen}
+      <Dialog 
+        open={documentPreviewOpen} 
         onClose={() => setDocumentPreviewOpen(false)}
         maxWidth="md"
         fullWidth
@@ -1243,27 +1396,23 @@ const RecruitmentPage: React.FC = () => {
           </IconButton>
         </DialogTitle>
         <DialogContent>
-          {selectedDocument?.url && (
-            selectedDocument.url.toLowerCase().endsWith('.pdf') ? (
-              <iframe
-                src={selectedDocument.url}
-                style={{ width: '100%', height: '80vh', border: 'none' }}
-                title="PDF Preview"
-              />
-            ) : (
-              <Box
-                component="img"
-                src={selectedDocument.url}
-                alt={selectedDocument.name}
-                sx={{
-                  width: '100%',
-                  height: 'auto',
-                  maxHeight: '80vh',
-                  objectFit: 'contain'
-                }}
-              />
-            )
-          )}
+          <Box sx={{ height: '70vh', width: '100%', overflow: 'auto' }}>
+            {selectedDocument?.url && (
+              selectedDocument.url.toLowerCase().endsWith('.pdf') ? (
+                <iframe
+                  src={selectedDocument.url}
+                  style={{ width: '100%', height: '100%', border: 'none' }}
+                  title="PDF Preview"
+                />
+              ) : (
+                <img
+                  src={selectedDocument.url}
+                  alt={selectedDocument.name}
+                  style={{ maxWidth: '100%', height: 'auto' }}
+                />
+              )
+            )}
+          </Box>
         </DialogContent>
       </Dialog>
 
@@ -1351,7 +1500,7 @@ const RecruitmentPage: React.FC = () => {
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (!file || !selectedCandidate || !selectedDocumentType) {
-                                showSnackbar('Please select a document type', 'error');
+                                enqueueSnackbar('Please select a document type', 'error');
                                 return;
                               }
 
@@ -1366,14 +1515,14 @@ const RecruitmentPage: React.FC = () => {
                                     uploadDate: new Date().toISOString()
                                   });
 
-                                  showSnackbar('Document uploaded successfully', 'success');
+                                  enqueueSnackbar('Document uploaded successfully', 'success');
                                   setDocumentUploadOpen(false);
                                   setSelectedDocumentType('');
                                   fetchCandidates();
                                 }
                               } catch (error) {
                                 console.error('Error uploading document:', error);
-                                showSnackbar('Error uploading document', 'error');
+                                enqueueSnackbar('Error uploading document', 'error');
                               }
                             }}
                           />
@@ -1414,10 +1563,16 @@ const RecruitmentPage: React.FC = () => {
                               title="PDF Preview"
                             />
                           ) : (
-                            <img
+                            <Box
+                              component="img"
                               src={selectedDocument.url}
                               alt={selectedDocument.name}
-                              style={{ maxWidth: '100%', height: 'auto' }}
+                              sx={{
+                                width: '100%',
+                                height: 'auto',
+                                maxHeight: '500px',
+                                objectFit: 'contain'
+                              }}
                             />
                           )
                         )}
@@ -1763,15 +1918,15 @@ const RecruitmentPage: React.FC = () => {
             setSelectedInterview(null);
             setInterviewForm({
               candidateId: '',
-              interviewerId: '',
+              interviewerId: 'none', // Initialize with 'none' to match select default
               dateTime: '',
-              type: 'technical',
-              status: 'scheduled',
+              type: 'technical' as const,
+              status: 'scheduled' as const,
               feedback: '',
               location: '',
               meetingLink: '',
               duration: 60,
-              participants: [],
+              participants: [] as string[],
               addToCalendar: true
             });
             setIsInterviewDialogOpen(true);
@@ -1869,7 +2024,7 @@ const RecruitmentPage: React.FC = () => {
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Chip
                     label={interview.status.toUpperCase()}
-                    color={interview.status === 'completed' ? 'success' : 
+                    color={interview.status === 'completed' ? 'success' :
                            interview.status === 'cancelled' ? 'error' : 'primary'}
                     size="small"
                   />
@@ -1985,7 +2140,10 @@ const RecruitmentPage: React.FC = () => {
                   renderValue={(selected) => (
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                       {selected.map((value) => (
-                        <Chip key={value} label={employees.find(emp => emp.id === value)?.name || value} />
+                        <Chip
+                          key={value}
+                          label={employees.find(emp => emp.id === value)?.name || value}
+                          />
                       ))}
                     </Box>
                   )}
@@ -2037,7 +2195,7 @@ const RecruitmentPage: React.FC = () => {
                     {interview.participants && interview.participants.length > 0 && (
                       <Box sx={{ mt: 1 }}>
                         <Typography variant="body2" color="textSecondary">Invitees:</Typography>
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                           {interview.participants.map((participantId) => (
                             <Chip
                               key={participantId}
@@ -2287,12 +2445,271 @@ const RecruitmentPage: React.FC = () => {
     </Box>
   );
 
+  const renderCandidateDetails = (candidate: Candidate) => {
+    const jobPosting = jobPostings.find(job => job.id === candidate.jobPostingId);
+    
+    return (
+      <Box sx={{ p: 2 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+          <Box>
+            <Typography variant="h6" sx={{ mb: 0.5, fontWeight: 500 }}>
+              {candidate.name}
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <WorkIcon sx={{ fontSize: 16, color: 'primary.main' }} />
+              <Typography variant="body2" color="text.secondary">
+                {candidate.jobPostingId ? jobPostings.find(j => j.id === candidate.jobPostingId)?.title : 'No Position'}
+              </Typography>
+            </Box>
+          </Box>
+          <Chip
+            label={candidate.status.toUpperCase()}
+            color={
+              candidate.status === 'hired'
+                ? 'success'
+                : candidate.status === 'rejected'
+                ? 'error'
+                : candidate.status === 'interview'
+                ? 'warning'
+                : 'primary'
+            }
+            size="small"
+            sx={{ 
+              borderRadius: 1,
+              fontWeight: 500,
+              fontSize: '0.75rem'
+            }}
+          />
+        </Box>
+        
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <PersonIcon sx={{ fontSize: 18, color: 'primary.light' }} />
+            <Typography variant="body2">{candidate.email}</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <PhoneIcon sx={{ fontSize: 18, color: 'primary.light' }} />
+            <Typography variant="body2">{candidate.phone}</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CalendarTodayIcon sx={{ fontSize: 18, color: 'primary.light' }} />
+            <Typography variant="body2">
+              Applied: {new Date(candidate.appliedDate).toLocaleDateString()}
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <DescriptionIcon sx={{ fontSize: 18, color: 'primary.light' }} />
+              <Typography variant="body2" sx={{ mr: 1 }}>
+                Documents:
+              </Typography>
+            </Box>
+            {candidate.documents?.length ? (
+              <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexWrap: 'wrap' }}>
+                {candidate.documents.map((doc) => (
+                  <Tooltip key={doc.id} title={`${doc.name} (${doc.category})`}>
+                    <IconButton
+                      onClick={() => {
+                        setSelectedDocument(doc);
+                        setDocumentPreviewOpen(true);
+                      }}
+                    >
+                      {doc.category === 'resume' && <DescriptionIcon sx={{ fontSize: 18 }} color="primary" />}
+                      {doc.category === 'certificate' && <CardMembershipIcon sx={{ fontSize: 18 }} color="secondary" />}
+                      {doc.category === 'id_proof' && <BadgeIcon sx={{ fontSize: 18 }} color="error" />}
+                      {doc.category === 'offer_letter' && <WorkIcon sx={{ fontSize: 18 }} color="success" />}
+                      {doc.category === 'other' && <AttachFileIcon sx={{ fontSize: 18 }} />}
+                    </IconButton>
+                  </Tooltip>
+                ))}
+              </Box>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No documents
+              </Typography>
+            )}
+          </Box>
+        </Box>
+        
+        {/* CV Analysis Section */}
+        <Box sx={{ mt: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            CV Analysis
+            <Tooltip title="Analyze CV with AI">
+              <IconButton 
+                size="small" 
+                onClick={() => {
+                  if (savedAnalyses[candidate.id] || analysisResults[candidate.id]) {
+                    setSelectedAnalysisId(candidate.id);
+                    setAnalysisDialogOpen(true);
+                  } else {
+                    handleAnalyzeCV(candidate, jobPosting!);
+                  }
+                }}
+                disabled={analyzing[candidate.id]}
+                sx={{ ml: 1 }}
+              >
+                {analyzing[candidate.id] ? <CircularProgress size={20} /> : 
+                 savedAnalyses[candidate.id] || analysisResults[candidate.id] ? 
+                   <VisibilityIcon /> : 
+                   <PsychologyIcon />
+                }
+              </IconButton>
+            </Tooltip>
+          </Typography>
+          {analysisResults[candidate.id] && (
+            <Box sx={{ 
+              mt: 2, 
+              p: 2, 
+              bgcolor: 'background.paper', 
+              borderRadius: 1,
+              boxShadow: 1,
+              '& .MuiTypography-root': { mb: 1 }
+            }}>
+              <Grid container spacing={2}>
+                {/* Skills Section */}
+                <Grid item xs={12} md={4}>
+                  <Paper sx={{ p: 2, height: '100%' }}>
+                    <Typography variant="h6" color="primary.dark" sx={{ fontWeight: 600, mb: 1 }}>
+                      Skills Match: {analysisResults[candidate.id].skills.relevanceScore}%
+                    </Typography>
+                    <Typography variant="subtitle2">Technical Skills:</Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {analysisResults[candidate.id].skills.technical.map((skill, i) => (
+                        <Chip
+                          key={i}
+                          label={typeof skill === 'string' ? skill : `${skill.skill} (${skill.proficiency})`}
+                          color="primary"
+                          variant="outlined"
+                          size="small"
+                        />
+                      ))}
+                    </Box>
+                    <Typography variant="subtitle2" sx={{ mt: 1 }}>Soft Skills:</Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {analysisResults[candidate.id].skills.soft.map((skill, i) => (
+                        <Chip
+                          key={i}
+                          label={typeof skill === 'string' ? skill : skill.skill}
+                          color="secondary"
+                          variant="outlined"
+                          size="small"
+                        />
+                      ))}
+                    </Box>
+                  </Paper>
+                </Grid>
+
+                {/* Experience Section */}
+                <Grid item xs={12} md={4}>
+                  <Paper sx={{ p: 2, height: '100%' }}>
+                    <Typography variant="h6" color="primary.dark" sx={{ fontWeight: 600, mb: 1 }}>
+                      Experience Match: {analysisResults[candidate.id].jobMatch.experienceMatch}%
+                    </Typography>
+                    <Typography>
+                      Total Experience: {analysisResults[candidate.id].experience.years} years
+                    </Typography>
+                    <Typography>
+                      Relevant Experience: {analysisResults[candidate.id].experience.relevantYears} years
+                    </Typography>
+                    <Typography variant="subtitle2">Companies:</Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {analysisResults[candidate.id].experience.companies.map((company, i) => (
+                        <Chip
+                          key={i}
+                          label={company}
+                          size="small"
+                          variant="outlined"
+                        />
+                      ))}
+                    </Box>
+                    <Typography variant="subtitle2" sx={{ mt: 1 }}>Roles:</Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {analysisResults[candidate.id].experience.roles.map((role, i) => (
+                        <Chip
+                          key={i}
+                          label={role}
+                          size="small"
+                          variant="outlined"
+                        />
+                      ))}
+                    </Box>
+                  </Paper>
+                </Grid>
+
+                {/* Education Section */}
+                <Grid item xs={12} md={4}>
+                  <Paper sx={{ p: 2, height: '100%' }}>
+                    <Typography variant="h6" color="primary.dark" sx={{ fontWeight: 600, mb: 1 }}>
+                      Education Match: {analysisResults[candidate.id].jobMatch.educationMatch}%
+                    </Typography>
+                    <Typography>
+                      Degree: {analysisResults[candidate.id].education.degree}
+                    </Typography>
+                    <Typography>
+                      Field: {analysisResults[candidate.id].education.field}
+                    </Typography>
+                    <Typography variant="subtitle2">Institutions:</Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {analysisResults[candidate.id].education.institutions.map((inst, i) => (
+                        <Chip
+                          key={i}
+                          label={inst}
+                          size="small"
+                          variant="outlined"
+                        />
+                      ))}
+                    </Box>
+                  </Paper>
+                </Grid>
+
+                {/* Overall Score */}
+                <Grid item xs={12}>
+                  <Paper sx={{ 
+                    p: 2, 
+                    bgcolor: 'primary.main', 
+                    color: 'primary.contrastText',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center'
+                  }}>
+                    <Typography variant="h5">
+                      Overall Match: {analysisResults[candidate.id].jobMatch.overallScore}%
+                    </Typography>
+                  </Paper>
+                </Grid>
+              </Grid>
+            </Box>
+          )}
+        </Box>
+      </Box>
+    );
+  };
+
+  // Load saved analyses on component mount
+  useEffect(() => {
+    const loadSavedAnalyses = async () => {
+      try {
+        const analysisRef = collection(db, 'candidateAnalysis');
+        const querySnapshot = await getDocs(analysisRef);
+        const saved: {[key: string]: boolean} = {};
+        querySnapshot.forEach((doc) => {
+          saved[doc.data().candidateId] = true;
+        });
+        setSavedAnalyses(saved);
+      } catch (error) {
+        console.error('Error loading saved analyses:', error);
+      }
+    };
+    loadSavedAnalyses();
+  }, []);
+
   return (
     <Paper sx={{ p: 3 }}>
       <Typography variant="h5" gutterBottom>
         Recruitment & Onboarding
       </Typography>
-      
+
       <Tabs
         value={activeTab}
         onChange={(_, newValue) => setActiveTab(newValue)}
@@ -2308,6 +2725,999 @@ const RecruitmentPage: React.FC = () => {
       {activeTab === 1 && renderCandidates()}
       {activeTab === 2 && renderInterviews()}
       {activeTab === 3 && renderOnboarding()}
+
+      {/* Add Candidate Dialog */}
+      <Dialog 
+        open={isCandidateDialogOpen} 
+        onClose={() => setIsCandidateDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>{selectedCandidate ? 'Edit Candidate' : 'Add Candidate'}</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            {/* Basic Information */}
+            <Grid item xs={12}>
+              <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 500 }}>Basic Information</Typography>
+            </Grid>
+
+            {/* Document Upload Section */}
+            {isCandidateDialogOpen && (
+              <>
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" sx={{ mt: 3, mb: 2, fontWeight: 500 }}>Documents</Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Box sx={{ mb: 2 }}>
+                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap', mb: 2 }}>
+                      {selectedCandidate?.documents?.map((doc) => (
+                        <Tooltip key={doc.id} title={`${doc.name} (${doc.category})`}>
+                          <IconButton
+                            onClick={() => {
+                              setSelectedDocument(doc);
+                              setDocumentPreviewOpen(true);
+                            }}
+                          >
+                            {doc.category === 'resume' && <DescriptionIcon color="primary" />}
+                            {doc.category === 'certificate' && <CardMembershipIcon color="secondary" />}
+                            {doc.category === 'id_proof' && <BadgeIcon color="error" />}
+                            {doc.category === 'offer_letter' && <WorkIcon color="success" />}
+                            {doc.category === 'other' && <AttachFileIcon />}
+                          </IconButton>
+                        </Tooltip>
+                      ))}
+                      {selectedCandidate ? (
+                        <Button
+                          variant="outlined"
+                          startIcon={<CloudUploadIcon />}
+                          onClick={() => setDocumentUploadOpen(true)}
+                        >
+                          Upload Document
+                        </Button>
+                      ) : (
+                        <Typography variant="body2" color="textSecondary">
+                          You can upload documents after creating the candidate
+                        </Typography>
+                      )}
+                    </Box>
+
+                    {/* Document Upload Dialog */}
+                    <Dialog 
+                      open={documentUploadOpen} 
+                      onClose={() => {
+                        setDocumentUploadOpen(false);
+                        setSelectedDocumentType('');
+                      }}
+                    >
+                      <DialogTitle>Upload Document</DialogTitle>
+                      <DialogContent>
+                        <Stack spacing={2} sx={{ mt: 2, minWidth: 300 }}>
+                          <FormControl fullWidth required>
+                            <InputLabel>Document Type</InputLabel>
+                            <Select
+                              value={selectedDocumentType}
+                              onChange={(e) => setSelectedDocumentType(e.target.value)}
+                              label="Document Type"
+                            >
+                              <MenuItem value="resume">Resume</MenuItem>
+                              <MenuItem value="certificate">Certificate</MenuItem>
+                              <MenuItem value="id_proof">ID Proof</MenuItem>
+                              <MenuItem value="offer_letter">Offer Letter</MenuItem>
+                              <MenuItem value="other">Other</MenuItem>
+                            </Select>
+                          </FormControl>
+
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,.gif"
+                            style={{ display: 'none' }}
+                            id="document-upload"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file || !selectedCandidate || !selectedDocumentType) {
+                                enqueueSnackbar('Please select a document type', 'error');
+                                return;
+                              }
+
+                              try {
+                                const uploadResult = await uploadCandidateDocument(file, selectedCandidate.id);
+                                
+                                if (uploadResult.url) {
+                                  await addDoc(collection(db, 'candidates', selectedCandidate.id, 'documents'), {
+                                    name: file.name,
+                                    url: uploadResult.url,
+                                    category: selectedDocumentType,
+                                    uploadDate: new Date().toISOString()
+                                  });
+
+                                  enqueueSnackbar('Document uploaded successfully', 'success');
+                                  setDocumentUploadOpen(false);
+                                  setSelectedDocumentType('');
+                                  fetchCandidates();
+                                }
+                              } catch (error) {
+                                console.error('Error uploading document:', error);
+                                enqueueSnackbar('Error uploading document', 'error');
+                              }
+                            }}
+                          />
+                          <Button
+                            variant="contained"
+                            onClick={() => document.getElementById('document-upload')?.click()}
+                            startIcon={<CloudUploadIcon />}
+                            fullWidth
+                          >
+                            Choose File
+                          </Button>
+                        </Stack>
+                      </DialogContent>
+                    </Dialog>
+
+                    {/* Document Preview Dialog */}
+                    <Dialog
+                      open={documentPreviewOpen}
+                      onClose={() => {
+                        setDocumentPreviewOpen(false);
+                        setSelectedDocument(null);
+                      }}
+                      maxWidth="md"
+                      fullWidth
+                    >
+                      <DialogTitle>
+                        {selectedDocument?.name}
+                        <Typography variant="caption" display="block" color="text.secondary">
+                          {selectedDocument?.category} - Uploaded on {new Date(selectedDocument?.uploadDate || '').toLocaleDateString()}
+                        </Typography>
+                      </DialogTitle>
+                      <DialogContent>
+                        {selectedDocument?.url && (
+                          selectedDocument.url.toLowerCase().endsWith('.pdf') ? (
+                            <iframe
+                              src={selectedDocument.url}
+                              style={{ width: '100%', height: '500px', border: 'none' }}
+                              title="PDF Preview"
+                            />
+                          ) : (
+                            <Box
+                              component="img"
+                              src={selectedDocument.url}
+                              alt={selectedDocument.name}
+                              sx={{
+                                width: '100%',
+                                height: 'auto',
+                                maxHeight: '500px',
+                                objectFit: 'contain'
+                              }}
+                            />
+                          )
+                        )}
+                      </DialogContent>
+                    </Dialog>
+                  
+                  </Box>
+                </Grid>
+              </>
+            )}
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Name"
+                value={candidateForm.name}
+                onChange={(e) => setCandidateForm({ ...candidateForm, name: e.target.value })}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                select
+                label="Position"
+                value={candidateForm.jobPostingId}
+                onChange={(e) => setCandidateForm({ ...candidateForm, jobPostingId: e.target.value })}
+              >
+                {jobPostings.map((job) => (
+                  <MenuItem key={job.id} value={job.id}>
+                    {job.title}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Email"
+                type="email"
+                value={candidateForm.email}
+                onChange={(e) => setCandidateForm({ ...candidateForm, email: e.target.value })}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Phone"
+                value={candidateForm.phone}
+                onChange={(e) => setCandidateForm({ ...candidateForm, phone: e.target.value })}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Resume URL"
+                value={candidateForm.resumeUrl}
+                onChange={(e) => setCandidateForm({ ...candidateForm, resumeUrl: e.target.value })}
+                helperText="Enter the URL where the resume is stored"
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                select
+                label="Status"
+                value={candidateForm.status}
+                onChange={(e) => setCandidateForm({
+                  ...candidateForm,
+                  status: e.target.value as Candidate['status']
+                })}
+              >
+                <MenuItem value="new">New</MenuItem>
+                <MenuItem value="screening">Screening</MenuItem>
+                <MenuItem value="interview">Interview</MenuItem>
+                <MenuItem value="offer">Offer</MenuItem>
+                <MenuItem value="hired">Hired</MenuItem>
+                <MenuItem value="rejected">Rejected</MenuItem>
+              </TextField>
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                label="Notes"
+                value={candidateForm.notes}
+                onChange={(e) => setCandidateForm({ ...candidateForm, notes: e.target.value })}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsCandidateDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleCandidateFormSubmit} variant="contained" color="primary">
+            {selectedCandidate ? 'Update' : 'Add'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Analysis Results Dialog */}
+      <Dialog 
+        open={Boolean(selectedAnalysisId)} 
+        onClose={handleCloseAnalysisDialog}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            background: 'linear-gradient(to bottom, #ffffff, #f8f9fa)',
+            overflow: 'hidden'
+          }
+        }}
+      >
+        {selectedAnalysisId && analysisResults[selectedAnalysisId] && (
+          <>
+            <DialogTitle 
+              sx={{ 
+                background: 'linear-gradient(135deg, #1a237e 0%, #0d47a1 100%)',
+                color: 'white',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                p: 3,
+                mb: 2
+              }}
+            >
+              <Box>
+                <Typography variant="h5" sx={{ fontWeight: 600, mb: 1 }}>
+                  AI Analysis Results
+                </Typography>
+                <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                  Powered by Deep Learning
+                </Typography>
+              </Box>
+              <Box 
+                sx={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center',
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  borderRadius: 2,
+                  p: 2
+                }}
+              >
+                <Typography variant="h3" sx={{ fontWeight: 700 }}>
+                  {analysisResults[selectedAnalysisId].jobMatch.overallScore}%
+                </Typography>
+                <Typography variant="caption" sx={{ opacity: 0.9 }}>
+                  Match Score
+                </Typography>
+              </Box>
+            </DialogTitle>
+            <DialogContent sx={{ p: 3 }}>
+              <Grid container spacing={3}>
+                {/* Verdict Section */}
+                <Grid item xs={12}>
+                  <Paper 
+                    elevation={0}
+                    sx={{ 
+                      p: 3, 
+                      background: (theme) => {
+                        const verdict = analysisResults[selectedAnalysisId].verdict.recommendation;
+                        switch (verdict) {
+                          case 'Strong Hire':
+                            return 'linear-gradient(135deg, rgba(46, 125, 50, 0.03) 0%, rgba(46, 125, 50, 0.08) 100%)';
+                          case 'Potential Hire':
+                            return 'linear-gradient(135deg, rgba(2, 136, 209, 0.03) 0%, rgba(2, 136, 209, 0.08) 100%)';
+                          case 'Consider with Reservations':
+                            return 'linear-gradient(135deg, rgba(237, 108, 2, 0.03) 0%, rgba(237, 108, 2, 0.08) 100%)';
+                          default:
+                            return 'linear-gradient(135deg, rgba(211, 47, 47, 0.03) 0%, rgba(211, 47, 47, 0.08) 100%)';
+                        }
+                      },
+                      borderRadius: 3,
+                      border: (theme) => {
+                        const verdict = analysisResults[selectedAnalysisId].verdict.recommendation;
+                        switch (verdict) {
+                          case 'Strong Hire':
+                            return '1px solid rgba(46, 125, 50, 0.1)';
+                          case 'Potential Hire':
+                            return '1px solid rgba(2, 136, 209, 0.1)';
+                          case 'Consider with Reservations':
+                            return '1px solid rgba(237, 108, 2, 0.1)';
+                          default:
+                            return '1px solid rgba(211, 47, 47, 0.1)';
+                        }
+                      },
+                      transition: 'all 0.3s ease',
+                      '&:hover': {
+                        transform: 'translateY(-2px)',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+                      }
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                      <Box>
+                        <Typography 
+                          variant="h5" 
+                          sx={{ 
+                            fontWeight: 600,
+                            color: (theme) => {
+                              const verdict = analysisResults[selectedAnalysisId].verdict.recommendation;
+                              switch (verdict) {
+                                case 'Strong Hire':
+                                  return theme.palette.success.main;
+                                case 'Potential Hire':
+                                  return theme.palette.info.main;
+                                case 'Consider with Reservations':
+                                  return theme.palette.warning.main;
+                                default:
+                                  return theme.palette.error.main;
+                              }
+                            }
+                          }}
+                        >
+                          {analysisResults[selectedAnalysisId].verdict.recommendation}
+                        </Typography>
+                        <Typography variant="body2" color="textSecondary">
+                          Confidence Score: {analysisResults[selectedAnalysisId].verdict.confidenceScore}%
+                        </Typography>
+                      </Box>
+                      <Box 
+                        sx={{ 
+                          background: (theme) => {
+                            const verdict = analysisResults[selectedAnalysisId].verdict.recommendation;
+                            switch (verdict) {
+                              case 'Strong Hire':
+                                return 'rgba(46, 125, 50, 0.1)';
+                              case 'Potential Hire':
+                                return 'rgba(2, 136, 209, 0.1)';
+                              case 'Consider with Reservations':
+                                return 'rgba(237, 108, 2, 0.1)';
+                              default:
+                                return 'rgba(211, 47, 47, 0.1)';
+                            }
+                          },
+                          borderRadius: 2,
+                          p: 1.5,
+                          minWidth: 120,
+                          textAlign: 'center'
+                        }}
+                      >
+                        <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                          {analysisResults[selectedAnalysisId].jobMatch.overallScore}%
+                        </Typography>
+                      </Box>
+                    </Box>
+                    
+                    <Grid container spacing={3}>
+                      <Grid item xs={12} md={6}>
+                        <Typography variant="subtitle1" color="success.main" sx={{ fontWeight: 600, mb: 1 }}>
+                          Reasons to Hire
+                        </Typography>
+                        <List dense>
+                          {analysisResults[selectedAnalysisId].verdict.reasonsToHire.map((reason, idx) => (
+                            <ListItem key={idx} sx={{ py: 0.5 }}>
+                              <ListItemIcon sx={{ minWidth: 32 }}>
+                                <CheckCircleIcon color="success" fontSize="small" />
+                              </ListItemIcon>
+                              <ListItemText primary={reason} />
+                            </ListItem>
+                          ))}
+                        </List>
+                      </Grid>
+                      <Grid item xs={12} md={6}>
+                        <Typography variant="subtitle1" color="error.main" sx={{ fontWeight: 600, mb: 1 }}>
+                          Areas of Caution
+                        </Typography>
+                        <List dense>
+                          {analysisResults[selectedAnalysisId].verdict.reasonsForCaution.map((reason, idx) => (
+                            <ListItem key={idx} sx={{ py: 0.5 }}>
+                              <ListItemIcon sx={{ minWidth: 32 }}>
+                                <WarningIcon color="error" fontSize="small" />
+                              </ListItemIcon>
+                              <ListItemText primary={reason} />
+                            </ListItem>
+                          ))}
+                        </List>
+                      </Grid>
+                      <Grid item xs={12}>
+                        <Typography variant="subtitle1" color="info.main" sx={{ fontWeight: 600, mb: 1 }}>
+                          Recommended Next Steps
+                        </Typography>
+                        <List dense>
+                          {analysisResults[selectedAnalysisId].verdict.nextSteps.map((step, idx) => (
+                            <ListItem key={idx} sx={{ py: 0.5 }}>
+                              <ListItemIcon sx={{ minWidth: 32 }}>
+                                <ArrowForwardIcon color="info" fontSize="small" />
+                              </ListItemIcon>
+                              <ListItemText primary={step} />
+                            </ListItem>
+                          ))}
+                        </List>
+                      </Grid>
+                    </Grid>
+                  </Paper>
+                </Grid>
+
+                {/* Summary Section */}
+                <Grid item xs={12}>
+                  <Paper 
+                    elevation={0}
+                    sx={{ 
+                      p: 3, 
+                      background: 'linear-gradient(135deg, rgba(103, 58, 183, 0.03) 0%, rgba(103, 58, 183, 0.08) 100%)',
+                      borderRadius: 3,
+                      border: '1px solid rgba(103, 58, 183, 0.1)',
+                      transition: 'all 0.3s ease',
+                      '&:hover': {
+                        transform: 'translateY(-2px)',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+                      }
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', mb: 3 }}>
+                      <Box>
+                        <Typography variant="h6" color="primary.dark" sx={{ fontWeight: 600, mb: 1 }}>
+                          Candidate Overview
+                        </Typography>
+                        <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+                          {analysisResults[selectedAnalysisId].summary.overview}
+                        </Typography>
+                      </Box>
+                      <Box 
+                        sx={{ 
+                          background: 'rgba(103, 58, 183, 0.1)',
+                          borderRadius: 2,
+                          p: 1.5,
+                          minWidth: 80,
+                          textAlign: 'center'
+                        }}
+                      >
+                        <Typography variant="h4" color="primary.dark" sx={{ fontWeight: 700 }}>
+                          {analysisResults[selectedAnalysisId].summary.relevanceScore}%
+                        </Typography>
+                      </Box>
+                    </Box>
+                    
+                    <Grid container spacing={3}>
+                      <Grid item xs={12} md={6}>
+                        <Typography 
+                          variant="subtitle1" 
+                          gutterBottom 
+                          sx={{ 
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1
+                          }}
+                        >
+                          <Box 
+                            sx={{ 
+                              width: 8, 
+                              height: 8, 
+                              borderRadius: '50%', 
+                              bgcolor: 'primary.main' 
+                            }} 
+                          />
+                          Key Insights
+                        </Typography>
+                        <List>
+                          {analysisResults[selectedAnalysisId].summary.insights.map((insight, idx) => (
+                            <ListItem key={idx} sx={{ py: 0.5 }}>
+                              <ListItemIcon sx={{ minWidth: 32 }}>
+                                <LightbulbIcon color="primary" fontSize="small" />
+                              </ListItemIcon>
+                              <ListItemText primary={insight} />
+                            </ListItem>
+                          ))}
+                        </List>
+                      </Grid>
+                      <Grid item xs={12} md={6}>
+                        <Box sx={{ mb: 3 }}>
+                          <Typography variant="subtitle1" color="success.main" sx={{ fontWeight: 600, mb: 1 }}>
+                            Strengths
+                          </Typography>
+                          <List dense>
+                            {analysisResults[selectedAnalysisId].summary.strengths.map((strength, idx) => (
+                              <ListItem key={idx} sx={{ py: 0.5 }}>
+                                <ListItemIcon sx={{ minWidth: 32 }}>
+                                  <CheckCircleIcon color="success" fontSize="small" />
+                                </ListItemIcon>
+                                <ListItemText primary={strength} />
+                              </ListItem>
+                            ))}
+                          </List>
+                        </Box>
+                        <Box>
+                          <Typography variant="subtitle1" color="warning.main" sx={{ fontWeight: 600, mb: 1 }}>
+                            Areas for Growth
+                          </Typography>
+                          <List dense>
+                            {analysisResults[selectedAnalysisId].summary.areasOfImprovement.map((area, idx) => (
+                              <ListItem key={idx} sx={{ py: 0.5 }}>
+                                <ListItemIcon sx={{ minWidth: 32 }}>
+                                  <TrendingUpIcon color="warning" fontSize="small" />
+                                </ListItemIcon>
+                                <ListItemText primary={area} />
+                              </ListItem>
+                            ))}
+                          </List>
+                        </Box>
+                      </Grid>
+                    </Grid>
+                  </Paper>
+                </Grid>
+
+                {/* Skills Section */}
+                <Grid item xs={12} md={4}>
+                  <Paper 
+                    elevation={0}
+                    sx={{ 
+                      p: 3, 
+                      background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.03) 0%, rgba(25, 118, 210, 0.08) 100%)',
+                      borderRadius: 3,
+                      border: '1px solid rgba(25, 118, 210, 0.1)',
+                      transition: 'all 0.3s ease',
+                      '&:hover': {
+                        transform: 'translateY(-2px)',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+                      }
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                      <Box>
+                        <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
+                          Skills Analysis
+                        </Typography>
+                        <Typography variant="body2" color="textSecondary">
+                          Technical and Soft Skills Assessment
+                        </Typography>
+                      </Box>
+                      <Box 
+                        sx={{ 
+                          background: 'rgba(25, 118, 210, 0.1)',
+                          borderRadius: 2,
+                          p: 1.5,
+                          minWidth: 80,
+                          textAlign: 'center'
+                        }}
+                      >
+                        <Typography variant="h4" color="primary" sx={{ fontWeight: 700 }}>
+                          {analysisResults[selectedAnalysisId].skills.relevanceScore}%
+                        </Typography>
+                      </Box>
+                    </Box>
+                    <Grid container spacing={3}>
+                      <Grid item xs={12} md={6}>
+                        <Typography 
+                          variant="subtitle1" 
+                          gutterBottom 
+                          sx={{ 
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1
+                          }}
+                        >
+                          <Box 
+                            sx={{ 
+                              width: 8, 
+                              height: 8, 
+                              borderRadius: '50%', 
+                              bgcolor: 'primary.main' 
+                            }} 
+                          />
+                          Technical Skills
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                          {analysisResults[selectedAnalysisId].skills.technical.map((skill, i) => (
+                            <Chip
+                              key={i}
+                              label={typeof skill === 'string' ? skill : `${skill.skill} (${skill.proficiency})`}
+                              color="primary"
+                              variant="outlined"
+                              size="small"
+                              sx={{ 
+                                borderRadius: '8px',
+                                bgcolor: (theme) => {
+                                  if (typeof skill === 'string') return alpha(theme.palette.primary.main, 0.1);
+                                  switch (skill.proficiency) {
+                                    case 'Expert':
+                                      return alpha(theme.palette.success.main, 0.1);
+                                    case 'Advanced':
+                                      return alpha(theme.palette.info.main, 0.1);
+                                    case 'Intermediate':
+                                      return alpha(theme.palette.warning.main, 0.1);
+                                    default:
+                                      return alpha(theme.palette.grey[500], 0.1);
+                                  }
+                                },
+                                borderColor: (theme) => {
+                                  if (typeof skill === 'string') return theme.palette.primary.main;
+                                  switch (skill.proficiency) {
+                                    case 'Expert':
+                                      return theme.palette.success.main;
+                                    case 'Advanced':
+                                      return theme.palette.info.main;
+                                    case 'Intermediate':
+                                      return theme.palette.warning.main;
+                                    default:
+                                      return theme.palette.grey[500];
+                                  }
+                                },
+                                color: (theme) => {
+                                  if (typeof skill === 'string') return theme.palette.primary.main;
+                                  switch (skill.proficiency) {
+                                    case 'Expert':
+                                      return theme.palette.success.main;
+                                    case 'Advanced':
+                                      return theme.palette.info.main;
+                                    case 'Intermediate':
+                                      return theme.palette.warning.main;
+                                    default:
+                                      return theme.palette.grey[500];
+                                  }
+                                },
+                                '&:hover': {
+                                  bgcolor: (theme) => {
+                                    if (typeof skill === 'string') return alpha(theme.palette.primary.main, 0.2);
+                                    switch (skill.proficiency) {
+                                      case 'Expert':
+                                        return alpha(theme.palette.success.main, 0.2);
+                                      case 'Advanced':
+                                        return alpha(theme.palette.info.main, 0.2);
+                                      case 'Intermediate':
+                                        return alpha(theme.palette.warning.main, 0.2);
+                                      default:
+                                        return alpha(theme.palette.grey[500], 0.2);
+                                    }
+                                  }
+                                }
+                              }}
+                            />
+                          ))}
+                        </Box>
+                        <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>
+                          Soft Skills
+                        </Typography>
+                        <List dense>
+                          {analysisResults[selectedAnalysisId].skills.soft.map((skill, i) => (
+                            <ListItem key={i} sx={{ py: 0.5 }}>
+                              <ListItemIcon sx={{ minWidth: 32 }}>
+                                <PersonIcon color="secondary" fontSize="small" />
+                              </ListItemIcon>
+                              <ListItemText 
+                                primary={typeof skill === 'string' ? skill : skill.skill}
+                                secondary={typeof skill === 'string' ? null : skill.evidence}
+                                secondaryTypography={{ 
+                                  variant: 'caption',
+                                  color: 'text.secondary',
+                                  fontSize: '0.75rem'
+                                }}
+                              />
+                            </ListItem>
+                          ))}
+                        </List>
+                      </Grid>
+                    </Grid>
+                  </Paper>
+                </Grid>
+
+                {/* Experience Section */}
+                <Grid item xs={12} md={4}>
+                  <Paper 
+                    elevation={0}
+                    sx={{ 
+                      p: 3,
+                      height: '100%',
+                      background: 'linear-gradient(135deg, rgba(46, 125, 50, 0.03) 0%, rgba(46, 125, 50, 0.08) 100%)',
+                      borderRadius: 3,
+                      border: '1px solid rgba(46, 125, 50, 0.1)',
+                      transition: 'all 0.3s ease',
+                      '&:hover': {
+                        transform: 'translateY(-2px)',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+                      }
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                      <Box>
+                        <Typography variant="h6" color="success.main" sx={{ fontWeight: 600 }}>
+                          Experience
+                        </Typography>
+                        <Typography variant="body2" color="textSecondary">
+                          Professional Background
+                        </Typography>
+                      </Box>
+                      <Box 
+                        sx={{ 
+                          background: 'rgba(46, 125, 50, 0.1)',
+                          borderRadius: 2,
+                          p: 1.5,
+                          minWidth: 80,
+                          textAlign: 'center'
+                        }}
+                      >
+                        <Typography variant="h4" color="success.main" sx={{ fontWeight: 700 }}>
+                          {analysisResults[selectedAnalysisId].jobMatch.experienceMatch}%
+                        </Typography>
+                      </Box>
+                    </Box>
+                    
+                    <Timeline>
+                      {analysisResults[selectedAnalysisId].experience.details.map((exp, idx) => (
+                        <TimelineItem key={idx}>
+                          <TimelineSeparator>
+                            <TimelineDot color="success" />
+                            {idx < analysisResults[selectedAnalysisId].experience.details.length - 1 && (
+                              <TimelineConnector />
+                            )}
+                          </TimelineSeparator>
+                          <TimelineContent>
+                            <Paper
+                              elevation={0}
+                              sx={{
+                                p: 2,
+                                bgcolor: 'rgba(46, 125, 50, 0.05)',
+                                borderRadius: 2,
+                                mb: 2
+                              }}
+                            >
+                              <Typography variant="subtitle1" color="success.main" sx={{ fontWeight: 600 }}>
+                                {exp.role} at {exp.company}
+                              </Typography>
+                              <Typography variant="body2" color="textSecondary" gutterBottom>
+                                {exp.duration}
+                              </Typography>
+                              <Box sx={{ mt: 1 }}>
+                                <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                                  Key Achievements:
+                                </Typography>
+                                <List dense>
+                                  {exp.achievements.map((achievement, aIdx) => (
+                                    <ListItem key={aIdx} sx={{ py: 0.5 }}>
+                                      <ListItemIcon sx={{ minWidth: 32 }}>
+                                        <StarIcon color="success" fontSize="small" />
+                                      </ListItemIcon>
+                                      <ListItemText primary={achievement} />
+                                    </ListItem>
+                                  ))}
+                                </List>
+                              </Box>
+                              <Box sx={{ mt: 1 }}>
+                                <Typography variant="subtitle2" color="textSecondary">
+                                  Technologies Used:
+                                </Typography>
+                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                                  {exp.technologies.map((tech, tIdx) => (
+                                    <Chip
+                                      key={tIdx}
+                                      label={tech}
+                                      size="small"
+                                      color="success"
+                                      variant="outlined"
+                                      sx={{ 
+                                        borderRadius: '8px',
+                                        '&:hover': {
+                                          bgcolor: 'success.main',
+                                          color: 'white'
+                                        }
+                                      }}
+                                    />
+                                  ))}
+                                </Box>
+                              </Box>
+                            </Paper>
+                          </TimelineContent>
+                        </TimelineItem>
+                      ))}
+                    </Timeline>
+                  </Paper>
+                </Grid>
+
+                {/* Education Section */}
+                <Grid item xs={12} md={4}>
+                  <Paper 
+                    elevation={0}
+                    sx={{ 
+                      p: 3,
+                      height: '100%',
+                      background: 'linear-gradient(135deg, rgba(237, 108, 2, 0.03) 0%, rgba(237, 108, 2, 0.08) 100%)',
+                      borderRadius: 3,
+                      border: '1px solid rgba(237, 108, 2, 0.1)',
+                      transition: 'all 0.3s ease',
+                      '&:hover': {
+                        transform: 'translateY(-2px)',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+                      }
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                      <Box>
+                        <Typography variant="h6" color="warning.main" sx={{ fontWeight: 600 }}>
+                          Educational Background
+                        </Typography>
+                        <Typography variant="body2" color="textSecondary">
+                          Academic History and Achievements
+                        </Typography>
+                      </Box>
+                      <Box 
+                        sx={{ 
+                          background: 'rgba(237, 108, 2, 0.1)',
+                          borderRadius: 2,
+                          p: 1.5,
+                          minWidth: 80,
+                          textAlign: 'center'
+                        }}
+                      >
+                        <Typography variant="h4" color="warning.main" sx={{ fontWeight: 700 }}>
+                          {analysisResults[selectedAnalysisId].jobMatch.educationMatch}%
+                        </Typography>
+                      </Box>
+                    </Box>
+                    
+                    <Grid container spacing={3}>
+                      {analysisResults[selectedAnalysisId].education.details.map((edu, idx) => (
+                        <Grid item xs={12} key={idx}>
+                          <Paper
+                            elevation={0}
+                            sx={{
+                              p: 2,
+                              bgcolor: 'rgba(237, 108, 2, 0.05)',
+                              borderRadius: 2
+                            }}
+                          >
+                            <Grid container spacing={2}>
+                              <Grid item xs={12} md={6}>
+                                <Typography variant="subtitle1" color="warning.main" sx={{ fontWeight: 600 }}>
+                                  {edu.institution}
+                                </Typography>
+                                <Typography variant="body2" color="textSecondary" gutterBottom>
+                                  {edu.location} • Ranking: {edu.ranking}
+                                </Typography>
+                                {edu.researchWork && (
+                                  <Box sx={{ mt: 1 }}>
+                                    <Typography variant="subtitle2" color="textSecondary">
+                                      Research Work:
+                                    </Typography>
+                                    <Typography variant="body2">
+                                      {edu.researchWork}
+                                    </Typography>
+                                  </Box>
+                                )}
+                              </Grid>
+                              <Grid item xs={12} md={6}>
+                                <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                                  Achievements:
+                                </Typography>
+                                <List dense>
+                                  {edu.achievements.map((achievement, aIdx) => (
+                                    <ListItem key={aIdx} sx={{ py: 0.5 }}>
+                                      <ListItemIcon sx={{ minWidth: 32 }}>
+                                        <SchoolIcon color="warning" fontSize="small" />
+                                      </ListItemIcon>
+                                      <ListItemText primary={achievement} />
+                                    </ListItem>
+                                  ))}
+                                </List>
+                              </Grid>
+                            </Grid>
+                          </Paper>
+                        </Grid>
+                      ))}
+                    </Grid>
+                  </Paper>
+                </Grid>
+              </Grid>
+            </DialogContent>
+            <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+              <Box sx={{ display: 'flex', gap: 2, width: '100%', justifyContent: 'space-between' }}>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <Button
+                    onClick={() => handleSaveAnalysis(selectedAnalysisId, analysisResults[selectedAnalysisId])}
+                    variant="outlined"
+                    startIcon={<SaveIcon />}
+                    sx={{ 
+                      borderRadius: 2,
+                      textTransform: 'none',
+                      px: 3,
+                      borderColor: 'primary.main',
+                      color: 'primary.main',
+                      '&:hover': {
+                        borderColor: 'primary.dark',
+                        bgcolor: 'primary.50'
+                      }
+                    }}
+                  >
+                    Save Analysis
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      const candidate = candidates.find(c => c.id === selectedAnalysisId);
+                      const jobPosting = jobPostings.find(j => j.id === candidate?.jobPostingId);
+                      if (candidate && jobPosting) {
+                        handleReAnalyze(selectedAnalysisId, jobPosting);
+                      }
+                    }}
+                    variant="outlined"
+                    startIcon={<RefreshIcon />}
+                    sx={{ 
+                      borderRadius: 2,
+                      textTransform: 'none',
+                      px: 3,
+                      borderColor: 'success.main',
+                      color: 'success.main',
+                      '&:hover': {
+                        borderColor: 'success.dark',
+                        bgcolor: 'success.50'
+                      }
+                    }}
+                  >
+                    Analyze Again
+                  </Button>
+                </Box>
+                <Button 
+                  onClick={handleCloseAnalysisDialog}
+                  variant="contained"
+                  sx={{ 
+                    borderRadius: 2,
+                    textTransform: 'none',
+                    px: 4
+                  }}
+                >
+                  Close
+                </Button>
+              </Box>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
     </Paper>
   );
 };
