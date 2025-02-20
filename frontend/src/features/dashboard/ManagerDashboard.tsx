@@ -108,6 +108,7 @@ export default function ManagerDashboard() {
     dueDate: null as Date | null,
     priority: 'medium',
     assigneeId: '',
+    assigneeName: '',
   });
 
   // Listen to leave requests
@@ -355,62 +356,87 @@ export default function ManagerDashboard() {
     };
 
     const fetchDepartmentTasks = async () => {
-      if (!user?.uid) return;
+      if (!user?.uid || !department?.id) return;
 
       try {
+        console.log('Fetching department tasks with:', {
+          departmentId: department.id,
+          userId: user.uid
+        });
+
+        // Query for both created and assigned tasks
         const tasksQuery = query(
           collection(db, 'tasks'),
-          where('userId', '==', user.uid),
+          where('departmentId', '==', department.id),
           orderBy('dueDate', 'asc')
         );
 
         return onSnapshot(tasksQuery, async (snapshot) => {
+          console.log('Got department tasks snapshot:', {
+            count: snapshot.docs.length,
+            empty: snapshot.empty
+          });
+
           const taskDocs = snapshot.docs.map(async (doc) => {
             const data = doc.data();
             const dueDate = data.dueDate?.toDate ? data.dueDate.toDate() : null;
             
             // Get assignee details
-            let assignedTo = 'Unassigned';
+            let assignee = null;
             if (data.assigneeId) {
-              const employeeRef = doc(db, 'employees', data.assigneeId);
-              const assigneeDoc = await getDoc(employeeRef);
+              const userRef = doc(db, 'users', data.assigneeId);
+              const assigneeDoc = await getDoc(userRef);
               if (assigneeDoc.exists()) {
                 const assigneeData = assigneeDoc.data();
-                assignedTo = assigneeData.firstName && assigneeData.lastName ? 
-                  `${assigneeData.firstName} ${assigneeData.lastName}` : 
-                  assigneeData.name || 'Unknown';
+                assignee = {
+                  id: data.assigneeId,
+                  name: assigneeData.displayName || assigneeData.email || 'Unknown',
+                  photoURL: assigneeData.photoURL
+                };
               }
             }
 
-            // Get comments
+            // Get comments with user details
             const commentsQuery = query(
               collection(db, `tasks/${doc.id}/comments`),
               orderBy('timestamp', 'desc')
             );
             const commentsSnapshot = await getDocs(commentsQuery);
-            const comments = commentsSnapshot.docs.map(commentDoc => {
+            const comments = await Promise.all(commentsSnapshot.docs.map(async (commentDoc) => {
               const commentData = commentDoc.data();
+              let userName = 'Unknown';
+              
+              if (commentData.userId) {
+                const userDoc = await getDoc(doc(db, 'users', commentData.userId));
+                if (userDoc.exists()) {
+                  userName = userDoc.data().displayName || userDoc.data().email || 'Unknown';
+                }
+              }
+
               return {
+                id: commentDoc.id,
                 text: commentData.text,
                 progress: commentData.progress,
                 timestamp: commentData.timestamp?.toDate(),
                 userId: commentData.userId,
-                userName: commentData.userName
+                userName
               };
-            });
+            }));
 
             return {
               id: doc.id,
               ...data,
               dueDate,
-              assignedTo,
+              assignee,
               comments,
               completed: data.completed === true || data.status === 'done',
               latestComment: comments.length > 0 ? comments[0] : null
             };
           });
 
-          setDepartmentTasks(await Promise.all(taskDocs));
+          const tasks = await Promise.all(taskDocs);
+          console.log('Processed department tasks:', tasks);
+          setDepartmentTasks(tasks);
         });
       } catch (error) {
         console.error('Error fetching department tasks:', error);
@@ -578,6 +604,14 @@ export default function ManagerDashboard() {
   // Update task status
   const handleTaskStatusChange = async (taskId: string, newStatus: string, progress?: number, comment?: string) => {
     try {
+      // Get the task first to access its data
+      const taskDoc = await getDoc(doc(db, 'tasks', taskId));
+      if (!taskDoc.exists()) {
+        console.error('Task not found');
+        return;
+      }
+      const taskData = taskDoc.data();
+
       const updates: any = {
         status: newStatus,
         completed: newStatus === 'done',
@@ -590,17 +624,64 @@ export default function ManagerDashboard() {
 
       // Add a comment for the update
       const commentRef = collection(db, `tasks/${taskId}/comments`);
-      await addDoc(commentRef, {
+      const newComment = {
         text: comment || `Task marked as ${newStatus}`,
         createdAt: new Date(),
         createdBy: user?.uid,
+        userName: user?.displayName || 'Unknown',
         type: progress !== undefined ? 'progress_update' : 'status_update',
         progress: progress
-      });
+      };
+      await addDoc(commentRef, newComment);
 
       await updateDoc(doc(db, 'tasks', taskId), updates);
+
+      // Create notification for task creator if different from current user
+      if (taskData.userId && taskData.userId !== user?.uid) {
+        const notificationData = {
+          userId: taskData.userId,
+          type: 'task_updated',
+          title: 'Task Status Updated',
+          message: `${user?.displayName || 'Someone'} marked task "${taskData.title}" as ${newStatus}`,
+          taskId: taskId,
+          createdAt: new Date(),
+          read: false,
+          data: {
+            taskTitle: taskData.title,
+            updatedBy: user?.displayName || 'Unknown',
+            status: newStatus,
+            progress: progress,
+            comment: comment
+          }
+        };
+        await addDoc(collection(db, 'notifications'), notificationData);
+      }
+
+      // Create notification for task assignee if different from current user
+      if (taskData.assigneeId && taskData.assigneeId !== user?.uid) {
+        const notificationData = {
+          userId: taskData.assigneeId,
+          type: 'task_updated',
+          title: 'Task Status Updated',
+          message: `${user?.displayName || 'Someone'} marked task "${taskData.title}" as ${newStatus}`,
+          taskId: taskId,
+          createdAt: new Date(),
+          read: false,
+          data: {
+            taskTitle: taskData.title,
+            updatedBy: user?.displayName || 'Unknown',
+            status: newStatus,
+            progress: progress,
+            comment: comment
+          }
+        };
+        await addDoc(collection(db, 'notifications'), notificationData);
+      }
+
+      showSnackbar('Task updated successfully', 'success');
     } catch (error) {
       console.error('Error updating task:', error);
+      showSnackbar('Failed to update task', 'error');
     }
   };
 
@@ -609,15 +690,77 @@ export default function ManagerDashboard() {
     if (!department?.id || !newTask.title || !newTask.dueDate || !newTask.assigneeId) return;
 
     try {
+      console.log('Creating new task with data:', {
+        ...newTask,
+        departmentId: department.id,
+        assigneeId: newTask.assigneeId
+      });
+
       const taskData = {
         ...newTask,
+        departmentId: department.id,
         userId: user?.uid,
         createdAt: new Date(),
         status: 'pending',
-        progress: 0
+        progress: 0,
+        assignedBy: {
+          id: user?.uid,
+          name: user?.displayName || 'Unknown',
+          timestamp: new Date()
+        }
       };
 
-      await addDoc(collection(db, 'tasks'), taskData);
+      // Create task document
+      const taskRef = await addDoc(collection(db, 'tasks'), taskData);
+      console.log('Task created with ID:', taskRef.id);
+
+      // Create notification for assignee
+      const notificationData = {
+        userId: newTask.assigneeId,
+        type: 'task_assigned',
+        title: 'New Task Assigned',
+        message: `${user?.displayName || 'Someone'} assigned you a new task: ${newTask.title}`,
+        taskId: taskRef.id,
+        createdAt: new Date(),
+        read: false,
+        data: {
+          taskTitle: newTask.title,
+          assignedBy: user?.displayName || 'Unknown',
+          priority: newTask.priority,
+          dueDate: newTask.dueDate,
+          description: newTask.description
+        }
+      };
+
+      await addDoc(collection(db, 'notifications'), notificationData);
+      console.log('Task notification created for assignee:', newTask.assigneeId);
+
+      // If there's a department manager and they're different from the current user and assignee,
+      // notify them as well
+      if (department.managerId && 
+          department.managerId !== user?.uid && 
+          department.managerId !== newTask.assigneeId) {
+        const managerNotification = {
+          userId: department.managerId,
+          type: 'task_created',
+          title: 'New Task Created in Department',
+          message: `${user?.displayName || 'Someone'} assigned a new task to ${newTask.assigneeName || 'an employee'}: ${newTask.title}`,
+          taskId: taskRef.id,
+          createdAt: new Date(),
+          read: false,
+          data: {
+            taskTitle: newTask.title,
+            assignedBy: user?.displayName || 'Unknown',
+            assignedTo: newTask.assigneeName,
+            priority: newTask.priority,
+            dueDate: newTask.dueDate,
+            description: newTask.description
+          }
+        };
+        await addDoc(collection(db, 'notifications'), managerNotification);
+        console.log('Task notification created for department manager:', department.managerId);
+      }
+
       setShowTaskDialog(false);
       setNewTask({
         title: '',
@@ -625,9 +768,13 @@ export default function ManagerDashboard() {
         dueDate: null,
         priority: 'medium',
         assigneeId: '',
+        assigneeName: '',
       });
+
+      showSnackbar('Task created successfully', 'success');
     } catch (error) {
       console.error('Error adding task:', error);
+      showSnackbar('Failed to create task', 'error');
     }
   };
 
@@ -1125,7 +1272,7 @@ export default function ManagerDashboard() {
                             <PeopleIcon color="primary" />
                             <Typography variant="h6">Recruitment</Typography>
                           </Stack>
-                          <Typography variant="body2" color="text.secondary">
+                          <Typography variant="body2" color="textSecondary">
                             Manage job postings, review applications, and schedule interviews.
                           </Typography>
                         </CardContent>
@@ -1149,7 +1296,7 @@ export default function ManagerDashboard() {
                             <LoginIcon color="primary" />
                             <Typography variant="h6">Attendance</Typography>
                           </Stack>
-                          <Typography variant="body2" color="text.secondary">
+                          <Typography variant="body2" color="textSecondary">
                             View and manage attendance records, time-off requests, and work schedules.
                           </Typography>
                         </CardContent>
@@ -1173,7 +1320,7 @@ export default function ManagerDashboard() {
                             <AssessmentIcon color="primary" />
                             <Typography variant="h6">Employee Reports</Typography>
                           </Stack>
-                          <Typography variant="body2" color="text.secondary">
+                          <Typography variant="body2" color="textSecondary">
                             Access detailed reports and analytics about your department's performance.
                           </Typography>
                         </CardContent>
@@ -1504,134 +1651,3 @@ export default function ManagerDashboard() {
     </Box>
   );
 }
-
-const fetchDepartmentTasks = async () => {
-  if (!user?.uid || !department?.id) return;
-
-  try {
-    // Query for in-progress tasks
-    const inProgressQuery = query(
-      collection(db, 'tasks'),
-      where('departmentId', '==', department.id),
-      where('status', '!=', 'done'),
-      orderBy('status'),
-      orderBy('dueDate', 'asc')
-    );
-
-    // Query for completed tasks
-    const completedQuery = query(
-      collection(db, 'tasks'),
-      where('departmentId', '==', department.id),
-      where('status', '==', 'done'),
-      orderBy('dueDate', 'desc')
-    );
-
-    // Set up listeners for both queries
-    const unsubscribeInProgress = onSnapshot(inProgressQuery, (snapshot) => {
-      Promise.all(
-        snapshot.docs.map(async (doc) => {
-          const data = doc.data();
-          const dueDate = data.dueDate?.toDate ? data.dueDate.toDate() : null;
-          
-          // Get assignee details
-          let assignedTo = 'Unassigned';
-          if (data.assigneeId) {
-            const assigneeDoc = await getDoc(doc(db, 'employees', data.assigneeId));
-            if (assigneeDoc.exists()) {
-              const assigneeData = assigneeDoc.data();
-              assignedTo = assigneeData.firstName && assigneeData.lastName ? 
-                `${assigneeData.firstName} ${assigneeData.lastName}` : 
-                assigneeData.name || 'Unknown';
-            }
-          }
-
-          // Get comments
-          const commentsQuery = query(
-            collection(db, `tasks/${doc.id}/comments`),
-            orderBy('timestamp', 'desc')
-          );
-          const commentsSnapshot = await getDocs(commentsQuery);
-          const comments = commentsSnapshot.docs.map(commentDoc => {
-            const commentData = commentDoc.data();
-            return {
-              text: commentData.text,
-              progress: commentData.progress,
-              timestamp: commentData.timestamp?.toDate(),
-              userId: commentData.userId,
-              userName: commentData.userName
-            };
-          });
-
-          return {
-            id: doc.id,
-            ...data,
-            dueDate,
-            assignedTo,
-            comments,
-            completed: data.completed === true || data.status === 'done',
-            latestComment: comments.length > 0 ? comments[0] : null
-          };
-        })
-      ).then(inProgressTasks => {
-        // Get completed tasks
-        const unsubscribeCompleted = onSnapshot(completedQuery, (completedSnapshot) => {
-          Promise.all(
-            completedSnapshot.docs.map(async (doc) => {
-              const data = doc.data();
-              const dueDate = data.dueDate?.toDate ? data.dueDate.toDate() : null;
-              
-              // Get assignee details
-              let assignedTo = 'Unassigned';
-              if (data.assigneeId) {
-                const employeeRef = doc(db, 'employees', data.assigneeId);
-              const assigneeDoc = await getDoc(employeeRef);
-                if (assigneeDoc.exists()) {
-                  const assigneeData = assigneeDoc.data();
-                  assignedTo = assigneeData.firstName && assigneeData.lastName ? 
-                    `${assigneeData.firstName} ${assigneeData.lastName}` : 
-                    assigneeData.name || 'Unknown';
-                }
-              }
-
-              // Get comments
-              const commentsQuery = query(
-                collection(db, `tasks/${doc.id}/comments`),
-                orderBy('timestamp', 'desc')
-              );
-              const commentsSnapshot = await getDocs(commentsQuery);
-              const comments = commentsSnapshot.docs.map(commentDoc => {
-                const commentData = commentDoc.data();
-                return {
-                  text: commentData.text,
-                  progress: commentData.progress,
-                  timestamp: commentData.timestamp?.toDate(),
-                  userId: commentData.userId,
-                  userName: commentData.userName
-                };
-              });
-
-              return {
-                id: doc.id,
-                ...data,
-                dueDate,
-                assignedTo,
-                comments,
-                completed: true,
-                latestComment: comments.length > 0 ? comments[0] : null
-              };
-            })
-          ).then(completedTasks => {
-            setDepartmentTasks([...inProgressTasks, ...completedTasks]);
-          });
-        });
-      });
-    });
-  } catch (error) {
-    console.error('Error fetching department tasks:', error);
-  }
-
-  return () => {
-    unsubscribeInProgress();
-    unsubscribeCompleted && unsubscribeCompleted();
-  };
-};

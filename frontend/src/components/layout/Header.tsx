@@ -31,6 +31,7 @@ import { useSnackbar } from '@/contexts/SnackbarContext';
 import { motion } from 'framer-motion';
 import { MiniCalendar as MiniCalendarComponent } from '@/components/calendar/MiniCalendar';
 import { format } from 'date-fns';
+import { NotificationBell } from '@/features/dashboard/components/NotificationBell';
 
 interface HeaderProps {
   onDrawerToggle?: () => void;
@@ -99,144 +100,90 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
   };
 
   return (
-    <AppBar position="fixed" color="default" elevation={0} sx={{ backgroundColor: 'background.paper' }}>
-      <Toolbar sx={{ minHeight: 64 }}>
+    <AppBar
+      position="fixed"
+      sx={{
+        zIndex: theme.zIndex.drawer + 1,
+        bgcolor: 'background.paper',
+        borderBottom: `1px solid ${theme.palette.divider}`,
+      }}
+      elevation={0}
+    >
+      <Toolbar>
         {showDrawerToggle && (
           <IconButton
             color="inherit"
             aria-label="open drawer"
             edge="start"
             onClick={onDrawerToggle}
-            sx={{ mr: 2, display: { lg: 'none' } }}
+            sx={{ mr: 2 }}
           >
             <MenuIcon />
           </IconButton>
         )}
 
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5 }}
-        >
-          <Box
+        {/* Company Logo/Name */}
+        <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1 }}>
+          <Typography
+            variant="h6"
+            noWrap
             component={Link}
             to="/"
             sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
+              color: 'text.primary',
               textDecoration: 'none',
-              color: 'inherit',
+              fontWeight: 600,
+              letterSpacing: 0.5,
             }}
           >
-            <Box
-              sx={{
-                width: 32,
-                height: 32,
-                borderRadius: 1.5,
-                background: (theme) => `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transform: 'rotate(-5deg)',
-              }}
-            >
-              <DashboardIcon sx={{ fontSize: 20, color: 'white' }} />
-            </Box>
-            <Typography
-              variant="h6"
-              sx={{
-                fontWeight: 700,
-                background: (theme) => `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.light})`,
-                backgroundClip: 'text',
-                WebkitBackgroundClip: 'text',
-                color: 'transparent',
-              }}
-            >
-              ModernHR
-            </Typography>
-          </Box>
-        </motion.div>
+            ModernHR
+          </Typography>
 
-        <Box sx={{ ml: 3, flex: 1 }}>
-          <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} aria-label="breadcrumb">
-            <Button component={Link} to="/" startIcon={<HomeIcon />} color="inherit" size="small">
-              Home
-            </Button>
-            {pathnames.map((value, index) => {
-              const last = index === pathnames.length - 1;
-              const to = `/${pathnames.slice(0, index + 1).join('/')}`;
+          {/* Breadcrumbs */}
+          <Breadcrumbs
+            separator={<NavigateNextIcon fontSize="small" />}
+            aria-label="breadcrumb"
+            sx={{ ml: 3, display: { xs: 'none', sm: 'flex' } }}
+          >
+            {pathnames.map((name, index) => {
+              const routeTo = `/${pathnames.slice(0, index + 1).join('/')}`;
+              const displayName = breadcrumbNameMap[name] || name;
 
-              return last ? (
-                <Typography color="text.primary" key={to}>
-                  {breadcrumbNameMap[value] || value}
+              return index === pathnames.length - 1 ? (
+                <Typography key={name} color="text.primary">
+                  {displayName}
                 </Typography>
               ) : (
-                <Button component={Link} to={to} key={to} color="inherit" size="small">
-                  {breadcrumbNameMap[value] || value}
-                </Button>
+                <Link
+                  key={name}
+                  to={routeTo}
+                  style={{
+                    textDecoration: 'none',
+                    color: theme.palette.text.secondary,
+                  }}
+                >
+                  {displayName}
+                </Link>
               );
             })}
           </Breadcrumbs>
         </Box>
 
-        <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+        {/* Right side items */}
+        <Stack direction="row" spacing={2} alignItems="center">
+          {/* Calendar Button */}
           <IconButton
+            color="inherit"
             onClick={handleCalendarClick}
-            size="small"
-            sx={{ ml: 2 }}
-            aria-controls={Boolean(calendarAnchorEl) ? 'calendar-menu' : undefined}
-            aria-haspopup="true"
-            aria-expanded={Boolean(calendarAnchorEl) ? 'true' : undefined}
+            sx={{ color: 'text.primary' }}
           >
             <CalendarIcon />
           </IconButton>
 
-          <Popover
-            id="calendar-menu"
-            open={Boolean(calendarAnchorEl)}
-            anchorEl={calendarAnchorEl}
-            onClose={handleCalendarClose}
-            anchorOrigin={{
-              vertical: 'bottom',
-              horizontal: 'right',
-            }}
-            transformOrigin={{
-              vertical: 'top',
-              horizontal: 'right',
-            }}
-            PaperProps={{
-              sx: {
-                width: 320,
-                maxHeight: 500,
-                p: 2,
-              },
-            }}
-          >
-            <Stack spacing={2}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="h6">{format(selectedDate, 'MMMM d, yyyy')}</Typography>
-                <Button
-                  endIcon={<OpenInNewIcon />}
-                  onClick={() => {
-                    handleCalendarClose();
-                    navigate('/calendar');
-                  }}
-                  size="small"
-                >
-                  Open Calendar
-                </Button>
-              </Stack>
+          {/* Notification Bell */}
+          {user && <NotificationBell userId={user.uid} />}
 
-              <MiniCalendarComponent
-                userId={user?.uid || ''}
-                selectedDate={selectedDate}
-                onDateChange={handleDateChange}
-                onAddTask={handleAddQuickTask}
-              />
-            </Stack>
-          </Popover>
-
+          {/* User Role */}
           {userRole && (
             <Box
               sx={{
@@ -263,6 +210,7 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
             </Box>
           )}
 
+          {/* User Menu */}
           <IconButton
             onClick={handleMenuOpen}
             size="small"
@@ -275,13 +223,58 @@ export default function Header({ onDrawerToggle, showDrawerToggle = false }: Hea
               sx={{
                 width: 32,
                 height: 32,
-                bgcolor: 'primary.main',
+                bgcolor: theme.palette.primary.main,
               }}
             >
               {user?.email?.[0].toUpperCase()}
             </Avatar>
           </IconButton>
-        </Box>
+        </Stack>
+
+        <Popover
+          id="calendar-menu"
+          open={Boolean(calendarAnchorEl)}
+          anchorEl={calendarAnchorEl}
+          onClose={handleCalendarClose}
+          anchorOrigin={{
+            vertical: 'bottom',
+            horizontal: 'right',
+          }}
+          transformOrigin={{
+            vertical: 'top',
+            horizontal: 'right',
+          }}
+          PaperProps={{
+            sx: {
+              width: 320,
+              maxHeight: 500,
+              p: 2,
+            },
+          }}
+        >
+          <Stack spacing={2}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Typography variant="h6">{format(selectedDate, 'MMMM d, yyyy')}</Typography>
+              <Button
+                endIcon={<OpenInNewIcon />}
+                onClick={() => {
+                  handleCalendarClose();
+                  navigate('/calendar');
+                }}
+                size="small"
+              >
+                Open Calendar
+              </Button>
+            </Stack>
+
+            <MiniCalendarComponent
+              userId={user?.uid || ''}
+              selectedDate={selectedDate}
+              onDateChange={handleDateChange}
+              onAddTask={handleAddQuickTask}
+            />
+          </Stack>
+        </Popover>
 
         <Menu
           anchorEl={anchorEl}

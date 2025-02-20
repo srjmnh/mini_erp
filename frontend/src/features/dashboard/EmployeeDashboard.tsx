@@ -61,6 +61,7 @@ import {
   orderBy,
   onSnapshot,
   limit,
+  addDoc
 } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { getLeaveBalance } from '@/services/leaveManagement';
@@ -1018,50 +1019,44 @@ export const PayrollCard = () => {
       return;
     }
 
-    const fetchPayrollHistory = async () => {
-      console.log('Fetching payroll history for user:', user.email);
-      try {
-        // Query employee document by email
-        const q = query(collection(db, 'employees'), where('email', '==', user.email));
-        console.log('Query created for:', user.email);
+    console.log('Fetching payroll history for user:', user.email);
+    try {
+      // Query employee document by email
+      const q = query(collection(db, 'employees'), where('email', '==', user.email));
+      console.log('Query created for:', user.email);
+      
+      console.log('Setting up onSnapshot listener...');
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        console.log('Snapshot received with', snapshot.docs.length, 'docs');
         
-        console.log('Setting up onSnapshot listener...');
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-          console.log('Snapshot received with', snapshot.docs.length, 'docs');
-          
-          if (snapshot.empty) {
-            console.log('No employee document found');
-            setPayrollHistory([]);
-            setLoading(false);
-            return;
-          }
-
-          const employeeDoc = snapshot.docs[0];
-          const employeeData = employeeDoc.data();
-          console.log('Employee data received:', employeeData);
-          console.log('Payroll array:', employeeData.payroll);
-          
-          const payroll = employeeData.payroll || [];
-          console.log('Setting payroll history:', payroll);
-          setPayrollHistory(payroll);
+        if (snapshot.empty) {
+          console.log('No employee document found');
+          setPayrollHistory([]);
           setLoading(false);
-        });
+          return;
+        }
 
-        return unsubscribe;
-      } catch (error) {
-        console.error('Error in fetchPayrollHistory:', error);
+        const employeeDoc = snapshot.docs[0];
+        const employeeData = employeeDoc.data();
+        console.log('Employee data received:', employeeData);
+        console.log('Payroll array:', employeeData.payroll);
+        
+        const payroll = employeeData.payroll || [];
+        console.log('Setting payroll history:', payroll);
+        setPayrollHistory(payroll);
         setLoading(false);
-      }
-    };
+      });
 
-    console.log('Calling fetchPayrollHistory...');
-    fetchPayrollHistory();
+      return unsubscribe;
+    } catch (error) {
+      console.error('Error in fetchPayrollHistory:', error);
+      setLoading(false);
+    }
   }, [user?.uid]);
 
   console.log('Rendering PayrollCard. Loading:', loading, 'History:', payrollHistory);
 
   if (loading) {
-    console.log('Showing loading state');
     return (
       <Box>
         <Card sx={{ p: 2 }}>
@@ -1296,6 +1291,44 @@ export const EmployeeDashboard = () => {
           latestComment: newComment
         });
 
+        // Create notification for task creator if different from current user
+        if (currentTask.userId && currentTask.userId !== user?.uid) {
+          const notificationData = {
+            userId: currentTask.userId,
+            type: 'task_updated',
+            title: 'Task Progress Updated',
+            message: `${user?.displayName || 'Someone'} updated progress on task: ${currentTask.title}`,
+            taskId: selectedTask.id,
+            createdAt: new Date(),
+            read: false,
+            data: {
+              taskTitle: currentTask.title,
+              updatedBy: user?.displayName || 'Unknown',
+              progress: newProgress
+            }
+          };
+          await addDoc(collection(db, 'notifications'), notificationData);
+        }
+
+        // Create notification for task assignee if different from current user
+        if (currentTask.assigneeId && currentTask.assigneeId !== user?.uid) {
+          const notificationData = {
+            userId: currentTask.assigneeId,
+            type: 'task_updated',
+            title: 'Task Progress Updated',
+            message: `${user?.displayName || 'Someone'} updated progress on task: ${currentTask.title}`,
+            taskId: selectedTask.id,
+            createdAt: new Date(),
+            read: false,
+            data: {
+              taskTitle: currentTask.title,
+              updatedBy: user?.displayName || 'Unknown',
+              progress: newProgress
+            }
+          };
+          await addDoc(collection(db, 'notifications'), notificationData);
+        }
+
         showSnackbar('Progress updated successfully', 'success');
         setIsProgressDialogOpen(false);
         setProgressComment('');
@@ -1310,26 +1343,162 @@ export const EmployeeDashboard = () => {
 
   // Load tasks with real-time updates
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      console.log('No user found, skipping task fetch');
+      return;
+    }
 
-    const tasksQuery = query(
-      collection(db, 'tasks'),
-      where('assigneeId', '==', user.uid)
-    );
-
-    const unsubscribe = onSnapshot(tasksQuery, (snapshot) => {
-      const updatedTasks = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        comments: doc.data().comments || []
-      }));
-      setTasks(updatedTasks);
-    }, (error) => {
-      console.error('Error loading tasks:', error);
-      showSnackbar('Error loading tasks', 'error');
+    console.log('Starting task fetch for user:', {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName
     });
 
-    return () => unsubscribe();
+    // Create a query for tasks assigned to the user
+    const tasksRef = collection(db, 'tasks');
+    console.log('Created tasks collection reference');
+
+    // First get the employee record to check both IDs
+    const setupTaskListeners = async () => {
+      try {
+        console.log('Fetching employee record for:', user.email);
+        const employeeSnapshot = await getDocs(
+          query(collection(db, 'employees'), where('email', '==', user.email))
+        );
+
+        let employeeId = null;
+        if (!employeeSnapshot.empty) {
+          employeeId = employeeSnapshot.docs[0].id;
+          console.log('Found employee ID:', employeeId);
+        } else {
+          console.log('No employee record found for email:', user.email);
+        }
+
+        // Set up listener for user.uid tasks - check both assigneeId and assigned tasks
+        const userTasksQuery = query(
+          tasksRef,
+          where('assigneeId', 'in', [user.uid, employeeId].filter(Boolean)),
+          orderBy('dueDate', 'asc')
+        );
+
+        console.log('Created user tasks query with:', {
+          assigneeIds: [user.uid, employeeId].filter(Boolean),
+          orderBy: 'dueDate'
+        });
+
+        const userTasksUnsubscribe = onSnapshot(userTasksQuery, async (snapshot) => {
+          const snapshotInfo = {
+            count: snapshot.docs.length,
+            empty: snapshot.empty,
+            docIds: snapshot.docs.map(doc => doc.id)
+          };
+          console.log('Got user tasks snapshot:', snapshotInfo);
+
+          processTaskSnapshot(snapshot, 'assigned');
+        });
+
+        // Also check for tasks where this user is in assignedBy
+        const assignedByQuery = query(
+          tasksRef,
+          where('assignedBy.id', '==', user.uid),
+          orderBy('dueDate', 'asc')
+        );
+
+        console.log('Created assignedBy tasks query');
+
+        const assignedByUnsubscribe = onSnapshot(assignedByQuery, async (snapshot) => {
+          const snapshotInfo = {
+            count: snapshot.docs.length,
+            empty: snapshot.empty,
+            docIds: snapshot.docs.map(doc => doc.id)
+          };
+          console.log('Got assignedBy tasks snapshot:', snapshotInfo);
+
+          processTaskSnapshot(snapshot, 'created');
+        });
+
+        return () => {
+          console.log('Cleaning up task listeners');
+          userTasksUnsubscribe();
+          assignedByUnsubscribe();
+        };
+      } catch (error) {
+        console.error('Error setting up task listeners:', error);
+        showSnackbar('Error setting up task tracking', 'error');
+      }
+    };
+
+    const processTaskSnapshot = (snapshot, source: 'assigned' | 'created') => {
+      if (snapshot.empty) {
+        console.log(`No ${source} tasks found. This could mean:`, {
+          source,
+          reason1: 'No tasks are assigned to this ID',
+          reason2: 'Tasks might be using a different field for assignee',
+          reason3: 'Tasks might not have assigneeId set'
+        });
+        return;
+      }
+
+      const loadedTasks = snapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log(`Processing ${source} task document:`, {
+          id: doc.id,
+          assigneeId: data.assigneeId,
+          userId: data.userId,
+          title: data.title,
+          rawDueDate: data.dueDate,
+          status: data.status,
+          completed: data.completed
+        });
+
+        const isCompleted = data.completed || data.status === 'done';
+        const dueDate = data.dueDate?.toDate();
+        
+        return {
+          id: doc.id,
+          ...data,
+          dueDate: dueDate,
+          completed: isCompleted,
+          status: isCompleted ? 'done' : data.status || 'todo',
+          progress: data.progress || 0,
+          comments: data.comments || []
+        };
+      });
+
+      // Merge with existing tasks, removing duplicates
+      setTasks(prevTasks => {
+        const taskMap = new Map();
+        
+        // Add existing tasks
+        prevTasks.forEach(task => taskMap.set(task.id, task));
+        
+        // Add or update with new tasks
+        loadedTasks.forEach(task => taskMap.set(task.id, task));
+        
+        const mergedTasks = Array.from(taskMap.values());
+        
+        console.log('Merged tasks state:', {
+          previousCount: prevTasks.length,
+          newCount: loadedTasks.length,
+          mergedCount: mergedTasks.length,
+          source
+        });
+
+        // Sort tasks
+        return mergedTasks.sort((a, b) => {
+          if (a.completed === b.completed) {
+            return (a.dueDate?.getTime() || 0) - (b.dueDate?.getTime() || 0);
+          }
+          return a.completed ? 1 : -1;
+        });
+      });
+    };
+
+    // Start the task loading process
+    const cleanup = setupTaskListeners();
+    return () => {
+      cleanup.then(cleanupFn => cleanupFn && cleanupFn());
+    };
   }, [user]);
 
   useEffect(() => {
@@ -1465,18 +1634,27 @@ export const EmployeeDashboard = () => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const loadedTasks = snapshot.docs.map(doc => {
         const data = doc.data();
-        const comments = data.comments || [];
-        // Sort comments by timestamp in descending order (newest first)
-        comments.sort((a, b) => b.timestamp.toDate() - a.timestamp.toDate());
+        console.log(`Processing task document:`, {
+          id: doc.id,
+          assigneeId: data.assigneeId,
+          userId: data.userId,
+          title: data.title,
+          rawDueDate: data.dueDate,
+          status: data.status,
+          completed: data.completed
+        });
 
+        const isCompleted = data.completed || data.status === 'done';
+        const dueDate = data.dueDate?.toDate();
+        
         return {
           id: doc.id,
           ...data,
-          comments,
+          dueDate: dueDate,
+          completed: isCompleted,
+          status: isCompleted ? 'done' : data.status || 'todo',
           progress: data.progress || 0,
-          dueDate: data.dueDate?.toDate(),
-          completed: data.status === 'done',
-          latestComment: comments[0] || null
+          comments: data.comments || []
         };
       });
 
@@ -1507,18 +1685,59 @@ export const EmployeeDashboard = () => {
 
       // If task has projectId, it's in a project subcollection
       if (task.projectId) {
-        await updateDoc(doc(db, `projects/${task.projectId}/tasks`, taskId), updates);
+        await updateDoc(doc(db, `projects/${task.projectId}/tasks/${task.id}`), updates);
       } else {
         // Otherwise it's in the root tasks collection
-        await updateDoc(doc(db, 'tasks', taskId), updates);
+        await updateDoc(doc(db, 'tasks', task.id), updates);
+      }
+
+      // Create notification for task creator if different from current user
+      if (task.userId && task.userId !== user?.uid) {
+        const notificationData = {
+          userId: task.userId,
+          type: 'task_updated',
+          title: 'Task Status Updated',
+          message: `${user?.displayName || 'Someone'} marked task "${task.title}" as ${newStatus}`,
+          taskId: task.id,
+          createdAt: new Date(),
+          read: false,
+          data: {
+            taskTitle: task.title,
+            updatedBy: user?.displayName || 'Unknown',
+            status: newStatus
+          }
+        };
+        await addDoc(collection(db, 'notifications'), notificationData);
+      }
+
+      // Create notification for task assignee if different from current user
+      if (task.assigneeId && task.assigneeId !== user?.uid) {
+        const notificationData = {
+          userId: task.assigneeId,
+          type: 'task_updated',
+          title: 'Task Status Updated',
+          message: `${user?.displayName || 'Someone'} marked task "${task.title}" as ${newStatus}`,
+          taskId: task.id,
+          createdAt: new Date(),
+          read: false,
+          data: {
+            taskTitle: task.title,
+            updatedBy: user?.displayName || 'Unknown',
+            status: newStatus
+          }
+        };
+        await addDoc(collection(db, 'notifications'), notificationData);
       }
 
       // Update local state
       setTasks(tasks.map(t =>
         t.id === taskId ? { ...t, ...updates } : t
       ));
+
+      showSnackbar('Task status updated successfully', 'success');
     } catch (error) {
       console.error('Error updating task status:', error);
+      showSnackbar('Failed to update task status', 'error');
     }
   };
 
@@ -1767,7 +1986,7 @@ export const EmployeeDashboard = () => {
                                         </Box>
                                         {task.latestComment && (
                                           <Typography variant="caption" color="text.secondary">
-                                            Latest: {task.latestComment.text} - {task.latestComment.userName} ({format(task.latestComment.timestamp.toDate(), 'MMM d, HH:mm')})
+                                            Latest Update
                                           </Typography>
                                         )}
                                       </Box>
@@ -1786,14 +2005,21 @@ export const EmployeeDashboard = () => {
 
             {/* Calendar - Right Column */}
             <Grid item xs={12} md={3}>
-              <MiniCalendar
-                userId={user?.uid || ''}
-                events={calendarEvents}
-                selectedDate={new Date()}
-                onDateChange={() => {}}
-                onAddTask={handleAddQuickTask}
-                renderEventContent={renderEventContent}
-              />
+              <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6" component="h2">
+                    Calendar
+                  </Typography>
+                </Box>
+                <MiniCalendar
+                  userId={user?.uid || ''}
+                  events={calendarEvents}
+                  selectedDate={new Date()}
+                  onDateChange={() => {}}
+                  onAddTask={handleAddQuickTask}
+                  renderEventContent={renderEventContent}
+                />
+              </Paper>
             </Grid>
           </Grid>
         </Box>
@@ -1824,7 +2050,7 @@ export const EmployeeDashboard = () => {
                 View All Projects
               </Button>
             </Box>
-            <Grid container spacing={2}>
+            <Grid container spacing={3}>
               {departmentProjects
                 .filter(project => project.status !== 'completed' && project.status !== 'done')
                 .map((project) => (
@@ -1913,9 +2139,9 @@ export const EmployeeDashboard = () => {
                             }}
                           />
                           {task.dueDate && (
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', fontSize: '0.75rem' }}>
-                              <AccessTimeIcon sx={{ fontSize: 14, mr: 0.5 }} />
-                              {
+                            <Typography variant="caption" color="text.secondary">
+                              <AccessTimeIcon fontSize="small" />
+                              Due: {
                                 task.dueDate instanceof Date 
                                   ? format(task.dueDate, 'MMM d, yyyy')
                                   : task.dueDate?.toDate 
@@ -1985,7 +2211,10 @@ export const EmployeeDashboard = () => {
                         borderColor: 'grey.100'
                       }}
                     >
-                      <Typography variant="caption" sx={{ fontSize: '0.875rem' }}>
+                      <Typography variant="caption" color="text.secondary">
+                        Latest Update
+                      </Typography>
+                      <Typography variant="body2">
                         {task.comments[0].text}
                       </Typography>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
