@@ -41,20 +41,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Set up auth state observer
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      // Sync with Supabase auth
-      if (user) {
-        const { data: { session }, error } = await supabase.auth.signInWithPassword({
-          email: user.email!,
-          password: user.uid // Using Firebase UID as password for Supabase
-        });
-        if (error) {
-          console.error('Error syncing with Supabase:', error);
-        } else {
-          console.log('Synced with Supabase:', session);
-        }
-      } else {
-        await supabase.auth.signOut();
-      }
       console.log('Auth state changed:', { 
         user: user ? { 
           uid: user.uid, 
@@ -70,61 +56,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         timestamp: new Date().toISOString()
       });
 
-      if (user) {
-        try {
-          // Get user role from Firestore
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          console.log('Raw user document:', userDoc.exists() ? userDoc.data() : 'not found');
-          
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            console.log('Found user document:', userData);
-            
-            // If role is HR0 or hr, set as HR0
-            const role = (userData.role === 'HR0' || userData.role === 'hr') ? 'HR0' : (userData.role as UserRole);
-            console.log('Setting user role:', role, 'from userData.role:', userData.role);
-            setUserRole(role);
-
-            // Fetch department from employees collection using email
-            const employeesRef = collection(db, 'employees');
-            const employeeQuery = query(employeesRef, where('email', '==', user.email));
-            const employeeSnapshot = await getDocs(employeeQuery);
-
-            if (!employeeSnapshot.empty) {
-              const employeeData = employeeSnapshot.docs[0].data();
-              console.log('Found employee data:', employeeData);
-              setUser({
-                ...user,
-                department: employeeData.department
-              });
-            } else {
-              console.log('No employee record found for email:', user.email);
-              setUser(user);
-            }
-          } else {
-            console.log('No user document found, checking email');
-            // For demo@demo.com, set as HR0
-            if (user.email === 'demo@demo.com') {
-              console.log('Setting demo user as HR0');
-              setUserRole('HR0');
-            } else {
-              console.log('Defaulting to employee role');
-              setUserRole('employee');
-            }
-          }
-        } catch (error) {
-          console.error('Error getting user role:', error);
-          setUserRole('HR0'); // Fallback to HR0 for legacy accounts
-        }
-      } else {
+      if (!user) {
+        setUser(null);
         setUserRole(null);
+        setLoading(false);
+        return;
       }
 
-      setUser(user);
-      setLoading(false);
+      setLoading(false); // Set loading to false here
+
+      try {
+        // Get user role from Firestore
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        console.log('Raw user document:', userDoc.exists() ? userDoc.data() : 'not found');
+        
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          console.log('Found user document:', userData);
+          
+          // If role is HR0 or hr, set as HR0
+          const role = (userData.role === 'HR0' || userData.role === 'hr') ? 'HR0' : (userData.role as UserRole);
+          console.log('Setting user role:', role, 'from userData.role:', userData.role);
+          setUserRole(role);
+
+          // Fetch department from employees collection using email
+          const employeesRef = collection(db, 'employees');
+          const employeeQuery = query(employeesRef, where('email', '==', user.email));
+          const employeeSnapshot = await getDocs(employeeQuery);
+
+          if (!employeeSnapshot.empty) {
+            const employeeData = employeeSnapshot.docs[0].data();
+            console.log('Found employee data:', employeeData);
+            setUser({
+              ...user,
+              department: employeeData.department
+            });
+          } else {
+            console.log('No employee record found for email:', user.email);
+            setUser(user); // Still set the user even if no employee record found
+          }
+        } else {
+          console.log('No user document found for uid:', user.uid);
+          setUser(user); // Still set the user even if no user document found
+        }
+
+        // Sync with Supabase auth only after Firebase auth is confirmed
+        const { error } = await supabase.auth.signInWithPassword({
+          email: user.email!,
+          password: user.uid
+        });
+        if (error) {
+          console.error('Error syncing with Supabase:', error);
+        }
+      } catch (error) {
+        console.error('Error setting up user:', error);
+        setUser(user); // Set the user even if there's an error
+      }
     });
 
-    // Cleanup subscription
     return () => unsubscribe();
   }, []);
 

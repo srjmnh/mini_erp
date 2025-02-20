@@ -12,14 +12,12 @@ export default defineConfig({
       }
     },
     include: [
-      'vis-network',
-      'vis-data',
-      'react-big-calendar',
-      'react-dropzone',
       'pretty-bytes',
       'recharts/lib',
       '@supabase/supabase-js',
-      '@mui/x-data-grid'
+      '@mui/x-data-grid',
+      'react-pdf',
+      'pdfjs-dist',
     ],
     exclude: []
   },
@@ -37,15 +35,28 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:5002',
+        target: 'http://localhost:3001',
         changeOrigin: true,
         secure: false,
       },
     },
+    headers: {
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Resource-Policy': 'cross-origin'
+    },
   },
   build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-pdf': ['react-pdf'],
+          pdfjs: ['pdfjs-dist'],
+        },
+      },
+    },
     commonjsOptions: {
-      include: [/node_modules/],
+      include: [/node_modules/, /react-pdf/],
       transformMixedEsModules: true
     }
   },

@@ -33,6 +33,9 @@ const icons = [BusinessIcon, PeopleIcon, DashboardIcon, AnalyticsIcon, SpeedIcon
 export default function LoginPage() {
   const theme = useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from?.pathname || '/dashboard';
+  
   const { user, loading, signInWithGoogle, signInWithEmailAndPassword } = useAuth();
   const { showSnackbar } = useSnackbar();
   const [isLoading, setIsLoading] = useState(false);
@@ -50,14 +53,18 @@ export default function LoginPage() {
 
   // Redirect if user is already logged in
   useEffect(() => {
-    if (!loading && user) {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [user, loading, navigate]);
+    console.log('LoginPage auth check:', {
+      loading,
+      hasUser: !!user,
+      userEmail: user?.email,
+      timestamp: new Date().toISOString()
+    });
 
-  // Redirect to the page they came from, or dashboard if they came directly to login
-  const { state } = useLocation() as { state: { from: { pathname: string } } | null };
-  const from = state?.from?.pathname || '/dashboard';
+    if (!loading && user) {
+      console.log('User already authenticated, redirecting to:', from);
+      navigate(from, { replace: true });
+    }
+  }, [user, loading, navigate, from]);
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,10 +75,12 @@ export default function LoginPage() {
     
     try {
       setIsLoading(true);
+      console.log('Attempting email sign in:', { email });
       await signInWithEmailAndPassword(email, password);
       showSnackbar('Successfully signed in!', 'success');
       navigate(from, { replace: true });
     } catch (error) {
+      console.error('Sign in error:', error);
       if (error instanceof FirebaseError) {
         switch (error.code) {
           case 'auth/invalid-email':
@@ -122,6 +131,9 @@ export default function LoginPage() {
       setIsLoading(false);
     }
   };
+
+  // If still loading auth state, show nothing
+  if (loading) return null;
 
   return (
     <Box
@@ -251,7 +263,7 @@ export default function LoginPage() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  disabled={loading}
+                  disabled={isLoading}
                 />
 
                 <TextField
@@ -260,7 +272,7 @@ export default function LoginPage() {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  disabled={loading}
+                  disabled={isLoading}
                   InputProps={{
                     endAdornment: (
                       <InputAdornment position="end">
@@ -279,7 +291,7 @@ export default function LoginPage() {
                   fullWidth
                   type="submit"
                   variant="contained"
-                  disabled={loading}
+                  disabled={isLoading}
                 >
                   Sign In
                 </Button>
@@ -293,7 +305,7 @@ export default function LoginPage() {
               variant="outlined"
               startIcon={<GoogleIcon />}
               onClick={handleGoogleSignIn}
-              disabled={loading}
+              disabled={isLoading}
             >
               Sign in with Google
             </Button>

@@ -307,6 +307,11 @@ const ProjectCard = ({ project }) => {
 
 // Task Card
 const TaskCard = ({ task, onStatusChange }) => {
+  // Filter out completed tasks
+  if (task.status === 'done' || task.status === 'completed') {
+    return null;
+  }
+
   const [anchorEl, setAnchorEl] = useState(null);
   const [showProgressDialog, setShowProgressDialog] = useState(false);
   const [progress, setProgress] = useState(task.progress || 0);
@@ -1723,51 +1728,54 @@ export const EmployeeDashboard = () => {
                           Latest Tasks
                         </Typography>
                         <List>
-                          {tasks.slice(0, 3).map((task) => (
-                            <ListItem key={task.id} disablePadding>
-                              <ListItemButton>
-                                <ListItemIcon>
-                                  <TaskIcon color={task.status === 'done' ? 'success' : 'action'} />
-                                </ListItemIcon>
-                                <ListItemText 
-                                  primary={task.title}
-                                  secondary={
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                                      {task.dueDate && (
-                                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                          <TimeIcon fontSize="small" />
-                                          Due: {
-                                            task.dueDate instanceof Date 
-                                              ? format(task.dueDate, 'MMM d, yyyy')
-                                              : task.dueDate?.toDate 
-                                                ? format(task.dueDate.toDate(), 'MMM d, yyyy')
-                                                : task.dueDate 
-                                                  ? format(new Date(task.dueDate), 'MMM d, yyyy')
-                                                  : 'No due date'
-                                          }
-                                        </Typography>
-                                      )}
-                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        <Typography variant="caption" color="text.secondary">
-                                          Progress: {task.progress || 0}%
-                                        </Typography>
-                                        <LinearProgress 
-                                          variant="determinate" 
-                                          value={task.progress || 0}
-                                          sx={{ flexGrow: 1, height: 4, borderRadius: 1 }}
-                                        />
+                          {tasks
+                            .filter(task => !['done', 'completed'].includes(task.status))
+                            .slice(0, 3)
+                            .map((task) => (
+                              <ListItem key={task.id} disablePadding>
+                                <ListItemButton>
+                                  <ListItemIcon>
+                                    <TaskIcon color={task.status === 'done' ? 'success' : 'action'} />
+                                  </ListItemIcon>
+                                  <ListItemText 
+                                    primary={task.title}
+                                    secondary={
+                                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                        {task.dueDate && (
+                                          <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                            <TimeIcon fontSize="small" />
+                                            Due: {
+                                              task.dueDate instanceof Date 
+                                                ? format(task.dueDate, 'MMM d, yyyy')
+                                                : task.dueDate?.toDate 
+                                                  ? format(task.dueDate.toDate(), 'MMM d, yyyy')
+                                                  : task.dueDate 
+                                                    ? format(new Date(task.dueDate), 'MMM d, yyyy')
+                                                    : 'No due date'
+                                            }
+                                          </Typography>
+                                        )}
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                          <Typography variant="caption" color="text.secondary">
+                                            Progress: {task.progress || 0}%
+                                          </Typography>
+                                          <LinearProgress 
+                                            variant="determinate" 
+                                            value={task.progress || 0}
+                                            sx={{ flexGrow: 1, height: 4, borderRadius: 1 }}
+                                          />
+                                        </Box>
+                                        {task.latestComment && (
+                                          <Typography variant="caption" color="text.secondary">
+                                            Latest: {task.latestComment.text} - {task.latestComment.userName} ({format(task.latestComment.timestamp.toDate(), 'MMM d, HH:mm')})
+                                          </Typography>
+                                        )}
                                       </Box>
-                                      {task.latestComment && (
-                                        <Typography variant="caption" color="text.secondary">
-                                          Latest: {task.latestComment.text} - {task.latestComment.userName} ({format(task.latestComment.timestamp.toDate(), 'MMM d, HH:mm')})
-                                        </Typography>
-                                      )}
-                                    </Box>
-                                  }
-                                />
-                              </ListItemButton>
-                            </ListItem>
-                          ))}
+                                    }
+                                  />
+                                </ListItemButton>
+                              </ListItem>
+                            ))}
                         </List>
                       </CardContent>
                     </Card>
@@ -1817,7 +1825,9 @@ export const EmployeeDashboard = () => {
               </Button>
             </Box>
             <Grid container spacing={2}>
-              {departmentProjects.map((project) => (
+              {departmentProjects
+                .filter(project => project.status !== 'completed' && project.status !== 'done')
+                .map((project) => (
                 <Grid item xs={12} md={6} key={project.id}>
                   <ProjectCard project={project} />
                 </Grid>
@@ -1847,7 +1857,9 @@ export const EmployeeDashboard = () => {
                 }
               }}
             >
-              {tasks.map((task) => (
+              {tasks
+                .filter(task => !task.completed && task.status !== 'done' && task.status !== 'completed')
+                .map((task) => (
                 <Box
                   key={task.id}
                   sx={{

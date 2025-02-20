@@ -18,7 +18,7 @@ export default function Message({ message, isOwnMessage }: MessageProps) {
         display: 'flex',
         flexDirection: isOwnMessage ? 'row-reverse' : 'row',
         gap: 1,
-        mb: 2,
+        mb: 3,
         '&:hover': {
           '& .message-actions': {
             opacity: 1,

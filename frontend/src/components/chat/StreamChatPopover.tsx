@@ -4403,11 +4403,12 @@ const StreamChatPopover: React.FC = () => {
               }}>
                 {/* Messages Area */}
                 <Box sx={{ 
-                  flex: 1,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  height: '100%',
-                  position: 'relative'
+                  flex: 1, 
+                  overflow: 'auto', 
+                  p: 2, 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: 2.5 
                 }}>
                   {/* Chat Header */}
                   <Box sx={{ 
@@ -4559,6 +4560,7 @@ const StreamChatPopover: React.FC = () => {
                           '&:hover .message-actions': {
                             opacity: 1,
                           },
+                          mb: 3 // Added margin bottom
                         }}
                       >
                         <Box

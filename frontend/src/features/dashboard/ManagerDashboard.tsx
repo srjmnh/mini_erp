@@ -1254,7 +1254,32 @@ export default function ManagerDashboard() {
                     ) : error ? (
                       <Typography color="error">{error}</Typography>
                     ) : (
-                      <TaskView userId={user?.uid || ''} isDepartmentView={true} />
+                      <Box sx={{ mt: 2 }}>
+                        <TaskView 
+                          userId={user?.uid || ''} 
+                          isDepartmentView={true}
+                          departmentId={department?.id}
+                          customTaskFilter={(tasks) => {
+                            const todoTasks = tasks.filter(task => 
+                              !task.completed && 
+                              task.status !== 'done' && 
+                              (!task.progress || task.progress === 0)
+                            );
+                            
+                            const inProgressTasks = tasks.filter(task => 
+                              !task.completed && 
+                              task.status !== 'done' && 
+                              task.progress > 0 && 
+                              task.progress < 100
+                            );
+
+                            return {
+                              todo: todoTasks,
+                              inProgress: inProgressTasks
+                            };
+                          }}
+                        />
+                      </Box>
                     )}
                   </Paper>
                 </Grid>

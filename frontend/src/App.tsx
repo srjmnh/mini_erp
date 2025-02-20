@@ -29,9 +29,10 @@ import { AuthProvider } from './contexts/AuthContext';
 import { FirestoreProvider } from './contexts/FirestoreContext';
 import { ProjectProvider } from './contexts/ProjectContext';
 import { SupabaseProvider } from './contexts/SupabaseContext';
-import { SnackbarProvider } from './contexts/SnackbarContext';
+import { SnackbarProvider } from 'notistack';
 import { ChatProvider } from './contexts/ChatContext';
 import NotificationManager from './components/chat/NotificationManager';
+import { useAuth } from '@/contexts/AuthContext';
 
 import theme from './theme';
 import StreamChatPopover from '@/components/chat/StreamChatPopover';
@@ -49,77 +50,79 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <ThemeProvider theme={theme}>
-      <LocalizationProvider dateAdapter={AdapterDateFns}>
-        <QueryClientProvider client={queryClient}>
-          <SnackbarProvider>
-            <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-              <AuthProvider>
-                <SupabaseProvider>
-                  <FirestoreProvider>
-                    <ProjectProvider>
-                      <ChatProvider>
-                        <CssBaseline />
-                        <Router>
-                          <Routes>
-                            {/* Public Routes */}
-                            <Route path="/login" element={<LoginPage />} />
-                            
-                            {/* Protected Routes */}
-                            <Route path="/" element={<RequireAuth><DashboardLayout /></RequireAuth>}>
-                              <Route index element={<Navigate to="/dashboard" replace />} />
-                              <Route path="dashboard" element={<DashboardPage />} />
-                              <Route path="projects" element={<ProjectsPage />} />
-                              <Route path="projects/:id" element={<ProjectDashboard />} />
-                              <Route path="employees" element={<EmployeesPage />} />
-                              <Route path="employees/:id" element={<EmployeeProfile />} />
-                              <Route path="departments" element={<DepartmentsPage />} />
-                              <Route path="departments/:id" element={<DepartmentDetailsPage />} />
-                              <Route path="documents" element={<DocumentsPage />} />
-                              <Route path="calendar" element={<CalendarPage />} />
-                              <Route path="requests" element={<RequestsPage />} />
-                              <Route path="hr/*" element={<HRRoutes />} />
-                              <Route path="clients/*" element={<ClientRoutes />} />
-                              <Route path="timesheet/*" element={<TimesheetRoutes />} />
-                              <Route path="settings" element={<SettingsPage />} />
-                            </Route>
+      <CssBaseline />
+      <QueryClientProvider client={queryClient}>
+        <LocalizationProvider dateAdapter={AdapterDateFns}>
+          <SnackbarProvider maxSnack={3} anchorOrigin={{ vertical: 'top', horizontal: 'right' }}>
+            <AuthProvider>
+              <SupabaseProvider>
+                <FirestoreProvider>
+                  <ProjectProvider>
+                    <ChatProvider>
+                      <Router>
+                        <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+                          <DashboardLayout>
+                            <Routes>
+                              {/* Public route - always accessible */}
+                              <Route path="/login" element={<LoginPage />} />
 
-                            {/* Add Expense Management Route */}
-                            <Route
-                              path="/expenses"
-                              element={
-                                <RequireAuth>
-                                  <DashboardLayout>
-                                    <ExpensePage />
-                                  </DashboardLayout>
-                                </RequireAuth>
-                              }
-                            />
-                          </Routes>
-                        </Router>
-                        {/* Floating buttons container */}
-                        <Box
-                          sx={{
-                            position: 'fixed',
-                            bottom: 16,
-                            right: 16,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 2,
-                            zIndex: 1300,
-                          }}
-                        >
-                          <StreamChatPopover />
-                          <NotificationManager />
+                              {/* Protected routes */}
+                              <Route
+                                path="/*"
+                                element={
+                                  <RequireAuth>
+                                    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+                                      <Routes>
+                                        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                                        <Route path="dashboard" element={<DashboardPage />} />
+                                        <Route path="projects" element={<ProjectsPage />} />
+                                        <Route path="projects/:id" element={<ProjectDashboard />} />
+                                        <Route path="employees" element={<EmployeesPage />} />
+                                        <Route path="employees/:id" element={<EmployeeProfile />} />
+                                        <Route path="departments" element={<DepartmentsPage />} />
+                                        <Route path="departments/:id" element={<DepartmentDetailsPage />} />
+                                        <Route path="documents" element={<DocumentsPage />} />
+                                        <Route path="calendar" element={<CalendarPage />} />
+                                        <Route path="requests" element={<RequestsPage />} />
+                                        <Route path="hr/*" element={<HRRoutes />} />
+                                        <Route path="clients/*" element={<ClientRoutes />} />
+                                        <Route path="timesheet/*" element={<TimesheetRoutes />} />
+                                        <Route path="settings" element={<SettingsPage />} />
+                                        <Route path="expenses" element={<ExpensePage />} />
+                                        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                                      </Routes>
+
+                                      {/* Floating buttons container */}
+                                      <Box
+                                        sx={{
+                                          position: 'fixed',
+                                          bottom: 16,
+                                          right: 16,
+                                          display: 'flex',
+                                          flexDirection: 'column',
+                                          gap: 2,
+                                          zIndex: 1300,
+                                        }}
+                                      >
+                                        <StreamChatPopover />
+                                        <NotificationManager />
+                                      </Box>
+                                    </Box>
+                                  </RequireAuth>
+                                }
+                              />
+                            </Routes>
+                          </DashboardLayout>
                         </Box>
-                      </ChatProvider>
-                    </ProjectProvider>
-                  </FirestoreProvider>
-                </SupabaseProvider>
-              </AuthProvider>
-            </Box>
+                      </Router>
+                    </ChatProvider>
+                  </ProjectProvider>
+                </FirestoreProvider>
+              </SupabaseProvider>
+            </AuthProvider>
           </SnackbarProvider>
-        </QueryClientProvider>
-      </LocalizationProvider>
+        </LocalizationProvider>
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }
