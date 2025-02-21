@@ -1,50 +1,89 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { format } from 'date-fns';
 import {
-  Box,
   Container,
-  Grid,
-  Card,
-  CardContent,
+  Box,
   Typography,
+  Stack,
   Button,
   IconButton,
-  Stack,
-  Divider,
+  Card,
+  CardContent,
+  Grid,
   Avatar,
-  LinearProgress,
+  Skeleton,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   TextField,
+  TableContainer,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  Paper,
+  ToggleButtonGroup,
+  ToggleButton,
+  InputAdornment,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
+  Breadcrumbs,
+  Link,
+  CircularProgress,
   useTheme,
   alpha,
-  CircularProgress,
 } from '@mui/material';
 import {
+  LoadingButton
+} from '@mui/lab';
+import {
+  Folder as FolderIcon,
+  ArrowBack as ArrowBackIcon,
   Upload as UploadIcon,
   CreateNewFolder as NewFolderIcon,
+  GridView as GridViewIcon,
+  ViewList as ListViewIcon,
+  MoreVert as MoreVertIcon,
+  PictureAsPdf as PictureAsPdfIcon,
+  Description as DescriptionIcon,
+  Image as ImageIcon,
+  InsertDriveFile as FileIcon,
+  Share as ShareIcon,
+  Download as DownloadIcon,
+  Close as CloseIcon,
+  Delete as DeleteIcon,
   Business as DepartmentIcon,
   People as EmployeesIcon,
-  Folder as FolderIcon,
   Search as SearchIcon,
-  CloudUpload as CloudUploadIcon,
-  ArrowForward as ArrowForwardIcon,
-  ArrowBack as ArrowBackIcon,
-  Download as DownloadIcon,
-  Delete as DeleteIcon,
-  Share as ShareIcon,
-  Description as DocumentIcon,
-  Image as ImageIcon,
-  PictureAsPdf as PdfIcon,
-  InsertDriveFile as DefaultFileIcon,
-  Add as AddIcon,
+  TextSnippet as TextIcon,
+  Code as CodeIcon,
+  VideoLibrary as VideoIcon,
+  AudioFile as AudioIcon,
 } from '@mui/icons-material';
 import { useFirestore } from '@/contexts/FirestoreContext';
 import { useSupabase } from '@/contexts/SupabaseContext';
-import { LoadingButton } from '@mui/lab';
 import { useSnackbar } from '@/contexts/SnackbarContext';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '../../hooks/useAuth';
+import { DepartmentView } from './components/DepartmentView';
+import { EmployeeView } from './components/EmployeeView';
+import { Worker } from '@react-pdf-viewer/core';
+import { Viewer } from '@react-pdf-viewer/core';
+import '@react-pdf-viewer/core/lib/styles/index.css';
+import '@react-pdf-viewer/default-layout/lib/styles/index.css';
+import DocViewer, { DocViewerRenderers } from "@cyntler/react-doc-viewer";
+import { pdfjs } from 'react-pdf';
+import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
+import 'react-pdf/dist/esm/Page/TextLayer.css';
+
+// Initialize PDF.js worker
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.js',
+  import.meta.url,
+).toString();
 
 interface FileItem {
   id: string;
@@ -52,858 +91,1409 @@ interface FileItem {
   type: string;
   size: number;
   path: string;
+  storage_path: string;
   created_at: string;
   updated_at: string;
   created_by?: string;
   isFolder?: boolean;
+  documentCount?: number;
 }
 
-const formatFileSize = (size: number) => {
-  if (size < 1024) return size + ' B';
-  if (size < 1024 * 1024) return (size / 1024).toFixed(2) + ' KB';
-  if (size < 1024 * 1024 * 1024) return (size / (1024 * 1024)).toFixed(2) + ' MB';
-  return (size / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+const formatFileSize = (bytes: number) => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 };
+
+const isValidFileName = (name: string): boolean => {
+  // Skip temporary files, system files, and raw cache files
+  const invalidPatterns = [
+    /^\./,  // Hidden files
+    /^[0-9]{8,}-/, // Timestamp prefixed files
+    /^gen-lang-client-/, // Generated language files
+    /^ud[0-9a-f]{6,}\.webp$/, // Generated image files
+    /\.folder$/, // Folder marker files
+    /\.tmp$/, // Temporary files
+    /\.cache$/ // Cache files
+  ];
+  
+  return !invalidPatterns.some(pattern => pattern.test(name));
+};
+
+const sections = [
+  {
+    id: 'departments',
+    title: 'Departments',
+    description: 'Access and manage department-specific documents and files',
+    icon: <DepartmentIcon />,
+    color: '#2196f3',
+  },
+  {
+    id: 'employees',
+    title: 'Employees',
+    description: 'View and manage employee documents, contracts, and personal files',
+    icon: <EmployeesIcon />,
+    color: '#4caf50',
+  },
+  {
+    id: 'general',
+    title: 'Personal Drive',
+    description: 'Your private workspace for managing personal files and documents',
+    icon: <DescriptionIcon />,
+    color: '#ff9800',
+  },
+];
 
 export default function DocumentsPage() {
   const theme = useTheme();
-  const { departments, employees } = useFirestore();
-  const { supabase, customFolders, fetchCustomFolders, getDocumentCount, syncStorageWithDatabase } = useSupabase();
+  const { supabase } = useSupabase();
+  const { user } = useAuth(); // Use the auth hook instead
   const { showSnackbar } = useSnackbar();
-  const { user } = useAuth();
-  const [currentSection, setCurrentSection] = useState<string | null>(null);
-  const [currentPath, setCurrentPath] = useState<string[]>([]);
-  const [openNewFolder, setOpenNewFolder] = useState(false);
-  const [openUpload, setOpenUpload] = useState(false);
   const [files, setFiles] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [currentPath, setCurrentPath] = useState<string[]>([]);
   const [newFolderName, setNewFolderName] = useState('');
-  const [sectionItems, setSectionItems] = useState<any[]>([]);
+  const [newFolderDialogOpen, setNewFolderDialogOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [selectedFileForShare, setSelectedFileForShare] = useState<FileItem | null>(null);
+  const [shareUrl, setShareUrl] = useState('');
+  const [showCopiedToast, setShowCopiedToast] = useState(false);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const isMounted = useRef(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const loadSectionItems = async () => {
-      const deptItems = await Promise.all(departments.map(async dept => ({
-        id: dept.id,
-        name: dept.name,
-        documentCount: await getDocumentCount(`departments/${dept.id}`),
-        type: 'department'
-      })));
-
-      const empItems = await Promise.all(employees.map(async emp => ({
-        id: emp.id,
-        name: emp.name || 'Unnamed Employee',
-        documentCount: await getDocumentCount(`employees/${emp.id}`),
-        photoUrl: emp.photoUrl,
-        type: 'employee'
-      })));
-
-      setSectionItems([...deptItems, ...empItems]);
-    };
-
-    loadSectionItems();
-  }, [departments, employees]);
-
-  useEffect(() => {
-    if (currentPath.length > 0) {
-      fetchFiles();
-    }
-  }, [currentPath]);
-
-  useEffect(() => {
-    if (currentPath.length === 0 && !currentSection) {
-      fetchFiles();
-    }
-  }, [currentPath, currentSection]);
-
-  const fetchFiles = async () => {
+  // Add useCallback to prevent recreation of functions
+  const fetchFiles = useCallback(async () => {
     try {
       setLoading(true);
-      let folderPath = '';
-
-      if (currentPath.length === 0) {
-        // Fetch from root/general directory
-        folderPath = 'general';
-      } else {
-        // Join the path parts correctly
-        folderPath = currentPath.join('/');
-      }
+      let path = currentPath.join('/');
       
-      console.log('Fetching files from path:', folderPath);
-      console.log('Current path state:', { currentPath, currentSection });
+      // If we're in personal drive, only show user files
+      if (currentPath[0] === 'personal') {
+        // Check if user is authenticated
+        if (!user) {
+          showSnackbar('Please sign in to view your personal drive', 'error');
+          setFiles([]);
+          return;
+        }
+        
+        const { data: userFiles, error } = await supabase.storage
+          .from('documents')
+          .list(`personal/${user.id}/${currentPath.slice(1).join('/')}`);
 
-      // Get files from storage to identify folders
-      const { data: storageItems, error: storageError } = await supabase.storage
-        .from('documents')
-        .list(folderPath);
+        if (error) throw error;
 
-      if (storageError) {
-        console.error('Storage error:', storageError);
-        throw storageError;
+        // Process files and folders
+        const processedFiles = await Promise.all((userFiles || []).map(async (item) => {
+          // Skip .keep files
+          if (item.name === '.keep') return null;
+          
+          // Check if item is a folder by checking if it has no mimetype or is a directory
+          const isFolder = !item.metadata?.mimetype || item.metadata?.isDir;
+          
+          if (isFolder) {
+            const folderPath = [...currentPath, item.name].join('/');
+            const { data: folderContents } = await supabase.storage
+              .from('documents')
+              .list(folderPath);
+            
+            // Filter out .keep and .folder files from count
+            const documentCount = (folderContents || [])
+              .filter(f => !f.name.startsWith('.'))  // Exclude all hidden files
+              .filter(f => f.metadata?.mimetype)     // Only count actual files
+              .length;
+            
+            return {
+              id: item.id || item.name,
+              name: item.name,
+              type: 'folder',
+              size: 0,
+              documentCount,
+              createdAt: item.created_at,
+              isFolder: true
+            };
+          }
+
+          // Regular file
+          return {
+            id: item.id || item.name,
+            name: item.name,
+            size: item.metadata?.size || 0,
+            type: item.metadata?.mimetype,
+            createdAt: item.created_at,
+            isFolder: false
+          };
+        }));
+
+        // Sort: folders first, then files alphabetically
+        const sortedFiles = processedFiles
+          .filter(Boolean) // Remove null entries
+          .filter(item => !item.name.startsWith('.')) // Remove all hidden files
+          .sort((a, b) => {
+            if (a.isFolder !== b.isFolder) {
+              return a.isFolder ? -1 : 1;
+            }
+            return a.name.localeCompare(b.name);
+          });
+
+        setFiles(sortedFiles);
+        return;
       }
 
-      console.log('Raw storage items:', storageItems);
+      // For other sections, use existing logic
+      const { data, error } = await supabase.storage
+        .from('documents')
+        .list(path);
 
-      // First, identify all folders by looking for .folder files
-      const folderNames = new Set(
-        (storageItems || [])
-          .filter(item => item.name.endsWith('.folder'))
-          .map(item => item.name.replace('.folder', ''))
-      );
+      if (error) throw error;
 
-      console.log('Identified folders:', folderNames);
-
-      // Then process all items, marking them as folders if their name matches a folder
-      const processedItems = (storageItems || [])
-        .filter(item => !item.name.endsWith('.folder')) // Filter out .folder files
-        .map(item => {
-          const isFolder = folderNames.has(item.name);
+      // Process files and folders
+      const processedFiles = await Promise.all((data || []).map(async (item) => {
+        // Skip .keep files
+        if (item.name === '.keep') return null;
+        
+        // Check if item is a folder by checking if it has no mimetype or is a directory
+        const isFolder = !item.metadata?.mimetype || item.metadata?.isDir;
+        
+        if (isFolder) {
+          const folderPath = [...currentPath, item.name].join('/');
+          const { data: folderContents } = await supabase.storage
+            .from('documents')
+            .list(folderPath);
+          
+          // Filter out .keep and .folder files from count
+          const documentCount = (folderContents || [])
+            .filter(f => !f.name.startsWith('.'))  // Exclude all hidden files
+            .filter(f => f.metadata?.mimetype)     // Only count actual files
+            .length;
+          
           return {
-            id: item.id,
+            id: item.id || item.name,
             name: item.name,
-            type: isFolder ? 'folder' : (item.metadata?.mimetype || 'application/octet-stream'),
-            size: isFolder ? 0 : (item.metadata?.size || 0),
-            path: `${folderPath}/${item.name}`,
-            created_at: item.created_at,
-            updated_at: item.created_at,
-            isFolder
-          };
-        });
-
-      // Add folders that don't have any files yet
-      folderNames.forEach(folderName => {
-        if (!processedItems.some(item => item.name === folderName)) {
-          processedItems.push({
-            id: folderName,
-            name: folderName,
             type: 'folder',
             size: 0,
-            path: `${folderPath}/${folderName}`,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
+            documentCount,
+            createdAt: item.created_at,
             isFolder: true
-          });
+          };
         }
-      });
 
-      console.log('Final processed items:', processedItems);
-      setFiles(processedItems);
+        // Regular file
+        return {
+          id: item.id || item.name,
+          name: item.name,
+          size: item.metadata?.size || 0,
+          type: item.metadata?.mimetype,
+          createdAt: item.created_at,
+          isFolder: false
+        };
+      }));
+
+      // Sort: folders first, then files alphabetically
+      const sortedFiles = processedFiles
+        .filter(Boolean) // Remove null entries
+        .filter(item => !item.name.startsWith('.')) // Remove all hidden files
+        .sort((a, b) => {
+          if (a.isFolder !== b.isFolder) {
+            return a.isFolder ? -1 : 1;
+          }
+          return a.name.localeCompare(b.name);
+        });
+
+      setFiles(sortedFiles);
     } catch (error) {
       console.error('Error fetching files:', error);
-      showSnackbar('Failed to fetch files', 'error');
+      if (error instanceof Error) {
+        showSnackbar(error.message, 'error');
+      } else {
+        showSnackbar('Failed to fetch files', 'error');
+      }
+      setFiles([]);
     } finally {
       setLoading(false);
     }
+  }, [currentPath, supabase, user, showSnackbar]);
+
+  // Single storage verification on mount
+  useEffect(() => {
+    const verifyStorage = async () => {
+      try {
+        const { data, error } = await supabase.storage
+          .from('documents')
+          .list('');
+
+        if (error) throw error;
+        
+        // Only fetch files if storage is accessible
+        fetchFiles();
+      } catch (error) {
+        console.error('Storage verification failed:', error);
+        showSnackbar('Error connecting to storage', 'error');
+      }
+    };
+
+    verifyStorage();
+  }, [supabase, fetchFiles, showSnackbar]);
+
+  // Debounced file fetching when path changes
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      fetchFiles();
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [currentPath, fetchFiles]);
+
+  const getFolderStats = async (folderPath: string) => {
+    try {
+      const { data: folderContents, error } = await supabase.storage
+        .from('documents')
+        .list(folderPath);
+
+      if (error) throw error;
+
+      // Filter out the .folder file and count actual documents
+      const documentCount = folderContents?.filter(item => !item.name.endsWith('.folder')).length || 0;
+      
+      return { documentCount };
+    } catch (error) {
+      console.error('Error getting folder stats:', error);
+      return { documentCount: 0 };
+    }
   };
 
-  const handleFolderClick = async (sectionId: string | null, itemId: string) => {
-    console.log('Folder click:', { sectionId, itemId, currentPath });
-    
-    if (currentPath.length === 0) {
-      // Clicking folder in root directory
-      setCurrentSection('custom');
-      setCurrentPath(['general', itemId]);
-    } else {
-      setCurrentSection(sectionId);
-      setCurrentPath([...currentPath, itemId]);
-    }
+  const generateThumbnail = async (file: File | Blob): Promise<string> => {
+    try {
+      if (!file) {
+        console.error('No file received');
+        return '';
+      }
 
-    console.log('New path:', [...currentPath, itemId]);
+      // Handle both File and Blob objects
+      const blob = file instanceof File ? file : file;
+      
+      // Ensure we have an image type
+      const type = blob.type || '';
+      if (!type.startsWith('image/')) {
+        console.log('Unsupported file type for thumbnail:', type);
+        return '';
+      }
+
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            resolve(reader.result);
+          } else {
+            reject(new Error('FileReader result is not a string'));
+          }
+        };
+        
+        reader.onerror = (error) => {
+          console.error('Error reading file:', error);
+          reject(new Error('Failed to read file'));
+        };
+        
+        reader.readAsDataURL(blob);
+      }).catch(error => {
+        console.error('Error generating thumbnail:', error);
+        return '';
+      });
+    } catch (error) {
+      console.error('Error in generateThumbnail:', error);
+      return '';
+    }
+  };
+
+  useEffect(() => {
+    const fetchThumbnails = async () => {
+      for (const file of files) {
+        // Only try to generate thumbnails for image files
+        if (
+          file.type?.startsWith('image/') &&
+          !thumbnails[file.name] &&
+          !file.isFolder
+        ) {
+          try {
+            // Get the correct storage path based on current section
+            let storagePath;
+            if (currentPath[0] === 'personal') {
+              // For personal drive, include user ID in the path
+              storagePath = `personal/${user?.id}/${currentPath.slice(1).join('/')}/${file.name}`;
+            } else {
+              // For other sections (departments, employees), use path as is
+              storagePath = `${currentPath.join('/')}/${file.name}`;
+            }
+
+            // First get a public URL to verify the file exists
+            const { data: { publicUrl }, error: urlError } = await supabase.storage
+              .from('documents')
+              .getPublicUrl(storagePath);
+
+            if (urlError || !publicUrl) {
+              console.error(`Error getting public URL for ${file.name}:`, urlError);
+              continue;
+            }
+
+            // Now download the file
+            const { data, error } = await supabase.storage
+              .from('documents')
+              .download(storagePath);
+
+            if (error) {
+              console.error(`Error downloading ${file.name}:`, error);
+              continue;
+            }
+
+            if (!data) {
+              console.log(`No data received for ${file.name}`);
+              continue;
+            }
+
+            // Create a new Blob with the correct type
+            const imageBlob = new Blob([data], { type: file.type });
+            const thumbnail = await generateThumbnail(imageBlob);
+            
+            if (thumbnail) {
+              setThumbnails(prev => ({ ...prev, [file.name]: thumbnail }));
+            }
+          } catch (error) {
+            console.error(`Error processing thumbnail for ${file.name}:`, error);
+            // Don't show error to user since thumbnails are not critical
+          }
+        }
+      }
+    };
+
+    if (files.length > 0 && user?.id) {
+      fetchThumbnails();
+    }
+  }, [files, currentPath, user?.id]);
+
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const files = event.target.files;
+      if (!files || files.length === 0) return;
+      
+      setUploading(true);
+      
+      for (const file of Array.from(files)) {
+        const filePath = currentPath[0] === 'personal'
+          ? `personal/${user?.id}/${currentPath.slice(1).join('/')}/${file.name}`
+          : `${currentPath.join('/')}/${file.name}`;
+
+        const { error } = await supabase.storage
+          .from('documents')
+          .upload(filePath, file);
+
+        if (error) throw error;
+      }
+
+      showSnackbar('Files uploaded successfully', 'success');
+      fetchFiles();
+    } catch (error) {
+      console.error('Error uploading files:', error);
+      showSnackbar('Failed to upload files', 'error');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return;
+
+    try {
+      setCreatingFolder(true);
+      
+      // Create folder path based on section
+      let folderPath;
+      if (currentPath[0] === 'personal') {
+        // For personal drive, include user ID in the path
+        folderPath = `personal/${user.id}/${currentPath.slice(1).join('/')}/${newFolderName}/.keep`;
+      } else {
+        // For other sections (departments, employees), use path as is
+        folderPath = `${currentPath.join('/')}/${newFolderName}/.keep`;
+      }
+
+      // Create an empty file to mark this as a folder
+      const { error } = await supabase.storage
+        .from('documents')
+        .upload(folderPath, new Blob([]));
+
+      if (error) throw error;
+
+      setNewFolderName('');
+      setNewFolderDialogOpen(false);
+      showSnackbar('Folder created successfully', 'success');
+      fetchFiles();
+    } catch (error) {
+      console.error('Error creating folder:', error);
+      if (error instanceof Error) {
+        showSnackbar(error.message, 'error');
+      } else {
+        showSnackbar('Failed to create folder', 'error');
+      }
+    } finally {
+      setCreatingFolder(false);
+    }
+  };
+
+  const formatDate = (date: string) => {
+    return format(new Date(date), 'MMM dd, yyyy');
+  };
+
+  const LoadingIndicator = () => (
+    <Box sx={{ 
+      display: 'flex', 
+      justifyContent: 'center',
+      alignItems: 'center',
+      minHeight: '200px'
+    }}>
+      <CircularProgress />
+      <Typography sx={{ ml: 2 }}>Loading files...</Typography>
+    </Box>
+  );
+
+  if (loading) {
+    return <LoadingIndicator />;
+  }
+
+  const handleDepartmentClick = (deptId: string) => {
+    setCurrentPath(['departments', deptId]);
+  };
+
+  const handleEmployeeClick = (empId: string) => {
+    setCurrentPath(['employees', empId]);
+  };
+
+  const handleFolderClick = async (folderName: string) => {
+    setCurrentPath(prev => [...prev, folderName]);
     await fetchFiles();
   };
 
   const handleBack = async () => {
-    console.log('Going back from:', currentPath);
-    if (currentPath.length > 0) {
-      const newPath = currentPath.slice(0, -1);
-      setCurrentPath(newPath);
-      if (newPath.length === 0) {
-        setCurrentSection(null);
-      }
-      await fetchFiles();
-    }
+    setCurrentPath(prev => prev.slice(0, -1));
+    await fetchFiles();
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files?.length) return;
-
-    setUploading(true);
+  const handlePreview = async (file: FileItem) => {
     try {
-      const file = files[0];
-      const storagePath = currentPath.length > 0 
-        ? `${currentPath.join('/')}/${file.name}`
-        : file.name;
+      setPreviewFile(file);
 
-      // Get the current folder path (excluding the file name)
-      const folderPath = currentPath.length > 0 
-        ? currentPath[currentPath.length - 1].split('/')[1] // Get the ID part
-        : '';
-
-      console.log('Uploading file with paths:', {
-        storagePath,
-        folderPath,
-        currentPath,
-        user
-      });
-
-      // Upload file to storage
-      const { error: storageError } = await supabase.storage
-        .from('documents')
-        .upload(storagePath, file);
-
-      if (storageError) throw storageError;
-
-      // Get the public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(storagePath);
-
-      // Store file metadata in database
-      const { error: dbError } = await supabase
-        .from('files')
-        .insert({
-          name: file.name,
-          folder_path: folderPath,
-          type: file.type,
-          size: file.size,
-          storage_path: storagePath,
-          created_by: user?.id // This can be null
-        });
-
-      if (dbError) {
-        console.error('Database error:', dbError);
-        throw dbError;
+      // Get the correct storage path based on current section
+      let storagePath;
+      if (currentPath[0] === 'personal') {
+        // For personal drive, include user ID in the path
+        storagePath = `personal/${user?.id}/${currentPath.slice(1).join('/')}`;
+      } else {
+        // For other sections (departments, employees), use path as is
+        storagePath = currentPath.join('/');
       }
-      
-      showSnackbar('File uploaded successfully', 'success');
-      await fetchFiles();
-      await fetchCustomFolders(); // Refresh folder counts
-    } catch (error) {
-      console.error('Error uploading file:', error);
-      showSnackbar('Failed to upload file', 'error');
-    } finally {
-      setUploading(false);
-      setOpenUpload(false);
-    }
-  };
 
-  const handleDownload = async (file: FileItem) => {
-    try {
+      // Get temporary URL for preview
       const { data, error } = await supabase.storage
         .from('documents')
-        .download(file.path);
+        .createSignedUrl(`${storagePath}/${file.name}`, 3600); // 1 hour expiry
 
-      if (error) throw error;
-
-      const url = window.URL.createObjectURL(data);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = file.name;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error downloading file:', error);
-    }
-  };
-
-  const handleDelete = async (file: FileItem) => {
-    try {
-      // Only allow deletion if user is creator or file has no creator
-      if (file.created_by && file.created_by !== user?.id) {
-        showSnackbar('You do not have permission to delete this file', 'error');
-        return;
+      if (error) {
+        console.error(`Error creating preview URL for ${storagePath}/${file.name}:`, error);
+        throw error;
       }
 
-      // Delete from storage
-      const { error: storageError } = await supabase.storage
-        .from('documents')
-        .remove([file.storage_path]);
+      if (!data?.signedUrl) {
+        throw new Error('No signed URL received from storage');
+      }
 
-      if (storageError) throw storageError;
-
-      // Delete from database
-      const { error: dbError } = await supabase
-        .from('files')
-        .delete()
-        .eq('storage_path', file.storage_path);
-
-      if (dbError) throw dbError;
-      
-      showSnackbar('File deleted successfully', 'success');
-      await fetchFiles();
-      await fetchCustomFolders(); // Refresh folder counts
+      setPreviewUrl(data.signedUrl);
     } catch (error) {
-      console.error('Error deleting file:', error);
-      showSnackbar('Failed to delete file', 'error');
+      console.error('Error generating preview:', error);
+      showSnackbar('Failed to preview file', 'error');
+      setPreviewFile(null);
+      setPreviewUrl(null);
     }
   };
 
-  const getFileIcon = (type: string) => {
-    if (type.startsWith('image/')) return <ImageIcon />;
-    if (type.includes('pdf')) return <PdfIcon />;
-    if (type.includes('document')) return <DocumentIcon />;
-    return <DefaultFileIcon />;
+  const getFilePreviewUrl = async (file: FileItem) => {
+    try {
+      const { data: { publicUrl }, error } = await supabase.storage
+        .from('documents')
+        .getPublicUrl([...currentPath, file.name].join('/'));
+
+      if (error) throw error;
+      return publicUrl;
+    } catch (error) {
+      console.error('Error getting file URL:', error);
+      return null;
+    }
   };
+
+  const getFileIcon = (fileName: string) => {
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+      case 'gif':
+      case 'webp':
+        return <ImageIcon />;
+      case 'pdf':
+        return <PictureAsPdfIcon />;
+      case 'txt':
+      case 'doc':
+      case 'docx':
+        return <TextIcon />;
+      case 'js':
+      case 'ts':
+      case 'jsx':
+      case 'tsx':
+      case 'html':
+      case 'css':
+        return <CodeIcon />;
+      case 'mp4':
+      case 'webm':
+      case 'mov':
+        return <VideoIcon />;
+      case 'mp3':
+      case 'wav':
+      case 'ogg':
+        return <AudioIcon />;
+      default:
+        return <FileIcon />;
+    }
+  };
+
+  const handleShare = async (file: FileItem, event?: React.MouseEvent) => {
+    if (event) {
+      event.stopPropagation(); // Prevent card click
+    }
+    
+    try {
+      const { data } = await supabase.storage
+        .from('documents')
+        .createSignedUrl(
+          [...currentPath, file.name].join('/'),
+          24 * 60 * 60 // 24 hours expiry
+        );
+
+      if (data?.signedUrl) {
+        setShareUrl(data.signedUrl);
+        setSelectedFileForShare(file);
+        setShareDialogOpen(true);
+        // Copy to clipboard
+        await navigator.clipboard.writeText(data.signedUrl);
+        setShowCopiedToast(true);
+        setTimeout(() => setShowCopiedToast(false), 2000);
+      }
+    } catch (error) {
+      console.error('Error generating share link:', error);
+      showSnackbar('Failed to generate share link', 'error');
+    }
+  };
+
+  const handleDownload = async (file: FileItem, event?: React.MouseEvent) => {
+    if (event) {
+      event.stopPropagation(); // Prevent card click
+    }
+    
+    try {
+      // Get the correct storage path based on current section
+      let storagePath;
+      if (currentPath[0] === 'personal') {
+        // For personal drive, include user ID in the path
+        storagePath = `personal/${user?.id}/${currentPath.slice(1).join('/')}`;
+      } else {
+        // For other sections (departments, employees), use path as is
+        storagePath = currentPath.join('/');
+      }
+
+      // Download using the correct path
+      const { data, error } = await supabase.storage
+        .from('documents')
+        .download(`${storagePath}/${file.name}`);
+
+      if (error) {
+        console.error(`Error downloading file from path ${storagePath}/${file.name}:`, error);
+        throw error;
+      }
+
+      if (!data) {
+        throw new Error('No data received from storage');
+      }
+
+      // Create download link
+      const url = window.URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      showSnackbar('File downloaded successfully', 'success');
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      showSnackbar('Failed to download file', 'error');
+    }
+  };
+
+  const renderFileCard = (file: FileItem) => {
+    const isPdf = file.name.toLowerCase().endsWith('.pdf');
+    const hasPreview = thumbnails[file.name] || isPdf;
+
+    return (
+      <Card
+        sx={{
+          height: '100%',
+          cursor: 'pointer',
+          position: 'relative',
+          '&:hover': {
+            bgcolor: alpha(theme.palette.primary.main, 0.04),
+            transform: 'translateY(-2px)',
+            transition: 'all 0.2s',
+            '& .file-actions': {
+              opacity: 1,
+            },
+          },
+        }}
+        onClick={() => handlePreview(file)}
+      >
+        <CardContent>
+          <Stack spacing={2} alignItems="center" textAlign="center">
+            {hasPreview ? (
+              isPdf ? (
+                <Box
+                  sx={{
+                    width: 80,
+                    height: 80,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    bgcolor: alpha(theme.palette.error.main, 0.1),
+                    borderRadius: 2,
+                  }}
+                >
+                  <PictureAsPdfIcon sx={{ fontSize: 40, color: theme.palette.error.main }} />
+                </Box>
+              ) : (
+                <Box
+                  component="img"
+                  src={thumbnails[file.name]}
+                  alt={file.name}
+                  sx={{
+                    width: '100%',
+                    height: 140,
+                    objectFit: 'cover',
+                    borderRadius: 1,
+                  }}
+                />
+              )
+            ) : (
+              <Box
+                sx={{
+                  width: 80,
+                  height: 80,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  bgcolor: alpha(theme.palette.primary.main, 0.1),
+                  borderRadius: 2,
+                }}
+              >
+                {getFileIcon(file.name)}
+              </Box>
+            )}
+            <Box>
+              <Typography variant="subtitle1" noWrap title={file.name}>
+                {file.name}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {formatFileSize(file.size)}
+              </Typography>
+            </Box>
+          </Stack>
+        </CardContent>
+        {/* Action buttons */}
+        <Box
+          className="file-actions"
+          sx={{
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            opacity: 0,
+            transition: 'opacity 0.2s',
+            bgcolor: 'background.paper',
+            borderRadius: 1,
+            boxShadow: 2,
+            display: 'flex',
+            gap: 0.5,
+            p: 0.5,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <IconButton
+            size="small"
+            onClick={(e) => handleShare(file, e)}
+            sx={{ color: 'primary.main' }}
+          >
+            <ShareIcon fontSize="small" />
+          </IconButton>
+          <IconButton
+            size="small"
+            onClick={(e) => handleDownload(file, e)}
+            sx={{ color: 'primary.main' }}
+          >
+            <DownloadIcon fontSize="small" />
+          </IconButton>
+        </Box>
+      </Card>
+    );
+  };
+
+  const renderFolderCard = (folder: FileItem) => (
+    <Card
+      variant="outlined"
+      sx={{
+        cursor: 'pointer',
+        height: '100%',
+        '&:hover': {
+          bgcolor: alpha(theme.palette.primary.main, 0.04),
+          transform: 'translateY(-2px)',
+          transition: 'all 0.2s',
+        },
+      }}
+      onClick={() => handleFolderClick(folder.name)}
+    >
+      <CardContent>
+        <Stack spacing={2} alignItems="center" textAlign="center">
+          <Box
+            sx={{
+              width: 80,
+              height: 80,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: alpha(theme.palette.warning.main, 0.1),
+              borderRadius: 2,
+            }}
+          >
+            <FolderIcon sx={{ fontSize: 48, color: theme.palette.warning.main }} />
+          </Box>
+          <Box>
+            <Typography variant="subtitle1" noWrap title={folder.name}>
+              {folder.name}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {folder.documentCount === 1 
+                ? '1 document' 
+                : `${folder.documentCount || 0} documents`}
+            </Typography>
+          </Box>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
 
   const renderFileGrid = () => {
     if (loading) {
       return (
-        <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-          <CircularProgress />
+        <Grid container spacing={2}>
+          {[...Array(4)].map((_, index) => (
+            <Grid item xs={12} sm={6} md={4} lg={3} key={index}>
+              <Skeleton variant="rectangular" height={200} />
+            </Grid>
+          ))}
+        </Grid>
+      );
+    }
+
+    if (files.length === 0) {
+      return (
+        <Box
+          sx={{
+            height: '70vh',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2,
+          }}
+        >
+          <FolderIcon sx={{ fontSize: 64, color: 'text.secondary', opacity: 0.5 }} />
+          <Typography variant="h6" color="text.secondary">
+            This folder is empty
+          </Typography>
         </Box>
       );
     }
 
-    console.log('Rendering files:', files);
-
     return (
       <Grid container spacing={2}>
-        {files.map((file) => {
-          console.log('Rendering file:', file);
-          return (
-          <Grid item xs={12} sm={6} md={4} key={file.id}>
-            <Card
-              variant="outlined"
-              sx={{
-                cursor: 'pointer',
-                '&:hover': {
-                  borderColor: theme.palette.primary.main,
-                  transform: 'translateY(-2px)',
-                  transition: 'all 0.2s',
-                },
-              }}
-            >
-              <CardContent>
-                <Stack direction="row" spacing={2} alignItems="center">
-                  <Avatar
-                    sx={{
-                      bgcolor: alpha(theme.palette.primary.main, 0.1),
-                      color: theme.palette.primary.main,
-                    }}
-                  >
-                    {file.isFolder ? <FolderIcon /> : getFileIcon(file.type)}
-                  </Avatar>
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="subtitle1" noWrap>
-                      {file.name}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {file.isFolder ? 'Folder' : formatFileSize(file.size)}
-                    </Typography>
-                  </Box>
-                  <Stack direction="row" spacing={1}>
-                    {file.isFolder ? (
-                      <IconButton
-                        size="small"
-                        onClick={() => handleFolderClick(currentSection || 'custom', file.name)}
-                        sx={{
-                          bgcolor: alpha(theme.palette.primary.main, 0.1),
-                          color: theme.palette.primary.main,
-                        }}
-                      >
-                        <ArrowForwardIcon />
-                      </IconButton>
-                    ) : (
-                      <>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleDownload(file)}
-                          sx={{
-                            bgcolor: alpha(theme.palette.primary.main, 0.1),
-                            color: theme.palette.primary.main,
-                          }}
-                        >
-                          <DownloadIcon />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleDelete(file)}
-                          sx={{
-                            bgcolor: alpha(theme.palette.error.main, 0.1),
-                            color: theme.palette.error.main,
-                          }}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </>
-                    )}
-                  </Stack>
-                </Stack>
-              </CardContent>
-            </Card>
+        {files.map((item) => (
+          <Grid item xs={12} sm={6} md={4} lg={3} key={item.id}>
+            {item.isFolder ? renderFolderCard(item) : renderFileCard(item)}
           </Grid>
-        )})}
+        ))}
       </Grid>
     );
   };
 
-  const sections = [
-    {
-      id: 'departments',
-      title: 'Department Documents',
-      description: 'Manage department-specific documents and files',
-      icon: <DepartmentIcon />,
-      color: '#2196f3',
-      items: sectionItems.filter(item => item.type === 'department')
-    },
-    {
-      id: 'employees',
-      title: 'Employee Documents',
-      description: 'Access employee-related documents and records',
-      icon: <EmployeesIcon />,
-      color: '#4caf50',
-      items: sectionItems.filter(item => item.type === 'employee')
-    },
-    {
-      id: 'custom',
-      title: 'General Files',
-      description: 'Custom folders for general file management',
-      icon: <FolderIcon />,
-      color: '#ff9800',
-      items: customFolders.map(folder => ({
-        ...folder,
-        type: 'custom'
-      }))
-    }
-  ];
+  const renderFileList = () => {
+    const renderTableContent = () => {
+      if (loading) {
+        return (
+          <TableBody>
+            {[...Array(4)].map((_, index) => (
+              <TableRow key={index}>
+                <TableCell><Skeleton variant="text" width={200} /></TableCell>
+                <TableCell><Skeleton variant="text" width={100} /></TableCell>
+                <TableCell><Skeleton variant="text" width={100} /></TableCell>
+                <TableCell><Skeleton variant="text" width={50} /></TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        );
+      }
 
-  const renderContent = () => {
-    if (currentPath.length === 0) {
-      // Root view (sections)
+      if (files.length === 0) {
+        return (
+          <TableBody>
+            <TableRow>
+              <TableCell colSpan={4}>
+                <Box
+                  sx={{
+                    p: 4,
+                    textAlign: 'center',
+                    bgcolor: theme.palette.background.paper,
+                  }}
+                >
+                  <Typography variant="h6" color="text.secondary" gutterBottom>
+                    No files found
+                  </Typography>
+                  <Typography color="text.secondary">
+                    Upload files or create folders to get started
+                  </Typography>
+                </Box>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        );
+      }
+
       return (
+        <TableBody>
+          {files.map((file) => (
+            <TableRow
+              key={file.id}
+              hover
+              onClick={() => file.isFolder ? handleFolderClick(file.name) : handlePreview(file)}
+              sx={{ 
+                cursor: 'pointer',
+                '&:hover': {
+                  bgcolor: alpha(theme.palette.primary.main, 0.04),
+                },
+              }}
+            >
+              <TableCell>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  {file.isFolder ? (
+                    <Box
+                      sx={{
+                        width: 32,
+                        height: 32,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        bgcolor: alpha(theme.palette.warning.main, 0.1),
+                        borderRadius: 1,
+                      }}
+                    >
+                      <FolderIcon sx={{ color: theme.palette.warning.main }} />
+                    </Box>
+                  ) : (
+                    <Box
+                      sx={{
+                        width: 32,
+                        height: 32,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        bgcolor: alpha(theme.palette.primary.main, 0.1),
+                        borderRadius: 1,
+                      }}
+                    >
+                      {getFileIcon(file.name)}
+                    </Box>
+                  )}
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: file.isFolder ? 500 : 400 }}>
+                      {file.name}
+                    </Typography>
+                    {file.isFolder && (
+                      <Typography variant="caption" color="text.secondary">
+                        {file.documentCount === 1 ? '1 document' : `${file.documentCount || 0} documents`}
+                      </Typography>
+                    )}
+                  </Box>
+                </Stack>
+              </TableCell>
+              <TableCell>
+                {!file.isFolder && formatFileSize(file.size)}
+              </TableCell>
+              <TableCell>
+                {formatDate(file.createdAt)}
+              </TableCell>
+              <TableCell align="right">
+                {!file.isFolder && (
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAnchorEl(e.currentTarget);
+                      setSelectedFile(file);
+                    }}
+                  >
+                    <MoreVertIcon />
+                  </IconButton>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      );
+    };
+
+    return (
+      <TableContainer component={Paper} variant="outlined">
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Name</TableCell>
+              <TableCell>Size</TableCell>
+              <TableCell>Last Modified</TableCell>
+              <TableCell align="right">Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          {renderTableContent()}
+        </Table>
+      </TableContainer>
+    );
+  };
+
+  const renderPreviewDialog = () => {
+    if (!previewFile || !previewUrl) return null;
+
+    const ext = previewFile.name.split('.').pop()?.toLowerCase();
+    const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '');
+    const isPdf = ext === 'pdf';
+    const isVideo = ['mp4', 'webm', 'mov'].includes(ext || '');
+    const isAudio = ['mp3', 'wav', 'ogg'].includes(ext || '');
+    const isDocument = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'].includes(ext || '');
+
+    return (
+      <Dialog
+        open={Boolean(previewFile)}
+        onClose={() => {
+          setPreviewFile(null);
+          setPreviewUrl(null);
+        }}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" justifyContent="space-between">
+            <Typography variant="h6" component="div">
+              {previewFile.name}
+            </Typography>
+            <Stack direction="row" spacing={1}>
+              <IconButton
+                onClick={async () => {
+                  const response = await fetch(previewUrl);
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = previewFile.name;
+                  a.click();
+                  window.URL.revokeObjectURL(url);
+                  document.body.removeChild(a);
+                }}
+              >
+                <DownloadIcon />
+              </IconButton>
+              <IconButton
+                onClick={() => {
+                  setPreviewFile(null);
+                  setPreviewUrl(null);
+                }}
+              >
+                <CloseIcon />
+              </IconButton>
+            </Stack>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ width: '100%', height: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {isDocument ? (
+              <DocViewer
+                documents={[{ uri: previewUrl }]}
+                pluginRenderers={DocViewerRenderers}
+                style={{ width: '100%', height: '100%' }}
+                config={{
+                  header: {
+                    disableHeader: true,
+                    disableFileName: true,
+                  }
+                }}
+              />
+            ) : isImage ? (
+              <img
+                src={previewUrl}
+                alt={previewFile.name}
+                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+              />
+            ) : isVideo ? (
+              <video
+                src={previewUrl}
+                controls
+                style={{ maxWidth: '100%', maxHeight: '100%' }}
+              />
+            ) : isAudio ? (
+              <audio
+                src={previewUrl}
+                controls
+                style={{ width: '100%' }}
+              />
+            ) : (
+              <Stack alignItems="center" spacing={2}>
+                {getFileIcon(previewFile.name)}
+                <Typography>
+                  This file type cannot be previewed. Click the download button to view it.
+                </Typography>
+              </Stack>
+            )}
+          </Box>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
+  const handleBreadcrumbClick = (index: number) => {
+    // Navigate to the selected path level
+    setCurrentPath(currentPath.slice(0, index));
+    fetchFiles();
+  };
+
+  const renderBreadcrumbs = () => {
+    // Start with Document Center
+    let pathSegments = ['Document Center'];
+    
+    // Add each path segment, maintaining the full hierarchy
+    currentPath.forEach((segment, index) => {
+      if (index === 0 && segment === 'departments') {
+        pathSegments.push('Departments');
+      } else if (index === 0 && segment === 'employees') {
+        pathSegments.push('Employees');
+      } else if (index === 0 && segment === 'personal') {
+        pathSegments.push('Personal Drive');
+      } else {
+        pathSegments.push(segment);
+      }
+    });
+    
+    return (
+      <Breadcrumbs 
+        separator="/"
+        sx={{ 
+          '& .MuiBreadcrumbs-separator': {
+            color: 'text.secondary',
+            mx: 1
+          }
+        }}
+      >
+        {pathSegments.map((segment, index) => {
+          // For the root level (Document Center)
+          if (index === 0) {
+            return (
+              <Link
+                key={segment}
+                component="button"
+                variant="body1"
+                onClick={() => setCurrentPath([])}
+                sx={{ 
+                  cursor: 'pointer',
+                  textDecoration: 'none',
+                  color: currentPath.length === 0 ? theme.palette.text.primary : theme.palette.text.secondary,
+                  '&:hover': {
+                    color: theme.palette.primary.main
+                  }
+                }}
+              >
+                {segment}
+              </Link>
+            );
+          }
+
+          return (
+            <Link
+              key={segment}
+              component="button"
+              variant="body1"
+              onClick={() => handleBreadcrumbClick(index - 1)}
+              sx={{ 
+                cursor: 'pointer',
+                textDecoration: 'none',
+                color: index === pathSegments.length - 1 ? theme.palette.text.primary : theme.palette.text.secondary,
+                '&:hover': {
+                  color: theme.palette.primary.main
+                }
+              }}
+            >
+              {segment}
+            </Link>
+          );
+        })}
+      </Breadcrumbs>
+    );
+  };
+
+  const renderHomeView = () => {
+    const categories = [
+      {
+        id: 'departments',
+        title: 'Departments',
+        description: 'Access and manage department-specific documents and files',
+        icon: <DepartmentIcon />,
+        color: theme.palette.primary.main,
+        path: '/departments'
+      },
+      {
+        id: 'employees',
+        title: 'Employees',
+        description: 'View and manage employee documents, contracts, and personal files',
+        icon: <EmployeesIcon />,
+        color: theme.palette.success.main,
+        path: '/employees'
+      },
+      {
+        id: 'personal',
+        title: 'Personal Drive',
+        description: 'Your private workspace for managing personal files and documents',
+        icon: <FileIcon />,
+        color: theme.palette.warning.main,
+        path: '/personal'
+      }
+    ];
+
+    return (
+      <Box>
+        <Typography variant="h4" gutterBottom sx={{ mb: 4 }}>
+          Document Center
+        </Typography>
+        
+        <Grid container spacing={3}>
+          {categories.map((category) => (
+            <Grid item xs={12} md={4} key={category.id}>
+              <Card 
+                sx={{ 
+                  height: '100%',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease-in-out',
+                  '&:hover': {
+                    transform: 'translateY(-8px)',
+                    boxShadow: theme.shadows[8],
+                    '& .category-icon': {
+                      transform: 'scale(1.1)',
+                      bgcolor: alpha(category.color, 0.2),
+                    }
+                  }
+                }}
+                onClick={() => handleFolderClick(category.id)}
+              >
+                <CardContent>
+                  <Box 
+                    className="category-icon"
+                    sx={{ 
+                      width: 56,
+                      height: 56,
+                      borderRadius: 2,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      bgcolor: alpha(category.color, 0.1),
+                      color: category.color,
+                      mb: 2,
+                      transition: 'all 0.3s ease-in-out',
+                    }}
+                  >
+                    {category.icon}
+                  </Box>
+                  <Typography variant="h6" gutterBottom>
+                    {category.title}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ minHeight: 40 }}>
+                    {category.description}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </Box>
+    );
+  };
+
+  const renderMainSections = () => {
+    return (
+      <>
+        <Typography variant="h5" gutterBottom>
+          Document Center
+        </Typography>
         <Grid container spacing={3}>
           {sections.map((section) => (
-            <Grid item xs={12} key={section.id}>
-              <Card sx={{ boxShadow: theme.shadows[2], '&:hover': { boxShadow: theme.shadows[4] } }}>
+            <Grid item xs={12} sm={6} md={4} key={section.id}>
+              <Card
+                variant="outlined"
+                sx={{
+                  cursor: 'pointer',
+                  '&:hover': {
+                    borderColor: section.color,
+                    transform: 'translateY(-2px)',
+                    transition: 'all 0.2s',
+                  },
+                }}
+                onClick={() => handleFolderClick(section.id)}
+              >
                 <CardContent>
-                  <Stack spacing={3}>
-                    {/* Section Header */}
-                    <Stack direction="row" justifyContent="space-between" alignItems="center">
-                      <Stack direction="row" spacing={2} alignItems="center">
-                        <Avatar sx={{ bgcolor: alpha(section.color, 0.1), color: section.color, width: 48, height: 48 }}>
-                          {section.icon}
-                        </Avatar>
-                        <Box>
-                          <Typography variant="h6" gutterBottom>
-                            {section.title}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            {section.description}
-                          </Typography>
-                        </Box>
-                      </Stack>
-                    </Stack>
-
-                    <Divider />
-
-                    {/* Section Content */}
-                    <Grid container spacing={2}>
-                      {/* Show files and folders for General Files section */}
-                      {section.id === 'custom' && files.map((file) => (
-                        <Grid item xs={12} sm={6} md={4} key={file.id}>
-                          <Card
-                            variant="outlined"
-                            sx={{
-                              cursor: 'pointer',
-                              '&:hover': {
-                                borderColor: section.color,
-                                transform: 'translateY(-2px)',
-                                transition: 'all 0.2s',
-                              },
-                            }}
-                          >
-                            <CardContent>
-                              <Stack direction="row" spacing={2} alignItems="center">
-                                <Avatar
-                                  sx={{
-                                    bgcolor: alpha(section.color, 0.1),
-                                    color: section.color,
-                                  }}
-                                >
-                                  {file.isFolder ? <FolderIcon /> : getFileIcon(file.type)}
-                                </Avatar>
-                                <Box sx={{ flex: 1 }}>
-                                  <Typography variant="subtitle1" noWrap>
-                                    {file.name}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {file.isFolder ? 'Folder' : formatFileSize(file.size)}
-                                  </Typography>
-                                </Box>
-                                <Stack direction="row" spacing={1}>
-                                  {file.isFolder ? (
-                                    <IconButton
-                                      size="small"
-                                      onClick={() => handleFolderClick('custom', file.name)}
-                                      sx={{
-                                        bgcolor: alpha(section.color, 0.1),
-                                        color: section.color,
-                                      }}
-                                    >
-                                      <ArrowForwardIcon />
-                                    </IconButton>
-                                  ) : (
-                                    <>
-                                      <IconButton
-                                        size="small"
-                                        onClick={() => handleDownload(file)}
-                                        sx={{
-                                          bgcolor: alpha(section.color, 0.1),
-                                          color: section.color,
-                                        }}
-                                      >
-                                        <DownloadIcon />
-                                      </IconButton>
-                                      <IconButton
-                                        size="small"
-                                        onClick={() => handleDelete(file)}
-                                        sx={{
-                                          bgcolor: alpha(theme.palette.error.main, 0.1),
-                                          color: theme.palette.error.main,
-                                        }}
-                                      >
-                                        <DeleteIcon />
-                                      </IconButton>
-                                    </>
-                                  )}
-                                </Stack>
-                              </Stack>
-                            </CardContent>
-                          </Card>
-                        </Grid>
-                      ))}
-
-                      {/* Show section items for other sections */}
-                      {section.id !== 'custom' && section.items.map((item) => (
-                        <Grid item xs={12} sm={6} md={4} key={item.id}>
-                          <Card
-                            variant="outlined"
-                            sx={{
-                              cursor: 'pointer',
-                              '&:hover': {
-                                borderColor: section.color,
-                                transform: 'translateY(-2px)',
-                                transition: 'all 0.2s',
-                              },
-                            }}
-                            onClick={() => handleFolderClick(section.id, item.id)}
-                          >
-                            <CardContent>
-                              <Stack direction="row" spacing={2} alignItems="center">
-                                <Avatar sx={{ bgcolor: alpha(section.color, 0.1), color: section.color }}>
-                                  {item.photoUrl ? (
-                                    <img src={item.photoUrl} alt={item.name} style={{ width: '100%', height: '100%' }} />
-                                  ) : (
-                                    <FolderIcon />
-                                  )}
-                                </Avatar>
-                                <Box sx={{ flex: 1 }}>
-                                  <Typography variant="subtitle1" noWrap>
-                                    {item.name}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {item.documentCount} documents
-                                  </Typography>
-                                </Box>
-                                <IconButton
-                                  size="small"
-                                  sx={{
-                                    bgcolor: alpha(section.color, 0.1),
-                                    color: section.color,
-                                    '&:hover': { bgcolor: alpha(section.color, 0.2) },
-                                  }}
-                                >
-                                  <ArrowForwardIcon />
-                                </IconButton>
-                              </Stack>
-                            </CardContent>
-                          </Card>
-                        </Grid>
-                      ))}
-                      
-                      {/* Add New Folder button only in custom section */}
-                      {section.id === 'custom' && (
-                        <Grid item xs={12} sm={6} md={4}>
-                          <Card
-                            variant="outlined"
-                            sx={{
-                              cursor: 'pointer',
-                              height: '100%',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              borderStyle: 'dashed',
-                              '&:hover': {
-                                borderColor: section.color,
-                                transform: 'translateY(-2px)',
-                                transition: 'all 0.2s',
-                              },
-                            }}
-                            onClick={() => setOpenNewFolder(true)}
-                          >
-                            <CardContent>
-                              <Stack spacing={1} alignItems="center">
-                                <Avatar sx={{ bgcolor: alpha(section.color, 0.1), color: section.color }}>
-                                  <AddIcon />
-                                </Avatar>
-                                <Typography variant="subtitle1">New Folder</Typography>
-                              </Stack>
-                            </CardContent>
-                          </Card>
-                        </Grid>
-                      )}
-                    </Grid>
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <Avatar sx={{ bgcolor: alpha(section.color, 0.1), color: section.color }}>
+                      {section.icon}
+                    </Avatar>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="subtitle1">{section.title}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {section.description}
+                      </Typography>
+                    </Box>
                   </Stack>
                 </CardContent>
               </Card>
             </Grid>
           ))}
         </Grid>
-      );
-    } else {
-      // Inside a folder view
-      return (
-        <>
-          {/* Back button and current path */}
-          <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
-            <Button
-              variant="outlined"
-              startIcon={<ArrowBackIcon />}
-              onClick={handleBack}
-            >
-              Back
-            </Button>
-            <Typography variant="subtitle1" color="text.secondary">
-              {currentPath.join(' / ')}
-            </Typography>
-          </Stack>
-
-          {/* Action buttons */}
-          <Stack direction="row" spacing={2} sx={{ mb: 3 }}>
-            <Button
-              variant="outlined"
-              startIcon={<NewFolderIcon />}
-              onClick={() => setOpenNewFolder(true)}
-            >
-              New Folder
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={<UploadIcon />}
-              onClick={() => setOpenUpload(true)}
-            >
-              Upload Files
-            </Button>
-          </Stack>
-
-          {/* Files and folders grid */}
-          {renderFileGrid()}
-        </>
-      );
-    }
+      </>
+    );
   };
 
-  const handleCreateFolder = async () => {
-    if (!newFolderName.trim()) {
-      showSnackbar('Please enter a folder name', 'error');
-      return;
+  const renderContent = () => {
+    // Show main sections if we're at root
+    if (currentPath.length === 0) {
+      return renderHomeView();
     }
 
-    try {
-      setLoading(true);
-      let folderPath = '';
-
-      if (currentPath.length === 0) {
-        // Create general folder if it doesn't exist
-        try {
-          const { error: generalError } = await supabase.storage
-            .from('documents')
-            .upload('general/.folder', new Blob([''], { type: 'text/plain' }), {
-              upsert: true
-            });
-          console.log('General folder creation result:', generalError || 'success');
-        } catch (error) {
-          // Ignore error if folder already exists
-          console.log('General folder might already exist:', error);
-        }
-
-        // Now create the new folder inside general
-        folderPath = `general/${newFolderName}.folder`;
-      } else if (currentSection === 'custom') {
-        folderPath = currentPath.length > 0 
-          ? `${currentPath.join('/')}/${newFolderName}.folder`
-          : `${newFolderName}.folder`;
-      } else if (currentSection === 'departments') {
-        folderPath = `departments/${currentPath[0]}/${newFolderName}.folder`;
-      } else if (currentSection === 'employees') {
-        folderPath = `employees/${currentPath[0]}/${newFolderName}.folder`;
-      }
-
-      console.log('Creating folder at path:', folderPath);
-
-      // Create an empty .folder file to mark this as a folder
-      const { error } = await supabase.storage
-        .from('documents')
-        .upload(folderPath, new Blob([''], { type: 'text/plain' }), {
-          cacheControl: '3600',
-          upsert: true
-        });
-
-      if (error) {
-        console.error('Folder creation error:', error);
-        throw error;
-      }
-
-      console.log('Folder created successfully');
-      showSnackbar('Folder created successfully', 'success');
-      setNewFolderName('');
-      setOpenNewFolder(false);
-      
-      // Refresh the current view
-      await fetchFiles();
-    } catch (error) {
-      console.error('Error creating folder:', error);
-      showSnackbar('Failed to create folder', 'error');
-    } finally {
-      setLoading(false);
+    // Show department view
+    if (currentPath[0] === 'departments' && currentPath.length === 1) {
+      return <DepartmentView onSelectDepartment={(deptId) => setCurrentPath(['departments', deptId])} />;
     }
-  };
 
-  return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Header */}
-      <Stack
-        direction={{ xs: 'column', sm: 'row' }}
-        justifyContent="space-between"
-        alignItems={{ xs: 'stretch', sm: 'center' }}
-        spacing={2}
-        sx={{ mb: 4 }}
-      >
-        <Box>
+    // Show employee view
+    if (currentPath[0] === 'employees' && currentPath.length === 1) {
+      return <EmployeeView 
+        onSelectEmployee={(empId) => setCurrentPath(['employees', empId])}
+        showSnackbar={showSnackbar}
+      />;
+    }
+
+    // Show file grid for specific department/employee/general
+    return (
+      <>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
           <Stack direction="row" spacing={2} alignItems="center">
             {currentPath.length > 0 && (
-              <IconButton onClick={handleBack}>
+              <IconButton onClick={handleBack} size="small">
                 <ArrowBackIcon />
               </IconButton>
             )}
-            <Box>
-              <Typography variant="h4" gutterBottom fontWeight={600}>
-                {currentSection ? sections.find(s => s.id === currentSection)?.title : 'Document Center'}
-              </Typography>
-              <Typography variant="body1" color="text.secondary">
-                {currentPath.length > 0 
-                  ? `Viewing ${currentSection} > ${currentPath[currentPath.length - 1].split('/')[1]}`
-                  : 'Manage and organize all your company documents in one place'}
-              </Typography>
-            </Box>
+            <Typography variant="h6">
+              {currentPath.length === 0 ? 'Document Center' : currentPath[currentPath.length - 1]}
+            </Typography>
           </Stack>
-        </Box>
-        <Stack direction="row" spacing={2}>
-          <Button
-            variant="contained"
-            startIcon={<UploadIcon />}
-            onClick={() => setOpenUpload(true)}
+          <ToggleButtonGroup
+            value={viewMode}
+            exclusive
+            onChange={(e, newMode) => newMode && setViewMode(newMode)}
+            size="small"
           >
-            Upload
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<NewFolderIcon />}
-            onClick={() => setOpenNewFolder(true)}
-          >
-            New Folder
-          </Button>
+            <ToggleButton value="grid">
+              <GridViewIcon />
+            </ToggleButton>
+            <ToggleButton value="list">
+              <ListViewIcon />
+            </ToggleButton>
+          </ToggleButtonGroup>
         </Stack>
-      </Stack>
+        {viewMode === 'grid' ? renderFileGrid() : renderFileList()}
+      </>
+    );
+  };
 
-      {/* Search Bar */}
-      <Card 
-        sx={{ 
-          mb: 4,
-          boxShadow: theme.shadows[2],
-          '&:hover': { boxShadow: theme.shadows[4] },
-        }}
-      >
-        <CardContent>
-          <Stack direction="row" spacing={2} alignItems="center">
-            <SearchIcon color="action" />
-            <TextField
-              fullWidth
-              variant="standard"
-              placeholder="Search documents, folders, or departments..."
-              // value={searchQuery}
-              // onChange={(e) => setSearchQuery(e.target.value)}
-              InputProps={{ disableUnderline: true }}
-            />
-          </Stack>
-        </CardContent>
-      </Card>
+  const getPageTitle = () => {
+    if (currentPath.length === 0) {
+      return 'Document Center';
+    }
 
-      {renderContent()}
+    if (currentPath[0] === 'departments') {
+      return 'Departments';
+    }
 
-      {/* Upload Dialog */}
-      <Dialog
-        open={openUpload}
-        onClose={() => setOpenUpload(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Upload Documents</DialogTitle>
-        <DialogContent>
-          <Box
-            component="label"
-            htmlFor="file-upload"
-            sx={{
-              border: `2px dashed ${theme.palette.divider}`,
-              borderRadius: 1,
-              p: 3,
-              textAlign: 'center',
-              cursor: 'pointer',
-              '&:hover': {
-                borderColor: theme.palette.primary.main,
-                bgcolor: alpha(theme.palette.primary.main, 0.04),
-              },
-            }}
-          >
-            <input
-              id="file-upload"
-              type="file"
-              onChange={handleFileUpload}
-              style={{ display: 'none' }}
-            />
-            {uploading ? (
-              <CircularProgress size={48} />
-            ) : (
-              <>
-                <CloudUploadIcon
-                  sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }}
-                />
-                <Typography variant="h6" gutterBottom>
-                  Drag and drop files here
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  or click to select files
-                </Typography>
-              </>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenUpload(false)}>Cancel</Button>
-          <Button variant="contained" disabled={uploading}>
-            {uploading ? 'Uploading...' : 'Upload'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+    if (currentPath[0] === 'employees') {
+      return 'Employees';
+    }
 
-      {/* New Folder Dialog */}
-      <Dialog
-        open={openNewFolder}
+    return currentPath.join(' / ');
+  };
+
+  const renderUploadButton = () => (
+    <LoadingButton
+      variant="contained"
+      component="label"
+      loading={uploading}
+      loadingPosition="start"
+      startIcon={<UploadIcon />}
+      sx={{ mr: 2 }}
+    >
+      Upload
+      <input
+        type="file"
+        hidden
+        multiple
+        onChange={handleUpload}
+        ref={fileInputRef}
+      />
+    </LoadingButton>
+  );
+
+  const renderNewFolderDialog = () => {
+    return (
+      <Dialog 
+        open={newFolderDialogOpen} 
         onClose={() => {
-          setOpenNewFolder(false);
+          setNewFolderDialogOpen(false);
           setNewFolderName('');
         }}
         maxWidth="xs"
@@ -919,13 +1509,18 @@ export default function DocumentsPage() {
             fullWidth
             value={newFolderName}
             onChange={(e) => setNewFolderName(e.target.value)}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter' && newFolderName.trim()) {
+                handleCreateFolder();
+              }
+            }}
             sx={{ mt: 2 }}
           />
         </DialogContent>
         <DialogActions>
           <Button 
             onClick={() => {
-              setOpenNewFolder(false);
+              setNewFolderDialogOpen(false);
               setNewFolderName('');
             }}
           >
@@ -934,15 +1529,180 @@ export default function DocumentsPage() {
           <LoadingButton
             variant="contained"
             onClick={handleCreateFolder}
-            loading={loading}
+            loading={creatingFolder}
             disabled={!newFolderName.trim()}
           >
             Create
           </LoadingButton>
         </DialogActions>
       </Dialog>
+    );
+  };
 
-      {/* ... rest of the dialogs ... */}
+  const renderDialogs = () => {
+    return (
+      <>
+        <input
+          type="file"
+          multiple
+          hidden
+          ref={fileInputRef}
+          onChange={handleUpload}
+        />
+        {renderNewFolderDialog()}
+      </>
+    );
+  };
+
+  const ShareDialog = () => (
+    <Dialog
+      open={shareDialogOpen}
+      onClose={() => setShareDialogOpen(false)}
+      maxWidth="sm"
+      fullWidth
+    >
+      <DialogTitle>
+        Share {selectedFileForShare?.name}
+        <IconButton
+          aria-label="close"
+          onClick={() => setShareDialogOpen(false)}
+          sx={{ position: 'absolute', right: 8, top: 8 }}
+        >
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent>
+        <Box sx={{ mt: 2 }}>
+          <TextField
+            fullWidth
+            value={shareUrl}
+            InputProps={{
+              readOnly: true,
+              endAdornment: (
+                <InputAdornment position="end">
+                  <Button
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(shareUrl);
+                      setShowCopiedToast(true);
+                      setTimeout(() => setShowCopiedToast(false), 2000);
+                    }}
+                  >
+                    Copy
+                  </Button>
+                </InputAdornment>
+              ),
+            }}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            Link expires in 24 hours
+          </Typography>
+        </Box>
+      </DialogContent>
+    </Dialog>
+  );
+
+  const ActionMenu = () => (
+    <Menu
+      anchorEl={anchorEl}
+      open={Boolean(anchorEl)}
+      onClose={() => setAnchorEl(null)}
+    >
+      <MenuItem onClick={() => {
+        if (selectedFile) handleShare(selectedFile);
+        setAnchorEl(null);
+      }}>
+        <ListItemIcon>
+          <ShareIcon fontSize="small" />
+        </ListItemIcon>
+        <ListItemText>Share</ListItemText>
+      </MenuItem>
+      <MenuItem onClick={() => {
+        if (selectedFile) handleDownload(selectedFile);
+        setAnchorEl(null);
+      }}>
+        <ListItemIcon>
+          <DownloadIcon fontSize="small" />
+        </ListItemIcon>
+        <ListItemText>Download</ListItemText>
+      </MenuItem>
+    </Menu>
+  );
+
+  return (
+    <Container maxWidth="xl">
+      <Box sx={{ py: 3 }}>
+        {currentPath.length > 0 && (
+          <>
+            <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
+              <IconButton 
+                onClick={handleBack} 
+                size="small"
+                sx={{
+                  transition: 'transform 0.2s ease-in-out',
+                  '&:hover': {
+                    transform: 'translateX(-4px)'
+                  }
+                }}
+              >
+                <ArrowBackIcon />
+              </IconButton>
+              {renderBreadcrumbs()}
+            </Stack>
+
+            {/* Action Buttons */}
+            <Stack direction="row" spacing={2} sx={{ mb: 3 }}>
+              <Button
+                variant="outlined"
+                startIcon={<NewFolderIcon />}
+                onClick={() => setNewFolderDialogOpen(true)}
+              >
+                New Folder
+              </Button>
+              <LoadingButton
+                variant="contained"
+                component="label"
+                loading={uploading}
+                loadingPosition="start"
+                startIcon={<UploadIcon />}
+              >
+                Upload Files
+                <input
+                  type="file"
+                  hidden
+                  multiple
+                  onChange={handleUpload}
+                  ref={fileInputRef}
+                />
+              </LoadingButton>
+
+              {/* View Toggle */}
+              <Box sx={{ ml: 'auto' }}>
+                <ToggleButtonGroup
+                  value={viewMode}
+                  exclusive
+                  onChange={(e, value) => value && setViewMode(value)}
+                  size="small"
+                >
+                  <ToggleButton value="grid">
+                    <GridViewIcon />
+                  </ToggleButton>
+                  <ToggleButton value="list">
+                    <ListViewIcon />
+                  </ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
+            </Stack>
+          </>
+        )}
+        
+        {renderContent()}
+        
+        {/* Dialogs */}
+        {renderDialogs()}
+        {renderPreviewDialog()}
+        <ShareDialog />
+        <ActionMenu />
+      </Box>
     </Container>
   );
 }

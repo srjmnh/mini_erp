@@ -22,6 +22,7 @@ import { useRequests } from '@/hooks/useRequests';
 import { useSnackbar } from '@/contexts/SnackbarContext';
 import { LeaveStatus } from '@/config/firestore-schema';
 import { Check as ApproveIcon, Close as RejectIcon, Comment as CommentIcon } from '@mui/icons-material';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface ApprovalDialogProps {
   open: boolean;
@@ -75,10 +76,13 @@ export const LeaveRequestsManager: React.FC = () => {
   const { showSnackbar } = useSnackbar();
   const [selectedRequest, setSelectedRequest] = useState<string | null>(null);
   const [approvalAction, setApprovalAction] = useState<'approve' | 'reject'>('approve');
+  const { user } = useAuth();
 
   const handleApprovalAction = async (requestId: string, status: LeaveStatus, note: string) => {
     try {
       await updateRequestStatus('leave', requestId, status, note);
+      
+      // Show snackbar for manager's feedback
       showSnackbar(
         `Leave request ${status === 'approved' ? 'approved' : 'rejected'} successfully`,
         'success'

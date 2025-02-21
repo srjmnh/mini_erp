@@ -2063,234 +2063,168 @@ export const EmployeeDashboard = () => {
 
           {/* Tasks Section */}
           <Box sx={{ mt: 3 }}>
-            <Typography variant="subtitle1" sx={{ mb: 2 }}>Your Tasks</Typography>
-            <Box 
-              sx={{ 
-                maxHeight: 400,
-                overflowY: 'auto',
-                '&::-webkit-scrollbar': {
-                  width: '8px',
-                },
-                '&::-webkit-scrollbar-track': {
-                  background: 'transparent',
-                },
-                '&::-webkit-scrollbar-thumb': {
-                  background: '#bdbdbd',
-                  borderRadius: '4px',
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="h6">Your Tasks</Typography>
+              <Button
+                startIcon={<AddIcon />}
+                variant="contained"
+                size="small"
+                onClick={handleAddQuickTask}
+                sx={{
+                  bgcolor: 'primary.light',
+                  color: 'primary.main',
                   '&:hover': {
-                    background: '#9e9e9e'
-                  }
-                }
-              }}
-            >
+                    bgcolor: 'primary.main',
+                    color: 'primary.contrastText',
+                  },
+                }}
+              >
+                Add Task
+              </Button>
+            </Box>
+            <Grid container spacing={2}>
               {tasks
                 .filter(task => !task.completed && task.status !== 'done' && task.status !== 'completed')
                 .map((task) => (
-                <Box
-                  key={task.id}
-                  sx={{
-                    mb: 2,
-                    p: 2,
-                    bgcolor: 'background.paper',
-                    borderRadius: 2,
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    '&:hover': {
-                      borderColor: 'primary.main',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-                    }
-                  }}
-                >
-                  {/* Header Section */}
-                  <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                      <Checkbox 
-                        checked={task.completed}
-                        onChange={() => handleToggleTaskStatus(task)}
-                        sx={{ 
-                          ml: -1,
-                          '&.Mui-checked': {
-                            color: 'success.main'
-                          }
-                        }}
-                      />
-                      <Box>
-                        <Typography 
-                          variant="caption" 
-                          sx={{ 
-                            fontWeight: 500,
-                            textDecoration: task.completed ? 'line-through' : 'none',
-                            color: task.completed ? 'text.secondary' : 'text.primary',
-                            fontSize: '0.875rem'
-                          }}
-                        >
-                          {task.title}
-                        </Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                          <Chip
-                            label={task.priority}
-                            size="small"
-                            sx={{
-                              height: 24,
-                              bgcolor: 
-                                task.priority === 'high' ? 'error.main' :
-                                task.priority === 'medium' ? 'warning.main' : 'success.main',
-                              color: '#fff'
-                            }}
-                          />
-                          {task.dueDate && (
-                            <Typography variant="caption" color="text.secondary">
-                              <AccessTimeIcon fontSize="small" />
-                              Due: {
-                                task.dueDate instanceof Date 
-                                  ? format(task.dueDate, 'MMM d, yyyy')
-                                  : task.dueDate?.toDate 
-                                    ? format(task.dueDate.toDate(), 'MMM d, yyyy')
-                                    : task.dueDate 
-                                      ? format(new Date(task.dueDate), 'MMM d, yyyy')
-                                      : 'No due date'
-                              }
-                            </Typography>
-                          )}
-                        </Box>
-                      </Box>
-                    </Box>
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <IconButton
-                        size="small"
-                        onClick={() => handleEditTask(task)}
-                      >
-                        <EditIcon />
-                      </IconButton>
-                    </Box>
-                  </Box>
-
-                  {/* Progress Section */}
-                  <Box sx={{ mb: task.comments?.length ? 2 : 0 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                      <Typography variant="caption" color="text.secondary">
-                        Progress: {task.progress || 0}%
-                      </Typography>
-                      <Button
-                        size="small"
-                        onClick={() => handleUpdateProgress(task)}
-                        sx={{ 
-                          ml: 'auto',
-                          minWidth: 'auto',
-                          color: 'primary.main',
-                          '&:hover': { bgcolor: 'primary.50' }
-                        }}
-                      >
-                        Update
-                      </Button>
-                    </Box>
-                    <LinearProgress
-                      variant="determinate"
-                      value={task.progress || 0}
-                      sx={{
-                        height: 6,
-                        borderRadius: 3,
-                        bgcolor: 'grey.100',
-                        '& .MuiLinearProgress-bar': {
-                          bgcolor: task.completed ? 'success.main' : 'primary.main',
-                          borderRadius: 3
-                        }
-                      }}
-                    />
-                  </Box>
-
-                  {/* Latest Comment Section */}
-                  {task.comments && task.comments.length > 0 && task.comments[0].timestamp && (
-                    <Box 
-                      sx={{ 
-                        mt: 2,
-                        p: 1.5,
-                        bgcolor: 'grey.50',
-                        borderRadius: 1,
-                        border: '1px solid',
-                        borderColor: 'grey.100'
-                      }}
-                    >
-                      <Typography variant="caption" color="text.secondary">
-                        Latest Update
-                      </Typography>
-                      <Typography variant="body2">
-                        {task.comments[0].text}
-                      </Typography>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Avatar 
-                          sx={{ 
-                            width: 24, 
-                            height: 24,
-                            fontSize: '0.875rem',
-                            bgcolor: 'primary.main'
-                          }}
-                        >
-                          {task.comments[0].userName?.charAt(0) || '?'}
-                        </Avatar>
-                        <Typography variant="caption" color="text.secondary">
-                          {task.comments[0].userName || 'Unknown'} • {task.comments[0].timestamp?.toDate ? 
-                            format(task.comments[0].timestamp.toDate(), 'MMM d, HH:mm') : 
-                            format(new Date(task.comments[0].timestamp), 'MMM d, HH:mm')}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  )}
-                </Box>
-              ))}
-            </Box>
-          </Box>
-
-          {/* Expenses Section */}
-          <Box sx={{ mt: 4 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="subtitle1">
-                Expenses
-              </Typography>
-              <Button
-                startIcon={<AddIcon />}
-                onClick={() => setShowExpenseDialog(true)}
-                size="small"
-              >
-                New Expense
-              </Button>
-            </Box>
-            <Paper elevation={0} sx={{ p: 2, height: '100%' }}>
-              <List dense>
-                {recentExpenses.slice(0, 5).map((expense) => (
-                  <ListItem
-                    key={expense.id}
-                    divider
+                <Grid item xs={12} sm={6} md={4} key={task.id}>
+                  <Card
                     sx={{
-                      borderLeft: 2,
-                      borderColor: 
-                        expense.status === 'approved' ? 'success.main' :
-                        expense.status === 'declined' ? 'error.main' : 'warning.main',
-                      pl: 1
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      '&:hover': {
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      },
                     }}
                   >
-                    <ListItemText
-                      primary={
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Typography variant="caption">
-                            ${expense.amount.toFixed(2)} - {expense.category.replace('_', ' ')}
+                    <CardContent sx={{ flex: 1, p: 2 }}>
+                      {/* Task Header */}
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+                        <Box sx={{ flex: 1 }}>
+                          <Typography 
+                            variant="subtitle1"
+                            sx={{ 
+                              fontWeight: 500,
+                              textDecoration: task.completed ? 'line-through' : 'none',
+                              color: task.completed ? 'text.secondary' : 'text.primary',
+                            }}
+                          >
+                            {task.title}
                           </Typography>
-                          <Chip
-                            label={expense.status}
-                            size="small"
-                            color={
-                              expense.status === 'approved' ? 'success' :
-                              expense.status === 'declined' ? 'error' : 'warning'
-                            }
-                          />
+                          <Stack direction="row" spacing={1} mt={0.5}>
+                            <Chip
+                              label={task.priority}
+                              size="small"
+                              sx={{
+                                height: 24,
+                                bgcolor: 
+                                  task.priority === 'high' ? 'error.main' :
+                                  task.priority === 'medium' ? 'warning.main' : 'success.main',
+                                color: '#fff'
+                              }}
+                            />
+                            {task.dueDate && (
+                              <Chip
+                                icon={<AccessTimeIcon fontSize="small" />}
+                                label={format(
+                                  task.dueDate instanceof Date 
+                                    ? task.dueDate
+                                    : task.dueDate?.toDate 
+                                      ? task.dueDate.toDate()
+                                      : new Date(task.dueDate),
+                                  'MMM d'
+                                )}
+                                size="small"
+                                variant="outlined"
+                              />
+                            )}
+                          </Stack>
                         </Box>
-                      }
-                      secondary={format(expense.submittedAt.toDate(), 'MMM d, yyyy')}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </Paper>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditTask(task)}
+                          sx={{ ml: 1 }}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+
+                      {/* Task Progress */}
+                      <Box>
+                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            Progress: {task.progress || 0}%
+                          </Typography>
+                          <Button
+                            size="small"
+                            onClick={() => handleUpdateProgress(task)}
+                            sx={{ 
+                              ml: 'auto',
+                              minWidth: 'auto',
+                              color: 'primary.main',
+                              '&:hover': { bgcolor: 'primary.50' }
+                            }}
+                          >
+                            Update
+                          </Button>
+                        </Box>
+                        <LinearProgress
+                          variant="determinate"
+                          value={task.progress || 0}
+                          sx={{
+                            height: 6,
+                            borderRadius: 3,
+                            bgcolor: 'grey.100',
+                            '& .MuiLinearProgress-bar': {
+                              bgcolor: task.completed ? 'success.main' : 'primary.main',
+                              borderRadius: 3
+                            }
+                          }}
+                        />
+                      </Box>
+
+                      {/* Latest Comment */}
+                      {task.comments && task.comments.length > 0 && task.comments[0].timestamp && (
+                        <Box 
+                          sx={{ 
+                            mt: 2,
+                            p: 1.5,
+                            bgcolor: 'grey.50',
+                            borderRadius: 1,
+                            border: '1px solid',
+                            borderColor: 'grey.100'
+                          }}
+                        >
+                          <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                            Latest Update
+                          </Typography>
+                          <Typography variant="body2" noWrap>
+                            {task.comments[0].text}
+                          </Typography>
+                          <Stack direction="row" alignItems="center" spacing={1} mt={0.5}>
+                            <Avatar 
+                              sx={{ 
+                                width: 24, 
+                                height: 24,
+                                fontSize: '0.875rem',
+                                bgcolor: 'primary.main'
+                              }}
+                            >
+                              {task.comments[0].userName?.charAt(0) || '?'}
+                            </Avatar>
+                            <Typography variant="caption" color="text.secondary">
+                              {task.comments[0].userName || 'Unknown'} • {task.comments[0].timestamp?.toDate ? 
+                                format(task.comments[0].timestamp.toDate(), 'MMM d, HH:mm') : 
+                                format(new Date(task.comments[0].timestamp), 'MMM d, HH:mm')}
+                            </Typography>
+                          </Stack>
+                        </Box>
+                      )}
+                    </CardContent>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
           </Box>
         </Box>
       )

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { collection, addDoc, updateDoc, doc, query, where, orderBy, onSnapshot, getDoc } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, query, where, orderBy, onSnapshot, getDoc, getDocs } from 'firebase/firestore';
 import { differenceInDays } from 'date-fns';
 import { updateLeaveBalance } from '@/services/leaveManagement';
 import { db } from '@/config/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import { LeaveType, LeaveStatus, ExpenseCategory, ExpenseStatus } from '@/config/firestore-schema';
 import { useFirestore } from '@/contexts/FirestoreContext';
+import { format } from 'date-fns';
 
 interface LeaveRequest {
   id: string;
@@ -281,37 +282,87 @@ export function useRequests() {
   ) => {
     if (!user || userRole !== 'manager') throw new Error('Unauthorized');
 
-    const collection = type === 'leave' ? 'leaveRequests' : 'expenseRequests';
-    const requestRef = doc(db, collection, requestId);
-    
-    await updateDoc(requestRef, {
-      status,
-      approverNote,
-      approvedBy: user.uid,
-      approvedAt: new Date(),
-      updatedAt: new Date(),
-      managerId: user.uid,
-      managerName: user.displayName || user.email,
-      statusText: `${status} by ${user.displayName || user.email}`,
-    });
+    try {
+      const collection = type === 'leave' ? 'leaveRequests' : 'expenseRequests';
+      const requestRef = doc(db, collection, requestId);
+      
+      // Get the request details first
+      const requestDoc = await getDoc(requestRef);
+      const requestData = requestDoc.data();
+      
+      if (!requestData) {
+        throw new Error('Request not found');
+      }
 
-    // Get the request details
-    const request = type === 'leave' 
-      ? leaveRequests.find(r => r.id === requestId)
-      : expenseRequests.find(r => r.id === requestId);
+      console.log('Updating request status:', { type, requestId, status, requestData }); // Debug log
 
-    if (!request) return;
+      // Get employee details
+      const employeeDoc = await getDoc(doc(db, 'employees', requestData.employeeId));
+      const employeeData = employeeDoc.data();
+      
+      if (!employeeData) {
+        throw new Error('Employee not found');
+      }
 
-    // Create notification for employee
-    await addDoc(collection(db, 'notifications'), {
-      userId: request.employeeId,
-      type: `${type}_${status}` as const,
-      title: `${type.charAt(0).toUpperCase() + type.slice(1)} Request ${status.charAt(0).toUpperCase() + status.slice(1)}`,
-      message: `Your ${type} request has been ${status}${approverNote ? `: ${approverNote}` : ''}`,
-      read: false,
-      requestId,
-      createdAt: new Date(),
-    });
+      // Get user document to get Firebase UID
+      const usersRef = collection(db, 'users');
+      const userQuery = query(usersRef, where('email', '==', employeeData.email));
+      const userSnapshot = await getDocs(userQuery);
+
+      if (userSnapshot.empty) {
+        console.error('User account not found for email:', employeeData.email);
+        throw new Error('User account not found for employee');
+      }
+
+      const employeeUid = userSnapshot.docs[0].id;
+      console.log('Found employee UID:', employeeUid);
+
+      // Update the request status first
+      await updateDoc(requestRef, {
+        status,
+        approverNote,
+        approvedBy: user.uid,
+        approvedAt: new Date(),
+        updatedAt: new Date(),
+        managerId: user.uid,
+        managerName: user.displayName || user.email,
+        statusText: `${status} by ${user.displayName || user.email}`,
+      });
+
+      // Create notification for the employee using their Firebase UID
+      const notificationRef = await addDoc(collection(db, 'notifications'), {
+        userId: employeeUid, // Use Firebase UID
+        type: 'system_notification',
+        title: `${type === 'leave' ? 'Leave' : 'Expense'} Request ${status === 'approved' ? 'Approved' : 'Rejected'}`,
+        message: type === 'leave' 
+          ? `Your leave request from ${format(requestData.startDate.toDate(), 'MMM dd')} to ${format(requestData.endDate.toDate(), 'MMM dd')} has been ${status}${approverNote ? `. Note: ${approverNote}` : ''}`
+          : `Your expense request for ${requestData.amount} ${requestData.currency} has been ${status}${approverNote ? `. Note: ${approverNote}` : ''}`,
+        read: false,
+        createdAt: new Date(),
+        data: {
+          requestId,
+          requestType: type,
+          status
+        }
+      });
+
+      console.log('Created notification:', { 
+        notificationId: notificationRef.id,
+        employeeUid,
+        employeeEmail: employeeData.email,
+        type,
+        status
+      }); // Enhanced debug log
+
+      // If it's a leave request and it's approved, update the leave balance
+      if (type === 'leave' && status === 'approved') {
+        const days = differenceInDays(requestData.endDate.toDate(), requestData.startDate.toDate()) + 1;
+        await updateLeaveBalance(requestData.employeeId, requestData.type, days);
+      }
+    } catch (error) {
+      console.error('Error in updateRequestStatus:', error);
+      throw error;
+    }
   };
 
   return {

@@ -1195,8 +1195,112 @@ export default function ManagerDashboard() {
                   </Paper>
                 </Box>
               )}
+              {activeTab === 'projects' && (
+                <Box sx={{ p: 3, overflow: 'auto' }}>
+                  {/* Projects Overview */}
+                  <Box sx={{ mb: 4 }}>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                      <Typography variant="h6">
+                        Active Projects
+                      </Typography>
+                      <Button
+                        variant="contained"
+                        onClick={() => navigate('/projects')}
+                        sx={{
+                          bgcolor: 'primary.light',
+                          color: 'primary.main',
+                          '&:hover': {
+                            bgcolor: 'primary.main',
+                            color: 'primary.contrastText',
+                          },
+                        }}
+                      >
+                        View All Projects
+                      </Button>
+                    </Box>
+                    <Grid container spacing={3}>
+                      {departmentProjects
+                        .filter(project => project.status !== 'completed' && project.status !== 'done')
+                        .map((project) => (
+                        <Grid item xs={12} sm={6} key={project.id}>
+                          <Card
+                            sx={{
+                              height: '100%',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              '&:hover': {
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                                cursor: 'pointer'
+                              },
+                            }}
+                            onClick={() => navigate(`/projects/${project.id}`)}
+                          >
+                            <CardContent sx={{ flex: 1, p: 2 }}>
+                              <Typography variant="h6" gutterBottom>
+                                {project.name}
+                              </Typography>
+                              <Typography variant="body2" color="textSecondary" paragraph>
+                                {project.description}
+                              </Typography>
+                              <Box sx={{ mb: 2 }}>
+                                <Typography variant="caption" color="textSecondary">
+                                  Progress
+                                </Typography>
+                                <LinearProgress
+                                  variant="determinate"
+                                  value={project.progress || 0}
+                                  sx={{
+                                    height: 8,
+                                    borderRadius: 4,
+                                    bgcolor: 'grey.100',
+                                    '& .MuiLinearProgress-bar': {
+                                      borderRadius: 4
+                                    }
+                                  }}
+                                />
+                              </Box>
+                              <Stack direction="row" spacing={1} mb={2}>
+                                <Chip
+                                  label={project.status}
+                                  size="small"
+                                  color={
+                                    project.status === 'completed' ? 'success' :
+                                    project.status === 'in_progress' ? 'primary' :
+                                    project.status === 'on_hold' ? 'warning' : 'default'
+                                  }
+                                />
+                                {project.dueDate && (
+                                  <Chip
+                                    label={`Due ${format(project.dueDate instanceof Date ? project.dueDate : project.dueDate?.toDate(), 'MMM d')}`}
+                                    size="small"
+                                    variant="outlined"
+                                  />
+                                )}
+                              </Stack>
+                              <Box>
+                                <Typography variant="caption" color="textSecondary">
+                                  Team Members
+                                </Typography>
+                                <AvatarGroup max={4} sx={{ mt: 1 }}>
+                                  {project.team?.map((member: any) => (
+                                    <Avatar
+                                      key={member.id}
+                                      sx={{ width: 30, height: 30 }}
+                                    >
+                                      {member.name?.charAt(0) || '?'}
+                                    </Avatar>
+                                  ))}
+                                </AvatarGroup>
+                              </Box>
+                            </CardContent>
+                          </Card>
+                        </Grid>
+                      ))}
+                    </Grid>
+                  </Box>
+                </Box>
+              )}
               {activeTab === 'timesheet' && <TimesheetContent />}
-
               {activeTab === 'documents' && (
                 <>
                   <Box sx={{ mb: 3, display: 'flex', justifyContent: 'flex-end' }}>
@@ -1248,18 +1352,65 @@ export default function ManagerDashboard() {
                   )}
                 </>
               )}
-              {activeTab === 'projects' && (
-                <Grid container spacing={3}>
-                  {departmentProjects.map((project) => (
-                    <Grid item xs={12} key={project.id}>
-                      <Card>
-                        <CardContent>
-                          <Typography variant="h6">{project.name}</Typography>
-                          <Typography variant="body2">{project.description}</Typography>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))}
+              {activeTab === 'tasks' && (
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="h6">Department Tasks</Typography>
+                    </Box>
+                    {loading ? (
+                      <LinearProgress />
+                    ) : error ? (
+                      <Typography color="error">{error}</Typography>
+                    ) : (
+                      <Box sx={{ mt: 2 }}>
+                        <TaskView 
+                          userId={user?.uid || ''} 
+                          isDepartmentView={true}
+                          departmentId={department?.id}
+                          customTaskFilter={(tasks) => {
+                            const todoTasks = tasks.filter(task => 
+                              !task.completed && 
+                              task.status !== 'done' && 
+                              (!task.progress || task.progress === 0)
+                            );
+                            
+                            const inProgressTasks = tasks.filter(task => 
+                              !task.completed && 
+                              task.status !== 'done' && 
+                              task.progress > 0 && 
+                              task.progress < 100
+                            );
+
+                            return {
+                              todo: todoTasks,
+                              inProgress: inProgressTasks
+                            };
+                          }}
+                        />
+                      </Box>
+                    )}
+                  </Paper>
+                </Grid>
+              )}
+              {activeTab === 'payroll' && (
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="h6">Department Payroll</Typography>
+                    </Box>
+                    <PayrollCard />
+                  </Paper>
+                </Grid>
+              )}
+              {activeTab === 'performance' && (
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="h6">Performance Reviews</Typography>
+                    </Box>
+                    <PerformanceReview />
+                  </Paper>
                 </Grid>
               )}
               {activeTab === 'hr' && (
@@ -1338,118 +1489,6 @@ export default function ManagerDashboard() {
                     </Grid>
                   </Grid>
                 </Box>
-              )}
-              {activeTab === 'projects' && (
-                <Grid container spacing={3}>
-                  <Grid item xs={12} md={6} lg={4}>
-                    <TimesheetManagerCard />
-                  </Grid>
-                  {departmentProjects.map((project) => (
-                    <Grid item xs={12} key={project.id}>
-                      <Box 
-                        sx={{ 
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          gap: 2,
-                          cursor: 'pointer',
-                          '&:hover': {
-                            bgcolor: 'action.hover'
-                          },
-                          p: 1,
-                          borderRadius: 1
-                        }}
-                        onClick={() => navigate(`/projects/${project.id}`)}>
-                        <ProjectsIcon color="primary" />
-                        <Box sx={{ flexGrow: 1 }}>
-                          <Typography variant="subtitle1">{project.name}</Typography>
-                          <Typography variant="body2" color="textSecondary">
-                            {project.status}
-                          </Typography>
-                        </Box>
-                        <Box>
-                          <AvatarGroup max={3} sx={{ justifyContent: 'flex-end' }}>
-                            {project.assignedEmployees?.map((empId: string) => {
-                              const employee = departmentEmployees.find(emp => emp.id === empId);
-                              return employee ? (
-                                <Avatar key={employee.id} alt={employee.name}>
-                                  {employee.name[0]}
-                                </Avatar>
-                              ) : null;
-                            })}
-                          </AvatarGroup>
-                        </Box>
-                      </Box>
-                      <Box sx={{ mt: 1, bgcolor: 'background.default', borderRadius: 1, p: 0.5 }}>
-                        <LinearProgress
-                          variant="determinate"
-                          value={project.progress || 0}
-                          sx={{ height: 6, borderRadius: 1 }}
-                        />
-                      </Box>
-                    </Grid>
-                  ))}
-                </Grid>
-              )}
-              {activeTab === 'tasks' && (
-                <Grid item xs={12}>
-                  <Paper sx={{ p: 2 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                      <Typography variant="h6">Department Tasks</Typography>
-                    </Box>
-                    {loading ? (
-                      <LinearProgress />
-                    ) : error ? (
-                      <Typography color="error">{error}</Typography>
-                    ) : (
-                      <Box sx={{ mt: 2 }}>
-                        <TaskView 
-                          userId={user?.uid || ''} 
-                          isDepartmentView={true}
-                          departmentId={department?.id}
-                          customTaskFilter={(tasks) => {
-                            const todoTasks = tasks.filter(task => 
-                              !task.completed && 
-                              task.status !== 'done' && 
-                              (!task.progress || task.progress === 0)
-                            );
-                            
-                            const inProgressTasks = tasks.filter(task => 
-                              !task.completed && 
-                              task.status !== 'done' && 
-                              task.progress > 0 && 
-                              task.progress < 100
-                            );
-
-                            return {
-                              todo: todoTasks,
-                              inProgress: inProgressTasks
-                            };
-                          }}
-                        />
-                      </Box>
-                    )}
-                  </Paper>
-                </Grid>
-              )}
-              {activeTab === 'payroll' && (
-                <Grid item xs={12}>
-                  <Paper sx={{ p: 2 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                      <Typography variant="h6">Department Payroll</Typography>
-                    </Box>
-                    <PayrollCard />
-                  </Paper>
-                </Grid>
-              )}
-              {activeTab === 'performance' && (
-                <Grid item xs={12}>
-                  <Paper sx={{ p: 2 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                      <Typography variant="h6">Performance Reviews</Typography>
-                    </Box>
-                    <PerformanceReview />
-                  </Paper>
-                </Grid>
               )}
             </Box>
           </Paper>

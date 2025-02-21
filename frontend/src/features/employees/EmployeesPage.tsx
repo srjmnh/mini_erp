@@ -43,10 +43,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useFirestore } from '@/contexts/FirestoreContext';
 import { useSupabase } from '@/hooks/useSupabase';
 import { useProjects } from '@/contexts/ProjectContext';
-import { useSnackbar } from '@/contexts/SnackbarContext';
-import { getFirestore, collection, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { useSnackbar } from 'notistack';
+import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, addDoc } from 'firebase/firestore';
 import { getAuth, sendPasswordResetEmail } from 'firebase/auth';
 import { app } from '@/config/firebase';
+import { Timestamp } from 'firebase/firestore';
 
 // Get Firebase instances
 const db = getFirestore(app);
@@ -145,7 +146,7 @@ export default function EmployeesPage() {
   const { employees, departments, addEmployee, updateEmployee, deleteEmployee, loading, error } = useFirestore();
   const { projects } = useProjects();
   const { supabase } = useSupabase();
-  const { showSnackbar } = useSnackbar();
+  const { enqueueSnackbar } = useSnackbar();
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [open, setOpen] = useState(false);
   const [formData, setFormData] = useState<EmployeeFormData>(initialFormData);
@@ -166,10 +167,16 @@ export default function EmployeesPage() {
         updatedAt: new Date().toISOString()
       });
 
-      showSnackbar('Reporting manager updated successfully', 'success');
+      enqueueSnackbar('Reporting manager updated successfully', { 
+        variant: 'success',
+        autoHideDuration: 3000
+      });
     } catch (error) {
       console.error('Error updating reporting manager:', error);
-      showSnackbar('Failed to update reporting manager', 'error');
+      enqueueSnackbar('Failed to update reporting manager', { 
+        variant: 'error',
+        autoHideDuration: 5000
+      });
     }
   };
 
@@ -208,17 +215,26 @@ export default function EmployeesPage() {
       );
 
       if (activeProjects.length > 0) {
-        showSnackbar(
+        enqueueSnackbar(
           `Cannot delete employee. They are currently assigned to ${activeProjects.length} active project(s)`, 
-          'error'
+          { 
+            variant: 'error',
+            autoHideDuration: 5000
+          }
         );
         return;
       }
 
       await deleteEmployee(employee.id);
-      showSnackbar('Employee deleted successfully', 'success');
+      enqueueSnackbar('Employee deleted successfully', { 
+        variant: 'success',
+        autoHideDuration: 3000
+      });
     } catch (error) {
-      showSnackbar(error instanceof Error ? error.message : 'Failed to delete employee', 'error');
+      enqueueSnackbar(error instanceof Error ? error.message : 'Failed to delete employee', { 
+        variant: 'error',
+        autoHideDuration: 5000
+      });
     }
   };
 
@@ -231,20 +247,29 @@ export default function EmployeesPage() {
           ...formData,
           updatedAt: new Date().toISOString(),
         });
-        showSnackbar('Employee updated successfully', 'success');
+        enqueueSnackbar('Employee updated successfully', { 
+          variant: 'success',
+          autoHideDuration: 3000
+        });
       } else {
         await addEmployee({
           ...formData,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
-        showSnackbar('Employee added successfully', 'success');
+        enqueueSnackbar('Employee added successfully', { 
+          variant: 'success',
+          autoHideDuration: 3000
+        });
       }
       setOpen(false);
       setSelectedEmployee(null);
       setFormData(initialFormData);
     } catch (error) {
-      showSnackbar(error instanceof Error ? error.message : 'An error occurred', 'error');
+      enqueueSnackbar(error instanceof Error ? error.message : 'An error occurred', { 
+        variant: 'error',
+        autoHideDuration: 5000
+      });
     }
   };
 
@@ -315,7 +340,10 @@ export default function EmployeesPage() {
 
     } catch (error) {
       console.error('Error in photo upload:', error);
-      showSnackbar(error instanceof Error ? error.message : 'Failed to upload photo', 'error');
+      enqueueSnackbar(error instanceof Error ? error.message : 'Failed to upload photo', { 
+        variant: 'error',
+        autoHideDuration: 5000
+      });
     } finally {
       setUploadingPhoto(false);
     }
@@ -324,6 +352,22 @@ export default function EmployeesPage() {
   const getDepartmentHeadName = (departmentId: string) => {
     const departmentHead = employees.find(emp => emp.id === departments.find(d => d.id === departmentId)?.managerId);
     return departmentHead ? departmentHead.name : 'No Department Head';
+  };
+
+  const addSystemNotification = async (title: string, message: string) => {
+    try {
+      await addDoc(collection(db, 'notifications'), {
+        userId: user.uid,
+        type: 'system_notification',
+        title,
+        message,
+        createdAt: Timestamp.now(),
+        read: false,
+        data: {}
+      });
+    } catch (error) {
+      console.error('Error adding system notification:', error);
+    }
   };
 
   // Debug log departments and employees on initial load
@@ -571,50 +615,6 @@ export default function EmployeesPage() {
                     </Grid>
                   </Grid>
                 </Box>
-
-                {/* Actions */}
-                <Box sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 1 }}>
-                  <Tooltip title="Edit Employee">
-                    <IconButton
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditEmployee(employee);
-                      }}
-                    >
-                      <EditIcon />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Reset Password">
-                    <IconButton
-                      size="small"
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        try {
-                          await sendPasswordResetEmail(auth, employee.email);
-                          showSnackbar('Password reset email sent successfully', 'success');
-                        } catch (error) {
-                          console.error('Error sending reset email:', error);
-                          showSnackbar('Failed to send password reset email', 'error');
-                        }
-                      }}
-                    >
-                      <KeyIcon />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Delete Employee">
-                    <IconButton
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(employee);
-                      }}
-                      sx={{ color: 'error.main' }}
-                    >
-                      <DeleteIcon />
-                    </IconButton>
-                  </Tooltip>
-                </Box>
               </Box>
 
               {/* Skills */}
@@ -701,6 +701,62 @@ export default function EmployeesPage() {
                     </Typography>
                   )}
                 </Box>
+              </Box>
+
+              {/* Actions */}
+              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end', gap: 1, borderTop: 1, borderColor: 'divider', pt: 2 }}>
+                <Tooltip title="Edit Employee">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditEmployee(employee);
+                    }}
+                  >
+                    <EditIcon />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Reset Password">
+                  <IconButton
+                    size="small"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        // Send reset email to the employee's email address
+                        await sendPasswordResetEmail(auth, employee.email);
+                        // Add system notification
+                        await addSystemNotification(
+                          'Password Reset Email Sent',
+                          `Password reset email was sent to ${employee.email}`
+                        );
+                      } catch (error: any) {
+                        console.error('Error sending reset email:', error);
+                        const errorMessage = error.code === 'auth/user-not-found' 
+                          ? 'No user account found with this email'
+                          : `Failed to send password reset email: ${error.message || 'Unknown error'}`;
+                        // Add error notification
+                        await addSystemNotification(
+                          'Password Reset Failed',
+                          errorMessage
+                        );
+                      }
+                    }}
+                  >
+                    <KeyIcon />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Delete Employee">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(employee);
+                    }}
+                    sx={{ color: 'error.main' }}
+                  >
+                    <DeleteIcon />
+                  </IconButton>
+                </Tooltip>
               </Box>
             </Card>
           </Grid>

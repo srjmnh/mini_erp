@@ -206,8 +206,9 @@ export const FirestoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           return {
             id: doc.id,
             ...data,
+            // Handle various name formats
+            name: data.name || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : 'Unnamed Employee'),
             // Ensure required fields have default values
-            name: data.name || 'Unnamed Employee',
             role: data.role || 'Unassigned',
             position: data.position || data.role || 'Unassigned',
             department: data.department || 'Unassigned',
@@ -312,7 +313,16 @@ export const FirestoreProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return {
           id: doc.id,
           ...data,
-          name: `${data.firstName} ${data.lastName}` // Add computed name field
+          // Handle various name formats
+          name: data.name || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : 'Unnamed Employee'),
+          // Ensure other required fields have defaults
+          role: data.role || 'Unassigned',
+          position: data.position || data.role || 'Unassigned',
+          department: data.department || 'Unassigned',
+          departmentId: data.departmentId || null,
+          managerId: data.managerId || null,
+          currentLevel: data.currentLevel || 1,
+          status: data.status || 'active'
         };
       }) as Employee[];
     } catch (error) {
