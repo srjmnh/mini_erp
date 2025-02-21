@@ -1,9 +1,18 @@
 import { Department, Employee } from './types';
 
 export const getDepartmentName = (departments: Department[], departmentId: string | undefined) => {
+  if (!departments?.length) return 'Loading...';
   if (!departmentId) return 'Not Assigned';
+  
+  // Find department by ID in the departments collection
   const department = departments.find(d => d.id === departmentId);
-  return department ? department.name : 'Not Assigned';
+  console.log('Finding department:', { 
+    departmentId, 
+    departmentFound: department?.name, 
+    allDepartments: departments.map(d => ({ id: d.id, name: d.name }))
+  });
+  
+  return department?.name || 'Not Assigned';
 };
 
 export const isEmployeeDepartmentHead = (departments: Department[] | undefined | null, employeeId: string) => {

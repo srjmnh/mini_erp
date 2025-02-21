@@ -25,7 +25,14 @@ import {
   Card,
   CardContent,
   Stack,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import {
   Person as PersonIcon,
   Description as DocumentIcon,
@@ -40,6 +47,15 @@ import {
   CalendarToday as JoinDateIcon,
   AttachMoney as SalaryIcon,
   CameraAlt as CameraAltIcon,
+  Badge as BadgeIcon,
+  DriveFileRenameOutline as LicenseIcon,
+  FlightTakeoff as PassportIcon,
+  AccountBox as IdCardIcon,
+  Work as WorkPermitIcon,
+  School as EducationIcon,
+  LocalHospital as MedicalIcon,
+  Warning as WarningIcon,
+  Upload as UploadIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFirestore } from '../../contexts/FirestoreContext';
@@ -134,6 +150,7 @@ export default function EmployeeProfile() {
   const [editingReportsTo, setEditingReportsTo] = useState(false);
   const [selectedManager, setSelectedManager] = useState<string | null>(null);
   const [createAccountDialogOpen, setCreateAccountDialogOpen] = useState(false);
+  const [documentTab, setDocumentTab] = useState(0);
 
   const getAvailableManagers = (employee: any) => {
     // Show all employees except the current one
@@ -241,16 +258,10 @@ export default function EmployeeProfile() {
   };
 
   useEffect(() => {
-    const loadDepartments = async () => {
-      try {
-        await fetchDepartments();
-        setDepartmentsLoaded(true);
-      } catch (error) {
-        console.error('Error loading departments:', error);
-      }
-    };
-    loadDepartments();
-  }, [fetchDepartments]);
+    if (!departmentsLoaded && fetchDepartments) {
+      fetchDepartments().then(() => setDepartmentsLoaded(true));
+    }
+  }, [departmentsLoaded, fetchDepartments]);
 
   useEffect(() => {
     let isMounted = true;
@@ -265,11 +276,27 @@ export default function EmployeeProfile() {
         setLoading(true);
         setError(null);
 
+        // Wait for both employees and departments data to be available
+        if (!employees.length || !departments.length) {
+          console.log('Waiting for data...', {
+            employeesLoaded: employees.length > 0,
+            departmentsLoaded: departments.length > 0
+          });
+          return;
+        }
+
         const employeeData = employees.find(e => e.id === id);
-        console.log('Fetched employee data:', employeeData);
+        console.log('Employee lookup:', { 
+          searchId: id,
+          foundEmployee: employeeData?.name,
+          departmentId: employeeData?.departmentId,
+          departmentName: employeeData ? getDepartmentName(departments, employeeData.departmentId) : null
+        });
         
         if (!employeeData) {
-          throw new Error('Employee not found');
+          setError('Employee not found. Please check if the employee exists and you have the correct permissions.');
+          setLoading(false);
+          return;
         }
 
         if (isMounted) {
@@ -290,7 +317,7 @@ export default function EmployeeProfile() {
     return () => {
       isMounted = false;
     };
-  }, [id, employees]);
+  }, [id, employees, departments]);
 
   const handleSkillsSave = async (newSkills: string[]) => {
     if (!id) return;
@@ -403,6 +430,226 @@ export default function EmployeeProfile() {
     } catch (error) {
       console.error('Error uploading photo:', error);
       alert('Failed to upload photo. Please try again.');
+    }
+  };
+
+  // Document Categories
+  const documentCategories = [
+    { id: 'passport', label: 'Passport', icon: PassportIcon },
+    { id: 'id_card', label: 'ID Card', icon: IdCardIcon },
+    { id: 'license', label: 'License', icon: LicenseIcon },
+    { id: 'work_permit', label: 'Work Permit', icon: WorkPermitIcon },
+    { id: 'education', label: 'Education Certificate', icon: EducationIcon },
+    { id: 'medical', label: 'Medical Certificate', icon: MedicalIcon },
+  ];
+
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [selectedDocType, setSelectedDocType] = useState('');
+  const [expiryDate, setExpiryDate] = useState<Date | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleDocumentUpload = async () => {
+    if (!selectedFile || !selectedDocType || !expiryDate || !id) {
+      showSnackbar('Please fill in all required fields', 'error');
+      return;
+    }
+
+    try {
+      setUploading(true);
+
+      // Create storage path
+      const filePath = `employees/${id}/official_documents/${selectedDocType}/${selectedFile.name}`;
+      
+      // Upload file
+      const { error: uploadError } = await supabase.storage
+        .from('documents')
+        .upload(filePath, selectedFile);
+
+      if (uploadError) throw uploadError;
+
+      // Update employee record with new document info
+      const docField = `${selectedDocType}Document`;
+      const expiryField = `${selectedDocType}Expiry`;
+      
+      const updates = {
+        ...employee,
+        [docField]: filePath,
+        [expiryField]: expiryDate.toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      await updateEmployee(id, updates);
+      setEmployee(updates); // Update local state immediately
+
+      showSnackbar('Document uploaded successfully', 'success');
+      setUploadDialogOpen(false);
+    } catch (error) {
+      console.error('Error uploading document:', error);
+      showSnackbar('Failed to upload document', 'error');
+    } finally {
+      setUploading(false);
+      setSelectedFile(null);
+      setSelectedDocType('');
+      setExpiryDate(null);
+    }
+  };
+
+  const renderUploadDialog = () => (
+    <Dialog
+      open={uploadDialogOpen}
+      onClose={() => setUploadDialogOpen(false)}
+      maxWidth="sm"
+      fullWidth
+    >
+      <DialogTitle>Upload Official Document</DialogTitle>
+      <DialogContent>
+        <Stack spacing={3} sx={{ mt: 2 }}>
+          <TextField
+            select
+            label="Document Type"
+            value={selectedDocType}
+            onChange={(e) => setSelectedDocType(e.target.value)}
+            fullWidth
+          >
+            {documentCategories.map((category) => (
+              <MenuItem key={category.id} value={category.id}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <category.icon sx={{ fontSize: 20 }} />
+                  <Typography>{category.label}</Typography>
+                </Stack>
+              </MenuItem>
+            ))}
+          </TextField>
+
+          <LocalizationProvider dateAdapter={AdapterDateFns}>
+            <DatePicker
+              label="Expiry Date"
+              value={expiryDate}
+              onChange={(newValue) => setExpiryDate(newValue)}
+              sx={{ width: '100%' }}
+            />
+          </LocalizationProvider>
+
+          <Button
+            variant="outlined"
+            component="label"
+            startIcon={<UploadIcon />}
+            fullWidth
+          >
+            {selectedFile ? selectedFile.name : 'Choose File'}
+            <input
+              type="file"
+              hidden
+              onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+            />
+          </Button>
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setUploadDialogOpen(false)}>Cancel</Button>
+        <Button
+          variant="contained"
+          onClick={handleDocumentUpload}
+          disabled={!selectedFile || !selectedDocType || !expiryDate || uploading}
+        >
+          Upload
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+
+  const renderDocumentInfo = (docType: string) => {
+    const docField = `${docType}Document`;
+    const expiryField = `${docType}Expiry`;
+    const hasDoc = employee[docField];
+    const expiryDate = employee[expiryField] ? new Date(employee[expiryField]) : null;
+    const isExpired = expiryDate && expiryDate < new Date();
+    const expiringIn30Days = expiryDate && 
+      expiryDate > new Date() && 
+      expiryDate < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    const category = documentCategories.find(cat => cat.id === docType);
+    if (!category) return null;
+
+    const Icon = category.icon;
+
+    return (
+      <Grid item xs={12} sm={6} key={docType}>
+        <Paper 
+          sx={{ 
+            p: 2, 
+            display: 'flex', 
+            alignItems: 'center',
+            bgcolor: isExpired ? alpha('#ff0000', 0.1) : 
+                    expiringIn30Days ? alpha('#ff9800', 0.1) : 
+                    'background.paper'
+          }}
+        >
+          <Icon sx={{ fontSize: 24, mr: 2, color: isExpired ? 'error.main' : 
+                                                expiringIn30Days ? 'warning.main' : 
+                                                'primary.main' }} />
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="subtitle1" sx={{ mb: 0.5 }}>
+              {category.label}
+            </Typography>
+            {hasDoc ? (
+              <>
+                <Typography variant="body2" color="text.secondary">
+                  Expires: {expiryDate?.toLocaleDateString() || 'No expiry date'}
+                </Typography>
+                <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                  <Button 
+                    size="small" 
+                    variant="outlined"
+                    onClick={() => handleDownloadDocument(docType)}
+                  >
+                    View
+                  </Button>
+                  <Button
+                    size="small"
+                    color={isExpired ? 'error' : expiringIn30Days ? 'warning' : 'primary'}
+                    variant="outlined"
+                    onClick={() => setUploadDialogOpen(true)}
+                  >
+                    Update
+                  </Button>
+                </Box>
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                Not uploaded
+              </Typography>
+            )}
+          </Box>
+        </Paper>
+      </Grid>
+    );
+  };
+
+  const handleDownloadDocument = async (docType: string) => {
+    const docField = `${docType}Document`;
+    const filePath = employee[docField];
+    
+    if (!filePath) {
+      showSnackbar('Document not found', 'error');
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.storage
+        .from('documents')
+        .download(filePath);
+
+      if (error) throw error;
+
+      // Create blob URL and open in new tab
+      const blob = new Blob([data], { type: 'application/octet-stream' });
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (error) {
+      console.error('Error downloading document:', error);
+      showSnackbar('Failed to download document', 'error');
     }
   };
 
@@ -525,7 +772,9 @@ export default function EmployeeProfile() {
                   </Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                     <BusinessIcon sx={{ fontSize: 20 }} />
-                    <Typography>{getDepartmentName(departments, employee.departmentId)}</Typography>
+                    <Typography>
+                      {employee.department || 'Not Assigned'}
+                    </Typography>
                     {isEmployeeDepartmentHead(departments, employee.id) && (
                       <Chip
                         size="small"
@@ -699,16 +948,6 @@ export default function EmployeeProfile() {
                       onChange={(e) => handleFieldChange('address', e.target.value)}
                     />
                   </Grid>
-                  <Grid item xs={12} sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button
-                      variant="contained"
-                      color="primary"
-                      onClick={handleSavePersonalInfo}
-                      disabled={!hasChanges}
-                    >
-                      Save Changes
-                    </Button>
-                  </Grid>
                 </Grid>
               </Grid>
 
@@ -742,19 +981,27 @@ export default function EmployeeProfile() {
                   <Grid item xs={12} sm={6}>
                     <TextField
                       fullWidth
-                      label="Join Date"
-                      type="date"
-                      value={employee.joinDate || ''}
-                      onChange={(e) => handleFieldChange('joinDate', e.target.value)}
-                      InputLabelProps={{ shrink: true }}
+                      label="Employee ID"
+                      value={employee.employeeId || ''}
+                      onChange={(e) => handleFieldChange('employeeId', e.target.value)}
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
                     <TextField
                       fullWidth
-                      label="Employee ID"
-                      value={employee.employeeId || ''}
-                      onChange={(e) => handleFieldChange('employeeId', e.target.value)}
+                      label="Work Location"
+                      value={employee.workLocation || ''}
+                      onChange={(e) => handleFieldChange('workLocation', e.target.value)}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Join Date"
+                      type="date"
+                      value={employee.joiningDate || ''}
+                      onChange={(e) => handleFieldChange('joiningDate', e.target.value)}
+                      InputLabelProps={{ shrink: true }}
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
@@ -770,15 +1017,21 @@ export default function EmployeeProfile() {
                       <MenuItem value="on_leave">On Leave</MenuItem>
                     </TextField>
                   </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Work Location"
-                      value={employee.workLocation || ''}
-                      onChange={(e) => handleFieldChange('workLocation', e.target.value)}
-                    />
-                  </Grid>
                 </Grid>
+              </Grid>
+
+              {/* Save Changes Button */}
+              <Grid item xs={12}>
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, mb: 3 }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleSavePersonalInfo}
+                    disabled={!hasChanges}
+                  >
+                    Save Changes
+                  </Button>
+                </Box>
               </Grid>
 
               {/* Reporting Structure */}
@@ -907,7 +1160,37 @@ export default function EmployeeProfile() {
         </TabPanel>
 
         <TabPanel value={activeTab} index={1}>
-          <MiniDocumentManager employeeId={id} />
+          <Box>
+            <Tabs
+              value={documentTab}
+              onChange={(_, newValue) => setDocumentTab(newValue)}
+              sx={{ mb: 3 }}
+            >
+              <Tab label="General Documents" />
+              <Tab label="Official Documents" />
+            </Tabs>
+
+            {documentTab === 0 ? (
+              <MiniDocumentManager employeeId={id} />
+            ) : (
+              <Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                  <Typography variant="h6">Official Documents</Typography>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={() => setUploadDialogOpen(true)}
+                    startIcon={<UploadIcon />}
+                  >
+                    Upload Document
+                  </Button>
+                </Box>
+                <Grid container spacing={3}>
+                  {documentCategories.map(category => renderDocumentInfo(category.id))}
+                </Grid>
+              </Box>
+            )}
+          </Box>
         </TabPanel>
 
         <TabPanel value={activeTab} index={2}>
@@ -953,6 +1236,8 @@ export default function EmployeeProfile() {
           updateEmployee(employee.id, { hasUserAccount: true });
         }}
       />
+
+      {renderUploadDialog()}
     </Box>
   );
 }
